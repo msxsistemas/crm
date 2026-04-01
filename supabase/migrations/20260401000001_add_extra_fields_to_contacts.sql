@@ -1,0 +1,13 @@
+-- Add extra contact fields needed by the Contacts page form
+
+ALTER TABLE public.contacts
+  ADD COLUMN IF NOT EXISTS email TEXT,
+  ADD COLUMN IF NOT EXISTS cpf_cnpj TEXT,
+  ADD COLUMN IF NOT EXISTS gender TEXT,
+  ADD COLUMN IF NOT EXISTS birthday DATE,
+  ADD COLUMN IF NOT EXISTS state TEXT,
+  ADD COLUMN IF NOT EXISTS city TEXT,
+  ADD COLUMN IF NOT EXISTS address TEXT,
+  ADD COLUMN IF NOT EXISTS reference TEXT,
+  ADD COLUMN IF NOT EXISTS disable_chatbot BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS extra_fields JSONB;

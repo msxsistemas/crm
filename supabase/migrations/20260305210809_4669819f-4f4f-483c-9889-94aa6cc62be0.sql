@@ -1,0 +1,1 @@
+ALTER TABLE public.profiles ADD COLUMN signing_enabled boolean NOT NULL DEFAULT true;

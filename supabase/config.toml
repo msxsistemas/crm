@@ -1,0 +1,28 @@
+project_id = "vjpkrulpokzjihlmevht"
+
+[functions.evolution-api]
+verify_jwt = false
+
+[functions.evolution-webhook]
+verify_jwt = false
+
+[functions.chatbot]
+verify_jwt = false
+
+[functions.ai-agent]
+verify_jwt = false
+
+[functions.create-reseller]
+verify_jwt = false
+
+[functions.ciabra]
+verify_jwt = false
+
+[functions.ciabra-webhook]
+verify_jwt = false
+
+[functions.manage-users]
+verify_jwt = false
+
+[functions.zapi]
+verify_jwt = false
