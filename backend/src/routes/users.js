@@ -16,7 +16,7 @@ export default async function userRoutes(fastify) {
   });
 
   fastify.get('/users/:id', auth, async (req, reply) => {
-    const { rows } = await query('SELECT id, name, name as full_name, email, role, avatar_url, permissions, created_at, last_login FROM profiles WHERE id = $1', [req.params.id]);
+    const { rows } = await query('SELECT id, name, name as full_name, email, role, avatar_url, permissions, status, signing_enabled, created_at, last_login FROM profiles WHERE id = $1', [req.params.id]);
     if (!rows[0]) return reply.status(404).send({ error: 'Usuário não encontrado' });
     return rows[0];
   });

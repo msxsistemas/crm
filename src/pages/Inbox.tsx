@@ -1497,7 +1497,7 @@ const Inbox = () => {
     const id = convoId || selected;
     if (!id) return;
     try {
-      const { error } = await supabase.from("conversations").update({ unread_count: 0, status: "attending" }).eq("id", id);
+      const { error } = await supabase.from("conversations").update({ unread_count: 0, status: "in_progress" }).eq("id", id);
       if (error) { toast.error("Erro ao atender"); return; }
       setSelected(id);
       setActiveTab("atendendo");
@@ -2034,14 +2034,14 @@ const Inbox = () => {
 
   const statusCounts = useMemo(() => ({
     aguardando: conversations.filter(c => c.status === "open").length,
-    atendendo: conversations.filter(c => c.status === "attending").length,
+    atendendo: conversations.filter(c => c.status === "in_progress").length,
     encerradas: conversations.filter(c => c.status === "closed").length,
     favoritas: conversations.filter(c => c.starred).length,
   }), [conversations]);
 
   const filtered = conversations
     .filter((c) => {
-      if (activeTab === "atendendo") return c.status === "attending";
+      if (activeTab === "atendendo") return c.status === "in_progress";
       if (activeTab === "aguardando") return c.status === "open";
       if (activeTab === "encerradas") return c.status === "closed";
       if (activeTab === "favoritas") return c.starred === true;
