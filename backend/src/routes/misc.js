@@ -242,13 +242,23 @@ export default async function miscRoutes(fastify) {
     return rows;
   });
   fastify.post('/campaigns', auth, async (req, reply) => {
-    const { name, message, connection_name } = req.body;
-    const { rows } = await query('INSERT INTO campaigns (name, message, connection_name, created_by) VALUES ($1,$2,$3,$4) RETURNING *', [name, message, connection_name, req.user.id]);
+    const { name, message, message_template, description, connection_name, send_speed, user_id, segment_id } = req.body;
+    const { rows } = await query(
+      'INSERT INTO campaigns (name, message, message_template, description, connection_name, send_speed, created_by, user_id, segment_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+      [name, message || message_template || '', message_template || message || '', description || '', connection_name, send_speed || 20, req.user.id, user_id || req.user.id, segment_id]
+    );
     return reply.status(201).send(rows[0]);
   });
   fastify.patch('/campaigns/:id', auth, async (req) => {
-    const { name, message, status } = req.body;
-    const { rows } = await query('UPDATE campaigns SET name=COALESCE($1,name), message=COALESCE($2,message), status=COALESCE($3,status), updated_at=NOW() WHERE id=$4 RETURNING *', [name, message, status, req.params.id]);
+    const { name, message, message_template, status, total_sent, delivered, failed, send_speed } = req.body;
+    const { rows } = await query(
+      `UPDATE campaigns SET
+        name=COALESCE($1,name), message=COALESCE($2,message), message_template=COALESCE($3,message_template),
+        status=COALESCE($4,status), total_sent=COALESCE($5,total_sent), delivered=COALESCE($6,delivered),
+        failed=COALESCE($7,failed), send_speed=COALESCE($8,send_speed), updated_at=NOW()
+       WHERE id=$9 RETURNING *`,
+      [name, message || message_template, message_template || message, status, total_sent, delivered, failed, send_speed, req.params.id]
+    );
     return rows[0];
   });
   fastify.delete('/campaigns/:id', auth, async (req) => {
