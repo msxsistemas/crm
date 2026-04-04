@@ -60,6 +60,7 @@ const TABLE_MAP: Record<string, string> = {
   profiles: '/users',
   settings: '/settings',
   evolution_connections: '/evolution-connections',
+  connections: '/evolution-connections',
   zapi_connections: '/zapi-connections',
   tags: '/tags',
   categories: '/categories',
