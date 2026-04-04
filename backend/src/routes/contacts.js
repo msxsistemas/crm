@@ -63,7 +63,7 @@ export default async function contactRoutes(fastify) {
 
   // Update contact
   fastify.patch('/contacts/:id', auth, async (req, reply) => {
-    const fields = ['name','phone','email','tags','notes','birthday','custom_fields','lead_score'];
+    const fields = ['name','phone','email','tags','notes','birthday','custom_fields','lead_score','disable_chatbot','avatar_url'];
     const updates = [];
     const params = [];
     let p = 1;
