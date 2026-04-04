@@ -41,7 +41,8 @@ async function apiFetch(method: string, path: string, body?: unknown): Promise<u
       if (!r2.ok) throw new Error((await r2.json().catch(() => ({}))).error || r2.statusText);
       return r2.json().catch(() => null);
     }
-    window.location.href = '/login';
+    const onLoginPage = ['/login', '/admin/login', '/revenda/login'].some(p => window.location.pathname.startsWith(p));
+    if (!onLoginPage) window.location.href = '/login';
     throw new Error('Sessão expirada');
   }
 

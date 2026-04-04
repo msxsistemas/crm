@@ -58,7 +58,9 @@ async function request<T = unknown>(
     } finally {
       isRefreshing = false;
     }
-    window.location.href = '/login';
+    // Avoid redirect loop: if already on a login page, just throw so the form shows normally
+    const onLoginPage = ['/login', '/admin/login', '/revenda/login'].some(p => window.location.pathname.startsWith(p));
+    if (!onLoginPage) window.location.href = '/login';
     throw new Error('Sessão expirada');
   }
 
