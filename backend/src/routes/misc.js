@@ -61,8 +61,12 @@ export default async function miscRoutes(fastify) {
   // ── Contact Tags ──────────────────────────────────────────────────────────
   fastify.get('/contact-tags', auth, async (req) => {
     const { contact_id } = req.query;
-    if (!contact_id) return [];
-    const { rows } = await query('SELECT * FROM contact_tags WHERE contact_id = $1', [contact_id]);
+    if (contact_id) {
+      const { rows } = await query('SELECT * FROM contact_tags WHERE contact_id = $1', [contact_id]);
+      return rows;
+    }
+    // Return all contact_tags (for building the contact->tags map in Inbox)
+    const { rows } = await query('SELECT contact_id, tag_id, created_at FROM contact_tags ORDER BY created_at ASC');
     return rows;
   });
   fastify.post('/contact-tags', auth, async (req, reply) => {
