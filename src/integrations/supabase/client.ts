@@ -120,6 +120,16 @@ const TABLE_MAP: Record<string, string> = {
   subscriptions: '/__skip__',
   reseller_sub_users: '/__skip__',
   reseller_transactions: '/__skip__',
+  custom_reports: '/__skip__',
+  distribution_log: '/__skip__',
+  help_articles: '/__skip__',
+  message_reactions: '/__skip__',
+  scheduled_reports: '/__skip__',
+  system_settings: '/__skip__',
+  user_activity_logs: '/__skip__',
+  business_hours: '/__skip__',
+  business_hours_config: '/__skip__',
+  ai_knowledge_base: '/__skip__',
 };
 
 type FilterOp = { col: string; val: unknown; op: string };
