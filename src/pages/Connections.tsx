@@ -65,6 +65,9 @@ const Connections = () => {
   const [editName, setEditName] = useState("");
   const [editOriginalName, setEditOriginalName] = useState("");
 
+  // Last checked timestamp
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
+
   // Shared QR state
   const [qrOpen, setQrOpen] = useState(false);
   const [qrData, setQrData] = useState<string | null>(null);
@@ -141,11 +144,20 @@ const Connections = () => {
       setInstances([]);
     }
     setLoading(false);
+    setLastChecked(new Date());
   }, []);
 
   useEffect(() => {
     fetchInstances();
     fetchZapiFromDb();
+  }, [fetchInstances]);
+
+  // Auto-refresh every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchInstances();
+    }, 30000);
+    return () => clearInterval(interval);
   }, [fetchInstances]);
 
   const fetchZapiFromDb = useCallback(async () => {
@@ -484,6 +496,16 @@ const Connections = () => {
     );
   };
 
+  const getStatusDot = (status?: string, connected?: boolean) => {
+    if (status === "open" || status === "connected" || connected) {
+      return <span className="h-3 w-3 rounded-full bg-emerald-500 animate-pulse shrink-0" title="Conectado" />;
+    }
+    if (status === "connecting") {
+      return <span className="h-3 w-3 rounded-full bg-yellow-400 animate-pulse shrink-0" title="Conectando" />;
+    }
+    return <span className="h-3 w-3 rounded-full bg-red-500 animate-pulse shrink-0" title="Desconectado" />;
+  };
+
   const formatPhone = (jid?: string) => {
     if (!jid) return "—";
     return jid.replace("@s.whatsapp.net", "").replace(/(\d{2})(\d{2})(\d{5})(\d{4})/, "+$1 ($2) $3-$4");
@@ -581,7 +603,7 @@ const Connections = () => {
                 {filtered.map((inst) => {
                   const isConnected = inst.status === "open" || inst.status === "connected";
                   return (
-                    <Card key={inst.instanceName} className="p-4">
+                    <Card key={inst.instanceName} className="p-4 relative">
                       <div className="flex items-center gap-4">
                         <div className={cn(
                           "h-12 w-12 rounded-xl flex items-center justify-center shrink-0",
@@ -591,31 +613,32 @@ const Connections = () => {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
+                            {getStatusDot(inst.status)}
                             <p className="font-semibold text-foreground truncate">{inst.instanceName}</p>
                             {getStatusBadge(inst.status)}
                             <Badge variant="outline" className="text-xs">Evolution</Badge>
                           </div>
                           <p className="text-sm text-muted-foreground">
-                            {isConnected 
-                              ? (inst.ownerJid ? formatPhone(inst.ownerJid) : "WhatsApp conectado") 
+                            {isConnected
+                              ? (inst.ownerJid ? formatPhone(inst.ownerJid) : "WhatsApp conectado")
                               : "Aguardando conexão"}
                           </p>
                         </div>
                         <div className="flex items-center gap-1">
                           {!isConnected && (
-                            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => handleShowEvolutionQR(inst.instanceName)}>
-                              <QrCode className="h-4 w-4" /> Conectar
+                            <Button variant="outline" size="sm" className="gap-1.5 border-amber-500 text-amber-600 hover:bg-amber-50 hover:text-amber-700" onClick={() => handleShowEvolutionQR(inst.instanceName)}>
+                              <QrCode className="h-4 w-4" /> Reconectar
                             </Button>
                           )}
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-8 w-8" 
-                            onClick={() => handleCheckStatus(inst.instanceName)} 
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => handleCheckStatus(inst.instanceName)}
                             title="Verificar Status"
                             disabled={checkingInstance === inst.instanceName}
                           >
-                            {checkingInstance === inst.instanceName 
+                            {checkingInstance === inst.instanceName
                               ? <Loader2 className="h-4 w-4 animate-spin" />
                               : <Signal className="h-4 w-4" />
                             }
@@ -632,6 +655,11 @@ const Connections = () => {
                   );
                 })}
               </div>
+            )}
+            {lastChecked && (
+              <p className="text-xs text-muted-foreground text-right mt-1">
+                Atualizado às {lastChecked.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              </p>
             )}
           </TabsContent>
 
@@ -654,7 +682,7 @@ const Connections = () => {
             ) : (
               <div className="grid gap-3">
                 {zapiFiltered.map((conn) => (
-                  <Card key={conn.id} className="p-4">
+                  <Card key={conn.id} className="p-4 relative">
                     <div className="flex items-center gap-4">
                       <div className={cn(
                         "h-12 w-12 rounded-xl flex items-center justify-center shrink-0",
@@ -664,6 +692,7 @@ const Connections = () => {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
+                          {getStatusDot(conn.status, conn.connected)}
                           <p className="font-semibold text-foreground truncate">{conn.label}</p>
                           {getStatusBadge(conn.status, conn.connected)}
                           <Badge variant="outline" className="text-xs">Z-API</Badge>
@@ -674,8 +703,8 @@ const Connections = () => {
                       </div>
                       <div className="flex items-center gap-1">
                         {!conn.connected && (
-                          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => handleShowZapiQR(conn)}>
-                            <QrCode className="h-4 w-4" /> Conectar
+                          <Button variant="outline" size="sm" className="gap-1.5 border-amber-500 text-amber-600 hover:bg-amber-50 hover:text-amber-700" onClick={() => handleShowZapiQR(conn)}>
+                            <QrCode className="h-4 w-4" /> Reconectar
                           </Button>
                         )}
                         <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleRemoveZapi(conn.id)} title="Excluir">

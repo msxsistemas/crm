@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, forwardRef, useRef, useMemo } from "react";
+import React, { useState, useCallback, useEffect, forwardRef, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { sendMessage } from "@/lib/evolution-api";
 import MediaMessage from "@/components/chat/MediaMessage";
@@ -11,7 +11,8 @@ import { useAuth } from "@/hooks/useAuth";
 import {
   Plus, Search, Filter, BarChart3, RotateCw, MoreVertical, ChevronDown,
   User, Phone, Clock, MessageCircle, X, ExternalLink, Send, Settings,
-  ArrowLeft, Paperclip, Mic,
+  ArrowLeft, Paperclip, Mic, FileText, CheckSquare, DollarSign, StickyNote,
+  ChevronRight,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -117,8 +118,16 @@ const SalesFunnel = () => {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
+  // Kanban search/filter bar
+  const [kanbanSearch, setKanbanSearch] = useState("");
+  const [kanbanStatusFilter, setKanbanStatusFilter] = useState<"all" | "aguardando" | "atendendo" | "encerrada">("all");
+  const [kanbanShowFilters, setKanbanShowFilters] = useState(false);
+
   // Chat modal
   const [chatContact, setChatContact] = useState<KanbanContact | null>(null);
+
+  // Detail drawer
+  const [detailContact, setDetailContact] = useState<KanbanContact | null>(null);
 
   // Board dialog state
   const [showBoardDialog, setShowBoardDialog] = useState(false);
@@ -489,6 +498,34 @@ const SalesFunnel = () => {
   }, [board, search, sortBy, dateFrom, dateTo]);
 
   const totalContacts = board.columns.reduce((s, c) => s + c.contacts.length, 0) + unassigned.length;
+
+  // Kanban inline filter function
+  const filterContacts = (contacts: KanbanContact[]) => {
+    return contacts.filter(c => {
+      const matchSearch = !kanbanSearch ||
+        c.name.toLowerCase().includes(kanbanSearch.toLowerCase()) ||
+        c.phone.includes(kanbanSearch);
+      const matchStatus = kanbanStatusFilter === "all" || c.status === kanbanStatusFilter;
+      return matchSearch && matchStatus;
+    });
+  };
+
+  const kanbanFiltersActive = kanbanSearch !== "" || kanbanStatusFilter !== "all";
+  const kanbanTotalFiltered = filteredBoard.columns.reduce((s, c) => s + filterContacts(c.contacts).length, 0);
+
+  // Highlight matching text helper
+  const highlightText = (text: string, query: string) => {
+    if (!query) return <>{text}</>;
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return <>{text}</>;
+    return (
+      <>
+        {text.slice(0, idx)}
+        <mark className="bg-yellow-200 text-yellow-900 rounded-sm px-0.5">{text.slice(idx, idx + query.length)}</mark>
+        {text.slice(idx + query.length)}
+      </>
+    );
+  };
 
   // Drag and drop
   const onDragEnd = async (result: DropResult) => {
@@ -960,12 +997,72 @@ const SalesFunnel = () => {
         
       </div>
 
+      {/* Kanban filter bar */}
+      <div className="flex items-center gap-2 px-4 py-2 bg-card/70 border-b border-border shrink-0 flex-wrap">
+        {/* Search input */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            placeholder="Buscar por nome ou telefone..."
+            value={kanbanSearch}
+            onChange={(e) => setKanbanSearch(e.target.value)}
+            className="pl-8 h-8 w-56 text-xs"
+          />
+          {kanbanSearch && (
+            <button onClick={() => setKanbanSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Status filter pills */}
+        <div className="flex items-center gap-1">
+          {([
+            { key: "all", label: "Todos" },
+            { key: "aguardando", label: "Aguardando" },
+            { key: "atendendo", label: "Atendendo" },
+            { key: "encerrada", label: "Encerradas" },
+          ] as const).map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setKanbanStatusFilter(key)}
+              className={cn(
+                "px-3 py-1 rounded-full text-xs font-medium border transition-colors",
+                kanbanStatusFilter === key
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-card text-muted-foreground border-border hover:bg-muted"
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Summary & clear */}
+        {kanbanFiltersActive && (
+          <div className="flex items-center gap-2 ml-1">
+            <span className="text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">{kanbanTotalFiltered}</span> cards encontrados
+            </span>
+            <button
+              onClick={() => { setKanbanSearch(""); setKanbanStatusFilter("all"); }}
+              className="flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 border border-destructive/30 rounded-md px-2 py-0.5"
+            >
+              <X className="h-3 w-3" /> Limpar
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Kanban board */}
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="flex-1 flex overflow-x-auto overflow-y-hidden gap-3 p-3 scrollbar-thin">
           
 
-          {filteredBoard.columns.map((col) => (
+          {filteredBoard.columns.map((col) => {
+            const colFiltered = filterContacts(col.contacts);
+            const colTotal = col.contacts.length;
+            return (
             <div key={col.id} className="min-w-[300px] max-w-[340px] flex-1 flex flex-col bg-card rounded-lg border border-border">
               {/* Column header with colored top accent */}
               <div className="relative px-3 py-3 flex items-center justify-between rounded-t-lg">
@@ -974,7 +1071,13 @@ const SalesFunnel = () => {
                   <div className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: col.color }} />
                     <span className="text-sm font-semibold text-foreground">{col.name}</span>
-                    <Badge className="text-[10px] px-1.5 h-5 font-semibold bg-muted text-foreground border-border rounded-md shadow-sm">{col.contacts.length}</Badge>
+                    {kanbanFiltersActive ? (
+                      <Badge className="text-[10px] px-1.5 h-5 font-semibold bg-muted text-foreground border-border rounded-md shadow-sm">
+                        {colFiltered.length}/{colTotal}
+                      </Badge>
+                    ) : (
+                      <Badge className="text-[10px] px-1.5 h-5 font-semibold bg-muted text-foreground border-border rounded-md shadow-sm">{col.contacts.length}</Badge>
+                    )}
                   </div>
                   {(col.isDefault || col.isFinalized) && (
                     <div className="flex items-center gap-1.5 ml-4">
@@ -1011,21 +1114,25 @@ const SalesFunnel = () => {
                         : "bg-transparent"
                     )}
                   >
-                    {col.contacts.length === 0 && !snap.isDraggingOver && (
+                    {colFiltered.length === 0 && !snap.isDraggingOver && (
                       <div className="flex flex-col items-center justify-center py-12 text-muted-foreground/40">
                         <div className="h-12 w-12 rounded-xl bg-muted/50 flex items-center justify-center mb-3">
                           <User className="h-6 w-6" />
                         </div>
-                        <p className="text-xs font-medium">Nenhum contato</p>
-                        <p className="text-[11px] mt-0.5">Arraste um card para cá</p>
+                        <p className="text-xs font-medium">
+                          {kanbanFiltersActive ? "Nenhum resultado" : "Nenhum contato"}
+                        </p>
+                        <p className="text-[11px] mt-0.5">
+                          {kanbanFiltersActive ? "Altere os filtros" : "Arraste um card para cá"}
+                        </p>
                       </div>
                     )}
-                    {snap.isDraggingOver && col.contacts.length === 0 && (
+                    {snap.isDraggingOver && colFiltered.length === 0 && (
                       <div className="border-2 border-dashed border-primary/30 rounded-xl h-20 flex items-center justify-center">
                         <p className="text-xs text-primary/60 font-medium">Solte aqui</p>
                       </div>
                     )}
-                    {col.contacts.map((contact, index) => (
+                    {colFiltered.map((contact, index) => (
                       <Draggable key={contact.id} draggableId={contact.id} index={index}>
                         {(prov, snap2) => (
                           <ContactCard
@@ -1034,11 +1141,13 @@ const SalesFunnel = () => {
                             {...prov.dragHandleProps}
                             contact={contact}
                             isDragging={snap2.isDragging}
-                            isSelected={chatContact?.id === contact.id}
+                            isSelected={chatContact?.id === contact.id || detailContact?.id === contact.id}
                             onChat={() => setChatContact(contact)}
+                            onDetail={() => setDetailContact(contact)}
                             getInitials={getInitials}
                             columnColor={col.color}
                             userName={userName}
+                            highlightName={kanbanSearch ? highlightText(contact.name, kanbanSearch) : undefined}
                           />
                         )}
                       </Draggable>
@@ -1048,7 +1157,8 @@ const SalesFunnel = () => {
                 )}
               </Droppable>
             </div>
-          ))}
+            );
+          })}
         </div>
       </DragDropContext>
 
@@ -1254,6 +1364,15 @@ const SalesFunnel = () => {
           getInitials={getInitials}
         />
       )}
+
+      {detailContact && (
+        <KanbanCardDetail
+          contact={detailContact}
+          onClose={() => setDetailContact(null)}
+          onOpenChat={() => { setChatContact(detailContact); setDetailContact(null); }}
+          getInitials={getInitials}
+        />
+      )}
     </div>
   );
 };
@@ -1265,14 +1384,16 @@ interface ContactCardProps {
   isDragging: boolean;
   isSelected?: boolean;
   onChat: () => void;
+  onDetail: () => void;
   getInitials: (name: string) => string;
   columnColor?: string;
   userName?: string;
+  highlightName?: React.ReactNode;
   [key: string]: any;
 }
 
 const ContactCard = forwardRef<HTMLDivElement, ContactCardProps>(
-  ({ contact, isDragging, isSelected, onChat, getInitials, columnColor, userName, ...props }, ref) => {
+  ({ contact, isDragging, isSelected, onChat, onDetail, getInitials, columnColor, userName, highlightName, ...props }, ref) => {
     const statusConfig = {
       aguardando: { dot: "bg-warning", label: "Aguardando", showAssignee: false },
       atendendo: { dot: "bg-success", label: "Em atendimento", showAssignee: true },
@@ -1284,7 +1405,7 @@ const ContactCard = forwardRef<HTMLDivElement, ContactCardProps>(
       <div
         ref={ref}
         {...props}
-        onClick={onChat}
+        onClick={onDetail}
         className={cn(
           "rounded-xl bg-background border border-border p-3 cursor-grab active:cursor-grabbing transition-[box-shadow,border-color,background-color,opacity] duration-150 ease-out",
           !isSelected && !isDragging && "hover:border-blue-500/60 hover:shadow-md",
@@ -1305,7 +1426,7 @@ const ContactCard = forwardRef<HTMLDivElement, ContactCardProps>(
             )}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-foreground truncate">{contact.name}</p>
+            <p className="text-sm font-semibold text-foreground truncate">{highlightName ?? contact.name}</p>
             <p className="text-[11px] text-muted-foreground flex items-center gap-1">
               <Phone className="h-3 w-3" />
               {contact.phone}
@@ -1337,11 +1458,20 @@ const ContactCard = forwardRef<HTMLDivElement, ContactCardProps>(
             )}
           </span>
         </div>
-        {contact.contact_id && (
-          <div className="mt-2 pt-2 border-t border-border/50" onClick={(e) => e.stopPropagation()}>
-            <TagSelector contactId={contact.contact_id} compact />
-          </div>
-        )}
+        <div className="mt-2 pt-2 border-t border-border/50 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          {contact.contact_id && (
+            <div className="flex-1">
+              <TagSelector contactId={contact.contact_id} compact />
+            </div>
+          )}
+          <button
+            onClick={(e) => { e.stopPropagation(); onChat(); }}
+            className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-700 font-medium shrink-0"
+            title="Abrir conversa"
+          >
+            <MessageCircle className="h-3.5 w-3.5" /> Chat
+          </button>
+        </div>
       </div>
     );
   }
@@ -1799,6 +1929,317 @@ const ChatModal = ({ contact, onClose, getInitials }: ChatModalProps) => {
         </form>
       </div>
     </div>
+  );
+};
+
+// --- KanbanCardDetail Drawer ---
+
+interface Opportunity {
+  id: string;
+  title: string;
+  value?: number | null;
+  status: string;
+}
+
+interface ConversationNote {
+  id: string;
+  content: string;
+  created_at: string;
+}
+
+interface KanbanCardDetailProps {
+  contact: KanbanContact;
+  onClose: () => void;
+  onOpenChat: () => void;
+  getInitials: (name: string) => string;
+}
+
+const KanbanCardDetail = ({ contact, onClose, onOpenChat, getInitials }: KanbanCardDetailProps) => {
+  const navigate = useNavigate();
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversationCount, setConversationCount] = useState<number>(0);
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [notes, setNotes] = useState<ConversationNote[]>([]);
+  const [newNote, setNewNote] = useState("");
+  const [addingNote, setAddingNote] = useState(false);
+  const [loadingData, setLoadingData] = useState(true);
+
+  const statusConfig: Record<string, { dot: string; label: string }> = {
+    aguardando: { dot: "bg-yellow-400", label: "Aguardando" },
+    atendendo: { dot: "bg-green-500", label: "Em atendimento" },
+    encerrada: { dot: "bg-muted-foreground", label: "Encerrada" },
+  };
+  const st = statusConfig[contact.status] || statusConfig.aguardando;
+
+  useEffect(() => {
+    const load = async () => {
+      setLoadingData(true);
+      try {
+        if (!contact.contact_id) { setLoadingData(false); return; }
+
+        // Load conversations (latest + count)
+        const { data: convos, count } = await supabase
+          .from("conversations")
+          .select("id", { count: "exact" })
+          .eq("contact_id", contact.contact_id)
+          .order("last_message_at", { ascending: false });
+
+        const latestConvoId = convos?.[0]?.id || null;
+        setConversationId(latestConvoId);
+        setConversationCount(count || 0);
+
+        // Load opportunities
+        const { data: oppsData } = await supabase
+          .from("opportunities")
+          .select("id, title, value, status")
+          .eq("contact_id", contact.contact_id)
+          .order("created_at", { ascending: false });
+        setOpportunities((oppsData as Opportunity[]) || []);
+
+        // Load notes for the latest conversation
+        if (latestConvoId) {
+          const { data: notesData } = await supabase
+            .from("conversation_notes")
+            .select("id, content, created_at")
+            .eq("conversation_id", latestConvoId)
+            .order("created_at", { ascending: false });
+          setNotes((notesData as ConversationNote[]) || []);
+        }
+      } catch (err) {
+        console.error("Error loading card detail:", err);
+      } finally {
+        setLoadingData(false);
+      }
+    };
+    load();
+  }, [contact.contact_id]);
+
+  const handleAddNote = async () => {
+    if (!newNote.trim() || !conversationId) return;
+    setAddingNote(true);
+    try {
+      const { data, error } = await supabase
+        .from("conversation_notes")
+        .insert({ conversation_id: conversationId, content: newNote.trim() })
+        .select("id, content, created_at")
+        .single();
+      if (error) throw error;
+      setNotes((prev) => [data as ConversationNote, ...prev]);
+      setNewNote("");
+      toast.success("Nota adicionada!");
+    } catch {
+      toast.error("Erro ao adicionar nota");
+    } finally {
+      setAddingNote(false);
+    }
+  };
+
+  const formatCurrency = (val: number | null | undefined) => {
+    if (val == null) return "—";
+    return val.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  };
+
+  const oppStatusLabel: Record<string, string> = {
+    open: "Aberta",
+    won: "Ganha",
+    lost: "Perdida",
+    pending: "Pendente",
+  };
+
+  const oppStatusColor: Record<string, string> = {
+    open: "bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400",
+    won: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400",
+    lost: "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400",
+    pending: "bg-yellow-100 text-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-400",
+  };
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 bg-black/20 z-40"
+        onClick={onClose}
+      />
+      {/* Drawer */}
+      <div className="fixed top-0 right-0 h-full w-96 bg-background border-l border-border z-50 flex flex-col shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-card">
+          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-sm font-semibold text-primary shrink-0">
+            {contact.avatar_url ? (
+              <img src={contact.avatar_url} alt="" className="h-10 w-10 rounded-full object-cover" />
+            ) : (
+              getInitials(contact.name)
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-foreground truncate">{contact.name}</p>
+            <p className="text-xs text-muted-foreground flex items-center gap-1">
+              <Phone className="h-3 w-3" />{contact.phone}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="h-8 w-8 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto">
+          {loadingData ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin h-6 w-6 border-2 border-primary border-t-transparent rounded-full" />
+            </div>
+          ) : (
+            <div className="p-4 space-y-4">
+
+              {/* Conversa Atual */}
+              <div className="rounded-lg border border-border p-3 space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <MessageCircle className="h-3.5 w-3.5" /> Conversa Atual
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className={cn("h-2 w-2 rounded-full shrink-0", st.dot)} />
+                  <span className="text-sm text-foreground">{st.label}</span>
+                </div>
+                {contact.lastMessage && (
+                  <p className="text-xs text-muted-foreground bg-muted/40 rounded px-2 py-1.5 truncate">
+                    {contact.lastMessage}
+                  </p>
+                )}
+                <div className="flex gap-2 pt-1">
+                  <Button
+                    size="sm"
+                    className="flex-1 gap-1.5 text-xs"
+                    onClick={onOpenChat}
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" /> Abrir Chat
+                  </Button>
+                  {conversationId && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 gap-1.5 text-xs"
+                      onClick={() => navigate(`/inbox?conversation=${conversationId}`)}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" /> Ir para Inbox
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* Oportunidades */}
+              <div className="rounded-lg border border-border p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    <DollarSign className="h-3.5 w-3.5" /> Oportunidades
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-xs text-primary hover:text-primary gap-1"
+                    onClick={() => navigate("/tasks")}
+                  >
+                    <Plus className="h-3 w-3" /> Nova
+                  </Button>
+                </div>
+                {opportunities.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic">Nenhuma oportunidade</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {opportunities.map((opp) => (
+                      <div key={opp.id} className="flex items-center justify-between text-xs bg-muted/40 rounded px-2.5 py-1.5">
+                        <span className="text-foreground truncate flex-1 mr-2">{opp.title}</span>
+                        <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0", oppStatusColor[opp.status] || oppStatusColor.open)}>
+                          {oppStatusLabel[opp.status] || opp.status}
+                        </span>
+                        {opp.value != null && (
+                          <span className="ml-2 text-foreground font-semibold shrink-0">{formatCurrency(opp.value)}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Tarefas */}
+              <div className="rounded-lg border border-border p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    <CheckSquare className="h-3.5 w-3.5" /> Tarefas
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full gap-1.5 text-xs"
+                  onClick={() => navigate("/tasks")}
+                >
+                  <ChevronRight className="h-3.5 w-3.5" /> Ver todas as tarefas
+                </Button>
+              </div>
+
+              {/* Notas rápidas */}
+              <div className="rounded-lg border border-border p-3 space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <StickyNote className="h-3.5 w-3.5" /> Notas Rápidas
+                </p>
+                {conversationId ? (
+                  <>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newNote}
+                        onChange={(e) => setNewNote(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleAddNote(); }}
+                        placeholder="Adicionar nota..."
+                        className="flex-1 text-xs rounded-md border border-input bg-background px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                      <Button
+                        size="sm"
+                        disabled={!newNote.trim() || addingNote}
+                        onClick={handleAddNote}
+                        className="px-2.5 text-xs"
+                      >
+                        {addingNote ? "..." : "Add"}
+                      </Button>
+                    </div>
+                    {notes.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">Nenhuma nota ainda</p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                        {notes.map((note) => (
+                          <div key={note.id} className="text-xs bg-muted/40 rounded px-2.5 py-1.5">
+                            <p className="text-foreground">{note.content}</p>
+                            <p className="text-muted-foreground mt-0.5">
+                              {new Date(note.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground italic">Nenhuma conversa vinculada</p>
+                )}
+              </div>
+
+              {/* Histórico */}
+              <div className="rounded-lg border border-border p-3">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                  <FileText className="h-3.5 w-3.5" /> Histórico
+                </p>
+                <p className="text-sm text-foreground">
+                  <span className="font-bold">{conversationCount}</span>{" "}
+                  <span className="text-muted-foreground">{conversationCount === 1 ? "conversa" : "conversas"} no histórico</span>
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 };
 

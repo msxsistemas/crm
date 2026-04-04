@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Search, Users, Building2, ArrowRight } from "lucide-react";
+import { Search, Users, Building2, ArrowRight, ClipboardList } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -21,8 +21,10 @@ interface Department {
 interface TransferDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onTransfer: (type: "user" | "department", targetId: string, targetName: string) => void;
+  onTransfer: (type: "user" | "department", targetId: string, targetName: string, note: string) => void;
 }
+
+const MAX_NOTE_CHARS = 300;
 
 const TransferDialog = ({ open, onOpenChange, onTransfer }: TransferDialogProps) => {
   const [activeTab, setActiveTab] = useState<"atendente" | "categoria">("atendente");
@@ -30,6 +32,7 @@ const TransferDialog = ({ open, onOpenChange, onTransfer }: TransferDialogProps)
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [transferNote, setTransferNote] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -44,6 +47,16 @@ const TransferDialog = ({ open, onOpenChange, onTransfer }: TransferDialogProps)
     load();
   }, [open]);
 
+  // Reset state when dialog closes
+  useEffect(() => {
+    if (!open) {
+      setSelectedId(null);
+      setSearch("");
+      setTransferNote("");
+      setActiveTab("atendente");
+    }
+  }, [open]);
+
   const filteredProfiles = profiles.filter((p) =>
     (p.full_name || "").toLowerCase().includes(search.toLowerCase())
   );
@@ -51,18 +64,21 @@ const TransferDialog = ({ open, onOpenChange, onTransfer }: TransferDialogProps)
     d.name.toLowerCase().includes(search.toLowerCase())
   );
 
+  const selectedProfile = profiles.find((x) => x.id === selectedId);
+  const selectedDept = departments.find((x) => x.id === selectedId);
+  const selectedName =
+    activeTab === "atendente"
+      ? selectedProfile?.full_name || "Atendente"
+      : selectedDept?.name || "Categoria";
+
   const handleTransfer = () => {
     if (!selectedId) return;
     if (activeTab === "atendente") {
-      const p = profiles.find((x) => x.id === selectedId);
-      onTransfer("user", selectedId, p?.full_name || "Atendente");
+      onTransfer("user", selectedId, selectedProfile?.full_name || "Atendente", transferNote);
     } else {
-      const d = departments.find((x) => x.id === selectedId);
-      onTransfer("department", selectedId, d?.name || "Categoria");
+      onTransfer("department", selectedId, selectedDept?.name || "Categoria", transferNote);
     }
     onOpenChange(false);
-    setSelectedId(null);
-    setSearch("");
   };
 
   return (
@@ -156,6 +172,28 @@ const TransferDialog = ({ open, onOpenChange, onTransfer }: TransferDialogProps)
             )
           )}
         </div>
+
+        {/* Context note — shown once an agent is selected */}
+        {selectedId && activeTab === "atendente" && (
+          <div className="space-y-1.5 pt-1">
+            <div className="flex items-center gap-1.5">
+              <ClipboardList className="h-3.5 w-3.5 text-muted-foreground" />
+              <label className="text-xs font-medium text-foreground">
+                Observação para {selectedName} (opcional)
+              </label>
+            </div>
+            <textarea
+              value={transferNote}
+              onChange={(e) => setTransferNote(e.target.value.slice(0, MAX_NOTE_CHARS))}
+              placeholder={`Deixe uma observação para ${selectedName}...`}
+              rows={3}
+              className="w-full text-xs rounded-md border border-border bg-background px-2.5 py-2 text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+            <p className="text-[10px] text-muted-foreground text-right">
+              {transferNote.length}/{MAX_NOTE_CHARS}
+            </p>
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex gap-3 pt-2">

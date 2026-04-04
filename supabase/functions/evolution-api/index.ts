@@ -103,10 +103,27 @@ Deno.serve(async (req) => {
         body = JSON.stringify({ number: data.phone });
         break;
 
+      case "fetch_contacts":
+        endpoint = `/contacts/fetchContacts/${instanceName}`;
+        method = "GET";
+        break;
+
       case "set_presence":
         endpoint = `/instance/setPresence/${instanceName}`;
         method = "POST";
         body = JSON.stringify({ presence: data.presence });
+        break;
+
+      case "send_status":
+        endpoint = `/status/send/${instanceName}`;
+        method = "POST";
+        body = JSON.stringify({
+          type: data.type,
+          content: data.content,
+          caption: data.caption || undefined,
+          backgroundColor: data.backgroundColor || undefined,
+          statusJidList: ["status@broadcast"],
+        });
         break;
 
       default:

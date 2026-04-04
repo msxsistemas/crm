@@ -1,0 +1,33 @@
+import { supabase } from "@/integrations/supabase/client";
+
+export async function logAudit(
+  action: string,
+  resourceType: string,
+  resourceId: string,
+  resourceName: string,
+  metadata: Record<string, unknown> = {}
+) {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("name")
+    .eq("id", user.id)
+    .single();
+
+  supabase
+    .from("access_audit")
+    .insert({
+      user_id: user.id,
+      user_name: (profile as { name?: string } | null)?.name || user.email,
+      action,
+      resource_type: resourceType,
+      resource_id: resourceId,
+      resource_name: resourceName,
+      metadata,
+    })
+    .then(() => {}); // fire and forget
+}

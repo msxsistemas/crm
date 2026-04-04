@@ -10,13 +10,12 @@ interface ProtectedRouteProps {
 
 const getLoginPathByRole = (requiredRole?: "admin" | "reseller" | "user") => {
   if (requiredRole === "admin") return "/admin/login";
-  if (requiredRole === "reseller") return "/revenda/login";
   return "/login";
 };
 
 const ProtectedRoute = ({ children, requiredRole }: ProtectedRouteProps) => {
   const { session, loading: authLoading } = useAuth();
-  const { isAdmin, isReseller, isUser, loading: roleLoading } = useUserRole();
+  const { isAdmin, loading: roleLoading } = useUserRole();
 
   if (authLoading || roleLoading) {
     return (
@@ -31,15 +30,7 @@ const ProtectedRoute = ({ children, requiredRole }: ProtectedRouteProps) => {
   }
 
   if (requiredRole === "admin" && !isAdmin) {
-    return <Navigate to={isReseller ? "/revenda" : "/"} replace />;
-  }
-
-  if (requiredRole === "reseller" && !isReseller) {
-    return <Navigate to={isAdmin ? "/admin" : "/"} replace />;
-  }
-
-  if (requiredRole === "user" && !isUser) {
-    return <Navigate to={isAdmin ? "/admin" : "/revenda"} replace />;
+    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;

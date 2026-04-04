@@ -1,50 +1,66 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { Session, User } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
-import { useNavigate } from "react-router-dom";
+import api from "@/lib/api";
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  role: "admin" | "agent" | "supervisor";
+  avatar_url?: string | null;
+  permissions: Record<string, unknown>;
+  two_factor_enabled?: boolean;
+}
 
 interface AuthContextType {
-  session: Session | null;
-  user: User | null;
+  user: UserProfile | null;
+  profile: UserProfile | null;
+  session: { user: UserProfile } | null; // compat shim
   loading: boolean;
   signOut: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
-  session: null,
   user: null,
+  profile: null,
+  session: null,
   loading: true,
   signOut: async () => {},
+  refreshUser: async () => {},
 });
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    // Get initial session first
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
+  const loadUser = async () => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) { setLoading(false); return; }
+    try {
+      const data = await api.get<UserProfile>('/auth/me');
+      setUser(data);
+    } catch {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('refresh_token');
+      setUser(null);
+    } finally {
       setLoading(false);
-    });
-
-    // Then listen for changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session);
-        setLoading(false);
-      }
-    );
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const signOut = async () => {
-    await supabase.auth.signOut();
+    }
   };
 
+  useEffect(() => { loadUser(); }, []);
+
+  const signOut = async () => {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('refresh_token');
+    setUser(null);
+    window.location.href = '/login';
+  };
+
+  const session = user ? { user } : null;
+
   return (
-    <AuthContext.Provider value={{ session, user: session?.user ?? null, loading, signOut }}>
+    <AuthContext.Provider value={{ user, profile: user, session, loading, signOut, refreshUser: loadUser }}>
       {children}
     </AuthContext.Provider>
   );

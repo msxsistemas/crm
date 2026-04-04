@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import {
   Search, Plus, X, RefreshCw, ChevronLeft, ChevronRight,
   Calendar as CalendarIcon, List, Clock, User, MessageSquare,
-  Paperclip, Settings
+  Paperclip, Settings, Pencil, Trash2, Repeat, Send
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,7 +35,21 @@ interface Schedule {
   repeat_count: string;
 }
 
+const WEEKDAYS = [
+  { label: "Seg", value: "1" },
+  { label: "Ter", value: "2" },
+  { label: "Qua", value: "3" },
+  { label: "Qui", value: "4" },
+  { label: "Sex", value: "5" },
+  { label: "Sáb", value: "6" },
+  { label: "Dom", value: "0" },
+];
+
+const isRecurring = (s: Schedule) =>
+  s.repeat_interval && s.repeat_interval !== "none" && s.repeat_interval !== "";
+
 const Schedules = () => {
+  const { user } = useAuth();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"month" | "day" | "history">("month");
@@ -50,16 +65,51 @@ const Schedules = () => {
   const [formOpenTicket, setFormOpenTicket] = useState("no");
   const [formCreateNote, setFormCreateNote] = useState("no");
   const [formRepeatInterval, setFormRepeatInterval] = useState("none");
-  const [formRepeatDaily, setFormRepeatDaily] = useState("none");
-  const [formRepeatCount, setFormRepeatCount] = useState("unlimited");
+  // For weekly: comma-separated day numbers e.g. "1,2,5"
+  const [formRepeatDays, setFormRepeatDays] = useState<string[]>([]);
+  // repeat_count mode: "unlimited" | "count"
+  const [formRepeatCountMode, setFormRepeatCountMode] = useState("unlimited");
+  const [formRepeatCountValue, setFormRepeatCountValue] = useState("5");
 
   // Contacts for search
   const [contacts, setContacts] = useState<{ id: string; name: string; phone: string }[]>([]);
   const [contactSearch, setContactSearch] = useState("");
+  const [formContactPhone, setFormContactPhone] = useState("");
   const [showContactDropdown, setShowContactDropdown] = useState(false);
 
   // Connections
   const [connections, setConnections] = useState<{ id: string; name: string }[]>([]);
+  const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
+  const [deleteScheduleId, setDeleteScheduleId] = useState<string | null>(null);
+  const [deletingSchedule, setDeletingSchedule] = useState(false);
+
+  // Sending state: scheduleId -> loading
+  const [sendingIds, setSendingIds] = useState<Record<string, boolean>>({});
+
+  const loadSchedules = useCallback(async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from("schedules")
+      .select("*")
+      .order("send_at", { ascending: true });
+    if (data) {
+      setSchedules(data.map((s: any) => ({
+        id: s.id,
+        contact_name: s.contact_name,
+        contact_phone: s.contact_phone,
+        connection: s.connection_id || "",
+        queue: s.queue || "",
+        message: s.message,
+        send_at: s.send_at,
+        status: s.status,
+        open_ticket: s.open_ticket,
+        create_note: s.create_note,
+        repeat_interval: s.repeat_interval,
+        repeat_daily: s.repeat_daily,
+        repeat_count: s.repeat_count,
+      })));
+    }
+  }, [user]);
 
   useEffect(() => {
     const fetchConnections = async () => {
@@ -68,6 +118,8 @@ const Schedules = () => {
     };
     fetchConnections();
   }, []);
+
+  useEffect(() => { loadSchedules(); }, [loadSchedules]);
 
   const searchContacts = async (query: string) => {
     setContactSearch(query);
@@ -82,6 +134,7 @@ const Schedules = () => {
   const selectContact = (c: { id: string; name: string; phone: string }) => {
     setFormContact(c.name);
     setContactSearch(c.name);
+    setFormContactPhone(c.phone);
     setShowContactDropdown(false);
   };
 
@@ -99,6 +152,7 @@ const Schedules = () => {
   const resetForm = () => {
     setFormContact("");
     setContactSearch("");
+    setFormContactPhone("");
     setFormConnection("");
     setFormQueue("");
     setFormMessage("");
@@ -106,32 +160,143 @@ const Schedules = () => {
     setFormOpenTicket("no");
     setFormCreateNote("no");
     setFormRepeatInterval("none");
-    setFormRepeatDaily("none");
-    setFormRepeatCount("unlimited");
+    setFormRepeatDays([]);
+    setFormRepeatCountMode("unlimited");
+    setFormRepeatCountValue("5");
+    setEditingSchedule(null);
   };
 
-  const handleSave = () => {
+  // Parse stored repeat_daily string into formRepeatDays (weekly mode) or countMode
+  const parseRepeatFields = (s: Schedule) => {
+    // repeat_daily in weekly mode stores "1,2,3"; in other modes it was "none"/"weekdays"/"all"
+    // repeat_count stores "unlimited" or a number string
+    const days = s.repeat_daily && s.repeat_daily !== "none" && s.repeat_interval === "weekly"
+      ? s.repeat_daily.split(",").filter(Boolean)
+      : [];
+    const countMode = s.repeat_count === "unlimited" ? "unlimited" : "count";
+    const countValue = s.repeat_count === "unlimited" ? "5" : s.repeat_count;
+    return { days, countMode, countValue };
+  };
+
+  const openEdit = (s: Schedule) => {
+    const { days, countMode, countValue } = parseRepeatFields(s);
+    setEditingSchedule(s);
+    setContactSearch(s.contact_name);
+    setFormContactPhone(s.contact_phone);
+    setFormConnection(s.connection);
+    setFormQueue(s.queue);
+    setFormMessage(s.message);
+    setFormDateTime(format(new Date(s.send_at), "yyyy-MM-dd'T'HH:mm"));
+    setFormOpenTicket(s.open_ticket ? "yes" : "no");
+    setFormCreateNote(s.create_note ? "yes" : "no");
+    setFormRepeatInterval(s.repeat_interval || "none");
+    setFormRepeatDays(days);
+    setFormRepeatCountMode(countMode);
+    setFormRepeatCountValue(countValue);
+    setDialogOpen(true);
+  };
+
+  const handleDeleteSchedule = async () => {
+    if (!deleteScheduleId) return;
+    setDeletingSchedule(true);
+    const { error } = await supabase.from("schedules").delete().eq("id", deleteScheduleId);
+    if (error) { toast.error("Erro ao excluir agendamento"); }
+    else { toast.success("Agendamento excluído!"); await loadSchedules(); }
+    setDeleteScheduleId(null);
+    setDeletingSchedule(false);
+  };
+
+  const buildRepeatDaily = () => {
+    if (formRepeatInterval === "weekly") {
+      return formRepeatDays.length > 0 ? formRepeatDays.join(",") : "none";
+    }
+    return "none";
+  };
+
+  const buildRepeatCount = () => {
+    if (formRepeatCountMode === "count") return formRepeatCountValue;
+    return "unlimited";
+  };
+
+  const handleSave = async () => {
     if (!contactSearch.trim()) { toast.error("Selecione um contato"); return; }
     if (!formConnection) { toast.error("Selecione uma conexão"); return; }
+    if (!user) return;
 
-    const newSchedule: Schedule = {
-      id: crypto.randomUUID(),
+    const payload = {
       contact_name: contactSearch,
-      contact_phone: "",
-      connection: formConnection,
-      queue: formQueue,
+      contact_phone: formContactPhone,
+      connection_id: formConnection || null,
+      queue: formQueue || null,
       message: formMessage,
-      send_at: formDateTime,
-      status: "pending",
+      send_at: new Date(formDateTime).toISOString(),
       open_ticket: formOpenTicket === "yes",
       create_note: formCreateNote === "yes",
       repeat_interval: formRepeatInterval,
-      repeat_daily: formRepeatDaily,
-      repeat_count: formRepeatCount,
+      repeat_daily: buildRepeatDaily(),
+      repeat_count: buildRepeatCount(),
     };
-    setSchedules(prev => [...prev, newSchedule]);
-    toast.success("Agendamento criado!");
+
+    if (editingSchedule) {
+      const { error } = await supabase.from("schedules").update(payload).eq("id", editingSchedule.id);
+      if (error) { toast.error("Erro ao atualizar agendamento"); return; }
+      toast.success("Agendamento atualizado!");
+    } else {
+      const { error } = await supabase.from("schedules").insert({
+        ...payload,
+        user_id: user.id,
+        status: "pending",
+      });
+      if (error) { toast.error("Erro ao criar agendamento"); return; }
+      toast.success("Agendamento criado!");
+    }
+    setEditingSchedule(null);
     setDialogOpen(false);
+    resetForm();
+    await loadSchedules();
+  };
+
+  const toggleWeekday = (val: string) => {
+    setFormRepeatDays(prev =>
+      prev.includes(val) ? prev.filter(d => d !== val) : [...prev, val]
+    );
+  };
+
+  // "Enviar agora" — direct send via Evolution API edge function
+  const handleSendNow = async (s: Schedule) => {
+    setSendingIds(prev => ({ ...prev, [s.id]: true }));
+    try {
+      // Get instance_name for this connection id
+      const conn = connections.find(c => c.id === s.connection);
+      if (!conn) {
+        toast.error("Conexão não encontrada");
+        return;
+      }
+      const { data, error } = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "send_message",
+          instanceName: conn.name,
+          data: { phone: s.contact_phone, message: s.message },
+        },
+      });
+
+      if (error) throw new Error(error.message);
+
+      // Update status to sent
+      await supabase.from("schedules").update({ status: "sent" }).eq("id", s.id);
+      toast.success("Mensagem enviada com sucesso!");
+      await loadSchedules();
+    } catch (err: any) {
+      await supabase.from("schedules").update({ status: "failed" }).eq("id", s.id);
+      toast.error("Erro ao enviar: " + (err?.message || "desconhecido"));
+      await loadSchedules();
+    } finally {
+      setSendingIds(prev => {
+        const next = { ...prev };
+        delete next[s.id];
+        return next;
+      });
+    }
   };
 
   const navigateCal = (dir: "prev" | "next" | "today") => {
@@ -153,7 +318,7 @@ const Schedules = () => {
       <div className="flex items-center justify-between mx-6 py-4 border-b border-border">
         <h1 className="text-xl font-bold text-blue-600">Agendamentos</h1>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon"><RefreshCw className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" onClick={loadSchedules}><RefreshCw className="h-4 w-4" /></Button>
           <Button onClick={() => { resetForm(); setDialogOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white uppercase text-xs font-semibold gap-1.5">
             <Plus className="h-4 w-4" /> NOVO AGENDAMENTO
           </Button>
@@ -220,12 +385,17 @@ const Schedules = () => {
                 const inMonth = isSameMonth(day, calendarDate);
                 const today = isToday(day);
                 return (
-                  <div key={i} className={`min-h-[90px] border-b border-r border-border p-2 ${!inMonth ? "bg-muted/10" : ""} ${today ? "ring-2 ring-inset ring-blue-500" : ""}`}>
+                  <div
+                    key={i}
+                    className={`min-h-[90px] border-b border-r border-border p-2 cursor-pointer hover:bg-muted/20 transition-colors ${!inMonth ? "bg-muted/10" : ""} ${today ? "ring-2 ring-inset ring-blue-500" : ""}`}
+                    onClick={() => { setCalendarDate(day); setViewMode("day"); }}
+                  >
                     <p className={`text-sm font-semibold ${today ? "text-blue-600" : !inMonth ? "text-muted-foreground/40" : "text-foreground"}`}>
                       {format(day, "d")}
                     </p>
                     {daySchedules.map(s => (
-                      <div key={s.id} className="bg-orange-400 text-white text-[10px] px-1.5 py-0.5 rounded mt-1 truncate">
+                      <div key={s.id} className="bg-orange-400 text-white text-[10px] px-1.5 py-0.5 rounded mt-1 truncate flex items-center gap-1" onClick={(e) => { e.stopPropagation(); openEdit(s); }}>
+                        {isRecurring(s) && <Repeat className="h-2.5 w-2.5 shrink-0" />}
                         {format(new Date(s.send_at), "HH:mm")} - {s.contact_name}
                       </div>
                     ))}
@@ -236,17 +406,122 @@ const Schedules = () => {
           </div>
         )}
 
-        {viewMode === "day" && (
-          <div className="rounded-lg border border-border p-6 bg-card text-center text-muted-foreground">
-            <p>Visualização por dia — selecione um dia no calendário</p>
-          </div>
-        )}
+        {viewMode === "day" && (() => {
+          const daySchedules = getSchedulesForDay(calendarDate);
+          return (
+            <div className="rounded-lg border border-border overflow-hidden bg-card">
+              <div className="px-4 py-3 border-b border-border bg-muted/20">
+                <p className="text-sm font-semibold text-foreground capitalize">
+                  {format(calendarDate, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                </p>
+              </div>
+              {daySchedules.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                  <CalendarIcon className="h-12 w-12 mb-3 opacity-20" />
+                  <p className="font-medium">Nenhum agendamento neste dia</p>
+                  <p className="text-xs mt-1">Navegue para outro dia ou crie um agendamento</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {daySchedules.map(s => (
+                    <div key={s.id} className="flex items-center gap-4 px-4 py-3">
+                      <div className="text-sm font-bold text-blue-600 w-12 shrink-0">
+                        {format(new Date(s.send_at), "HH:mm")}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-foreground truncate flex items-center gap-1.5">
+                          {s.contact_name}
+                          {isRecurring(s) && <Repeat className="h-3.5 w-3.5 text-blue-400 shrink-0" title="Recorrente" />}
+                        </p>
+                        {s.contact_phone && <p className="text-xs text-muted-foreground">{s.contact_phone}</p>}
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">{s.message}</p>
+                      </div>
+                      <div className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                        s.status === "sent" ? "bg-green-100 text-green-700" :
+                        s.status === "failed" ? "bg-red-100 text-red-700" :
+                        "bg-orange-100 text-orange-700"
+                      }`}>
+                        {s.status === "sent" ? "Enviado" : s.status === "failed" ? "Falhou" : "Pendente"}
+                      </div>
+                      <div className="flex items-center gap-1 ml-2">
+                        {s.status === "pending" && (
+                          <button
+                            onClick={() => handleSendNow(s)}
+                            disabled={!!sendingIds[s.id]}
+                            title="Enviar agora"
+                            className="flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                          >
+                            <Send className="h-3 w-3" />
+                            {sendingIds[s.id] ? "Enviando..." : "Enviar agora"}
+                          </button>
+                        )}
+                        <button onClick={() => openEdit(s)} className="p-1 text-muted-foreground hover:text-blue-600 transition-colors"><Pencil className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => setDeleteScheduleId(s.id)} className="p-1 text-muted-foreground hover:text-red-500 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
-        {viewMode === "history" && (
-          <div className="rounded-lg border border-border p-6 bg-card text-center text-muted-foreground">
-            <p>Nenhum agendamento no histórico</p>
-          </div>
-        )}
+        {viewMode === "history" && (() => {
+          const past = filtered.filter(s => s.status === "sent" || s.status === "failed" || new Date(s.send_at) < new Date());
+          return (
+            <div className="rounded-lg border border-border overflow-hidden bg-card">
+              <div className="px-4 py-3 border-b border-border bg-muted/20">
+                <p className="text-sm font-semibold text-foreground">Histórico de agendamentos</p>
+              </div>
+              {past.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                  <Clock className="h-12 w-12 mb-3 opacity-20" />
+                  <p className="font-medium">Nenhum agendamento no histórico</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {past.map(s => (
+                    <div key={s.id} className="flex items-center gap-4 px-4 py-3">
+                      <div className="text-xs text-muted-foreground w-32 shrink-0">
+                        {format(new Date(s.send_at), "dd/MM/yyyy HH:mm")}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-foreground truncate flex items-center gap-1.5">
+                          {s.contact_name}
+                          {isRecurring(s) && <Repeat className="h-3.5 w-3.5 text-blue-400 shrink-0" title="Recorrente" />}
+                        </p>
+                        {s.contact_phone && <p className="text-xs text-muted-foreground">{s.contact_phone}</p>}
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">{s.message}</p>
+                      </div>
+                      <div className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                        s.status === "sent" ? "bg-green-100 text-green-700" :
+                        s.status === "failed" ? "bg-red-100 text-red-700" :
+                        "bg-orange-100 text-orange-700"
+                      }`}>
+                        {s.status === "sent" ? "Enviado" : s.status === "failed" ? "Falhou" : "Pendente"}
+                      </div>
+                      <div className="flex items-center gap-1 ml-2">
+                        {s.status === "pending" && (
+                          <button
+                            onClick={() => handleSendNow(s)}
+                            disabled={!!sendingIds[s.id]}
+                            title="Enviar agora"
+                            className="flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded bg-blue-50 text-blue-600 hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                          >
+                            <Send className="h-3 w-3" />
+                            {sendingIds[s.id] ? "Enviando..." : "Enviar agora"}
+                          </button>
+                        )}
+                        <button onClick={() => openEdit(s)} className="p-1 text-muted-foreground hover:text-blue-600 transition-colors"><Pencil className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => setDeleteScheduleId(s.id)} className="p-1 text-muted-foreground hover:text-red-500 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* New Schedule Dialog */}
@@ -254,7 +529,7 @@ const Schedules = () => {
         <DialogContent className="sm:max-w-2xl p-0 overflow-hidden gap-0 [&>button.absolute]:hidden">
           <div className="bg-blue-600 px-6 py-4 flex items-center gap-3">
             <CalendarIcon className="h-5 w-5 text-white" />
-            <h2 className="text-lg font-bold text-white flex-1">Novo Agendamento</h2>
+            <h2 className="text-lg font-bold text-white flex-1">{editingSchedule ? "Editar Agendamento" : "Novo Agendamento"}</h2>
             <button onClick={() => setDialogOpen(false)} className="text-white/70 hover:text-white"><X className="h-5 w-5" /></button>
           </div>
           <div className="px-6 py-5 space-y-5 max-h-[60vh] overflow-y-auto">
@@ -330,12 +605,81 @@ const Schedules = () => {
               />
             </div>
 
+            {/* Recorrência */}
+            <div>
+              <h3 className="text-sm font-semibold text-blue-600 flex items-center gap-2 mb-4">
+                <Repeat className="h-4 w-4" /> Recorrência
+              </h3>
+              <div className="space-y-4">
+                {/* Intervalo */}
+                <FloatingSelectWrapper label="Intervalo" hasValue={true}>
+                  <Select value={formRepeatInterval} onValueChange={(v) => { setFormRepeatInterval(v); if (v !== "weekly") setFormRepeatDays([]); }}>
+                    <SelectTrigger className="h-10 pt-3 pb-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sem repetição</SelectItem>
+                      <SelectItem value="daily">Diário</SelectItem>
+                      <SelectItem value="weekly">Semanal</SelectItem>
+                      <SelectItem value="monthly">Mensal</SelectItem>
+                      <SelectItem value="custom">Personalizado</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FloatingSelectWrapper>
+
+                {/* Dias da semana — only for weekly */}
+                {formRepeatInterval === "weekly" && (
+                  <div>
+                    <p className="text-xs font-semibold text-muted-foreground mb-2">Dias da semana</p>
+                    <div className="flex flex-wrap gap-2">
+                      {WEEKDAYS.map(wd => (
+                        <button
+                          key={wd.value}
+                          type="button"
+                          onClick={() => toggleWeekday(wd.value)}
+                          className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                            formRepeatDays.includes(wd.value)
+                              ? "bg-blue-600 text-white border-blue-600"
+                              : "bg-card text-muted-foreground border-border hover:border-blue-400"
+                          }`}
+                        >
+                          {wd.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Repetir até */}
+                <div className="grid grid-cols-2 gap-4">
+                  <FloatingSelectWrapper label="Repetir até" hasValue={true}>
+                    <Select value={formRepeatCountMode} onValueChange={setFormRepeatCountMode}>
+                      <SelectTrigger className="h-10 pt-3 pb-1"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unlimited">Sem limite</SelectItem>
+                        <SelectItem value="count">Número de vezes</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </FloatingSelectWrapper>
+
+                  {/* Quantidade — only when count mode */}
+                  {formRepeatCountMode === "count" && (
+                    <FloatingInput
+                      label="Quantidade"
+                      type="number"
+                      min="1"
+                      value={formRepeatCountValue}
+                      onChange={(e) => setFormRepeatCountValue(e.target.value)}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+
             {/* Configurações Avançadas */}
             <div>
               <h3 className="text-sm font-semibold text-blue-600 flex items-center gap-2 mb-4">
                 <Settings className="h-4 w-4" /> Configurações Avançadas
               </h3>
-              <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className="grid grid-cols-2 gap-4">
                 <FloatingSelectWrapper label="Abrir Ticket?" hasValue={true}>
                   <Select value={formOpenTicket} onValueChange={setFormOpenTicket}>
                     <SelectTrigger className="h-10 pt-3 pb-1"><SelectValue /></SelectTrigger>
@@ -355,40 +699,6 @@ const Schedules = () => {
                   </Select>
                 </FloatingSelectWrapper>
               </div>
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <FloatingSelectWrapper label="Repetir a cada" hasValue={true}>
-                  <Select value={formRepeatInterval} onValueChange={setFormRepeatInterval}>
-                    <SelectTrigger className="h-10 pt-3 pb-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Não Repetir</SelectItem>
-                      <SelectItem value="daily">Diariamente</SelectItem>
-                      <SelectItem value="weekly">Semanalmente</SelectItem>
-                      <SelectItem value="monthly">Mensalmente</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </FloatingSelectWrapper>
-                <FloatingSelectWrapper label="Repetir todo dia" hasValue={true}>
-                  <Select value={formRepeatDaily} onValueChange={setFormRepeatDaily}>
-                    <SelectTrigger className="h-10 pt-3 pb-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Não Repetir</SelectItem>
-                      <SelectItem value="weekdays">Dias úteis</SelectItem>
-                      <SelectItem value="all">Todos os dias</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </FloatingSelectWrapper>
-              </div>
-              <FloatingSelectWrapper label="Quantas vezes repetir" hasValue={true}>
-                <Select value={formRepeatCount} onValueChange={setFormRepeatCount}>
-                  <SelectTrigger className="h-10 pt-3 pb-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unlimited">Ilimitado</SelectItem>
-                    <SelectItem value="5">5 vezes</SelectItem>
-                    <SelectItem value="10">10 vezes</SelectItem>
-                    <SelectItem value="30">30 vezes</SelectItem>
-                  </SelectContent>
-                </Select>
-              </FloatingSelectWrapper>
             </div>
           </div>
 
@@ -398,7 +708,23 @@ const Schedules = () => {
             </Button>
             <div className="flex gap-3">
               <Button variant="outline" className="uppercase font-semibold text-xs" onClick={() => setDialogOpen(false)}>CANCELAR</Button>
-              <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white uppercase font-semibold text-xs px-6">ADICIONAR</Button>
+              <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white uppercase font-semibold text-xs px-6">{editingSchedule ? "SALVAR" : "ADICIONAR"}</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Schedule Dialog */}
+      <Dialog open={!!deleteScheduleId} onOpenChange={(o) => !o && setDeleteScheduleId(null)}>
+        <DialogContent className="sm:max-w-md">
+          <div className="p-6">
+            <h3 className="text-lg font-bold text-foreground mb-2">Excluir agendamento</h3>
+            <p className="text-sm text-muted-foreground mb-6">Esta ação não pode ser desfeita.</p>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setDeleteScheduleId(null)}>Cancelar</Button>
+              <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={handleDeleteSchedule} disabled={deletingSchedule}>
+                {deletingSchedule ? "Excluindo..." : "Excluir"}
+              </Button>
             </div>
           </div>
         </DialogContent>

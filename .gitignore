@@ -7,12 +7,24 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+backend/node_modules
+
+# Build output
 dist
 dist-ssr
-*.local
 
-# Editor directories and files
+# Environment variables (credentials)
+.env
+.env.*
+!.env.example
+backend/.env
+
+# VPS deployment scripts (contêm credenciais)
+vps-*.mjs
+
+# Editor
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -22,3 +34,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Supabase (não usado mais)
+supabase/.temp/

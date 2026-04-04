@@ -3,9 +3,23 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { FloatingInput, FloatingTextarea, FloatingSelectWrapper } from "@/components/ui/floating-input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Users as UsersIcon, Pencil, X } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Users as UsersIcon, Pencil, X, ShieldCheck } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+
+const MODULES = [
+  { key: "inbox", label: "Caixa de Entrada" },
+  { key: "contacts", label: "Contatos" },
+  { key: "tasks", label: "Tarefas" },
+  { key: "campaigns", label: "Campanhas" },
+  { key: "chatbot", label: "Chatbot" },
+  { key: "reports", label: "Relatórios" },
+  { key: "schedules", label: "Agendamentos" },
+  { key: "funnel", label: "Funil de Vendas" },
+  { key: "users", label: "Usuários" },
+  { key: "settings", label: "Configurações" },
+];
 
 
 interface UserFormData {
@@ -60,22 +74,29 @@ interface Props {
   onSaved: () => void;
 }
 
+const defaultPermissions = (): Record<string, boolean> =>
+  Object.fromEntries(MODULES.map(m => [m.key, true]));
+
 const UserFormDialog = ({ open, onOpenChange, editUserId, editUserEmail, onSaved }: Props) => {
   const [form, setForm] = useState<UserFormData>(defaultForm);
   const [loading, setLoading] = useState(false);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [permissions, setPermissions] = useState<Record<string, boolean>>(defaultPermissions());
+  const [activeTab, setActiveTab] = useState<"info" | "permissions">("info");
   const isEdit = !!editUserId;
 
   useEffect(() => {
     if (open) {
       setErrors({});
+      setActiveTab("info");
       loadSelectData();
       if (editUserId) {
         loadUser(editUserId);
       } else {
         setForm(defaultForm);
+        setPermissions(defaultPermissions());
       }
     }
   }, [open, editUserId]);
@@ -120,6 +141,14 @@ const UserFormDialog = ({ open, onOpenChange, editUserId, editUserEmail, onSaved
         campaigns_access: p.campaigns_access || false,
         can_create_tags: p.can_create_tags || false,
       });
+      // Load permissions: if empty/null → all enabled
+      const savedPerms = p.permissions as Record<string, boolean> | null;
+      if (savedPerms && Object.keys(savedPerms).length > 0) {
+        // Merge with defaults so new modules default to true
+        setPermissions({ ...defaultPermissions(), ...savedPerms });
+      } else {
+        setPermissions(defaultPermissions());
+      }
     }
   };
 
@@ -158,7 +187,7 @@ const UserFormDialog = ({ open, onOpenChange, editUserId, editUserEmail, onSaved
       } as any;
 
       if (isEdit && editUserId) {
-        await supabase.from("profiles").update(profileData).eq("id", editUserId);
+        await supabase.from("profiles").update({ ...profileData, permissions }).eq("id", editUserId);
         await supabase.from("user_roles").delete().eq("user_id", editUserId);
         if (form.role !== "user") {
           await supabase.from("user_roles").insert({ user_id: editUserId, role: form.role } as any);
@@ -217,8 +246,51 @@ const UserFormDialog = ({ open, onOpenChange, editUserId, editUserEmail, onSaved
           </button>
         </div>
 
+        {/* Tabs (only when editing) */}
+        {isEdit && (
+          <div className="flex border-b border-border bg-muted/30">
+            <button
+              onClick={() => setActiveTab("info")}
+              className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wide transition-colors ${activeTab === "info" ? "border-b-2 border-blue-600 text-blue-600" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              Informações
+            </button>
+            <button
+              onClick={() => setActiveTab("permissions")}
+              className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wide transition-colors flex items-center justify-center gap-1.5 ${activeTab === "permissions" ? "border-b-2 border-blue-600 text-blue-600" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              <ShieldCheck className="h-3.5 w-3.5" /> Permissões
+            </button>
+          </div>
+        )}
+
         {/* Body */}
         <div className="px-6 py-5 space-y-3 max-h-[60vh] overflow-y-auto">
+          {/* Permissions Tab */}
+          {isEdit && activeTab === "permissions" && (
+            <div>
+              <p className="text-xs text-muted-foreground mb-4">
+                Ative ou desative o acesso aos módulos para este usuário. Por padrão, todos os módulos estão habilitados.
+              </p>
+              <div className="space-y-3">
+                {MODULES.map(module => (
+                  <div key={module.key} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                    <span className="text-sm text-foreground">{module.label}</span>
+                    <Switch
+                      checked={permissions[module.key] ?? true}
+                      onCheckedChange={(checked) =>
+                        setPermissions(prev => ({ ...prev, [module.key]: checked }))
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Info Tab (default, or when not editing) */}
+          {(!isEdit || activeTab === "info") && (
+            <>
           {/* Nome + Senha */}
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -316,6 +388,8 @@ const UserFormDialog = ({ open, onOpenChange, editUserId, editUserEmail, onSaved
               </Select>
             </FloatingSelectWrapper>
           ))}
+            </>
+          )}
         </div>
 
         {/* Footer */}

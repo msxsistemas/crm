@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { usePlatformName } from "@/hooks/usePlatformName";
 import { supabase } from "@/integrations/supabase/client";
@@ -17,7 +17,14 @@ import {
   MessageSquare,
   FileText,
   Type,
+  MessageCircle,
+  Send,
+  Info,
+  Loader2,
+  HelpCircle,
 } from "lucide-react";
+import { useFollowupReminders } from "@/hooks/useFollowupReminders";
+import { FollowupPanel } from "@/components/followup/FollowupPanel";
 import { useTheme } from "next-themes";
 import {
   DropdownMenu,
@@ -26,8 +33,21 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { formatDistanceToNow } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 type UserStatus = "online" | "ausente" | "offline";
+
+interface AppNotification {
+  id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  read: boolean;
+  link: string | null;
+  created_at: string;
+}
 
 const statusConfig: Record<UserStatus, { label: string; color: string }> = {
   online: { label: "Online", color: "text-green-500" },
@@ -35,7 +55,26 @@ const statusConfig: Record<UserStatus, { label: string; color: string }> = {
   offline: { label: "Offline", color: "text-red-500" },
 };
 
-const TopBar = () => {
+const notifTypeIcon = (type: string) => {
+  switch (type) {
+    case "new_conversation":
+      return <MessageSquare className="h-4 w-4 text-blue-500 shrink-0" />;
+    case "task_due":
+      return <Bell className="h-4 w-4 text-yellow-500 shrink-0" />;
+    case "campaign_done":
+      return <Send className="h-4 w-4 text-green-500 shrink-0" />;
+    case "message_received":
+      return <MessageCircle className="h-4 w-4 text-purple-500 shrink-0" />;
+    default:
+      return <Info className="h-4 w-4 text-gray-400 shrink-0" />;
+  }
+};
+
+interface TopBarProps {
+  onStartTour?: () => void;
+}
+
+const TopBar = ({ onStartTour }: TopBarProps) => {
   const { user } = useAuth();
   const { platformName } = usePlatformName();
   const navigate = useNavigate();
@@ -54,6 +93,25 @@ const TopBar = () => {
   const [socketStatus, setSocketStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [apiStatus, setApiStatus] = useState<'connected' | 'disconnected'>('disconnected');
 
+  // Notification states
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifLoading, setNotifLoading] = useState(false);
+
+  // Follow-up reminders
+  const [followupOpen, setFollowupOpen] = useState(false);
+  const {
+    reminders: followupReminders,
+    loading: followupLoading,
+    dueTodayCount,
+    updateReminderStatus,
+  } = useFollowupReminders();
+
+  const prevUnreadRef = useRef(0);
+  const prevWaitingRef = useRef(0);
+
+  const unreadNotifCount = notifications.filter(n => !n.read).length;
+
   // Measure real latency with a lightweight ping
   const measureLatency = useCallback(async () => {
     const start = performance.now();
@@ -62,6 +120,83 @@ const TopBar = () => {
     setLatencyMs(elapsed);
     setApiStatus(error ? 'disconnected' : 'connected');
   }, []);
+
+  const requestNotificationPermission = useCallback(async () => {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "default") {
+      await Notification.requestPermission();
+    }
+  }, []);
+
+  const sendBrowserNotification = useCallback((title: string, body: string) => {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    if (document.visibilityState === "visible") return;
+    new Notification(title, {
+      body,
+      icon: "/favicon.ico",
+      tag: "crm-notification",
+    });
+  }, []);
+
+  // Load notifications from DB
+  const loadNotifications = useCallback(async () => {
+    if (!user) return;
+    setNotifLoading(true);
+    const { data } = await supabase
+      .from("notifications")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    setNotifications((data as AppNotification[]) || []);
+    setNotifLoading(false);
+  }, [user]);
+
+  // Open/close handler — load when opening
+  useEffect(() => {
+    if (notifOpen) {
+      loadNotifications();
+    }
+  }, [notifOpen, loadNotifications]);
+
+  // Realtime subscription for new notifications
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel("topbar-notifications")
+      .on(
+        "postgres_changes" as any,
+        { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
+        (payload: { new: AppNotification }) => {
+          const newNotif = payload.new as AppNotification;
+          setNotifications(prev => [newNotif, ...prev]);
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user]);
+
+  // Mark a single notification as read
+  const markAsRead = useCallback(async (id: string) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    await supabase
+      .from("notifications")
+      .update({ read: true } as any)
+      .eq("id", id);
+  }, []);
+
+  // Mark all notifications as read
+  const markAllAsRead = useCallback(async () => {
+    if (!user) return;
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    await supabase
+      .from("notifications")
+      .update({ read: true } as any)
+      .eq("user_id", user.id)
+      .eq("read", false);
+  }, [user]);
 
   // Fetch profile & connections
   const fetchData = useCallback(async () => {
@@ -86,10 +221,42 @@ const TopBar = () => {
   useEffect(() => {
     fetchData();
     measureLatency();
+    requestNotificationPermission();
     // Ping latency every 30s
     const interval = setInterval(measureLatency, 30000);
     return () => clearInterval(interval);
-  }, [fetchData, measureLatency]);
+  }, [fetchData, measureLatency, requestNotificationPermission]);
+
+  // Browser notifications + DB insert when unread/waiting count increases
+  useEffect(() => {
+    const prevUnread = prevUnreadRef.current;
+    const prevWaiting = prevWaitingRef.current;
+
+    if (unreadConversations > prevUnread) {
+      sendBrowserNotification(
+        "Nova mensagem não lida",
+        `Você tem ${unreadConversations} conversa(s) com mensagens não lidas`
+      );
+      // Insert DB notification
+      if (user) {
+        supabase.from("notifications").insert({
+          user_id: user.id,
+          type: "new_conversation",
+          title: "Nova mensagem recebida",
+          body: `${unreadConversations} conversa(s) aguardando resposta`,
+          link: "/inbox",
+        } as any);
+      }
+    } else if (waitingConversations > prevWaiting) {
+      sendBrowserNotification(
+        "Nova conversa aguardando",
+        `${waitingConversations} conversa(s) aguardando atendimento`
+      );
+    }
+
+    prevUnreadRef.current = unreadConversations;
+    prevWaitingRef.current = waitingConversations;
+  }, [unreadConversations, waitingConversations, sendBrowserNotification, user]);
 
   // Realtime unread updates + socket status detection
   useEffect(() => {
@@ -168,11 +335,10 @@ const TopBar = () => {
     navigate("/configuracoes");
   };
 
-  const handleConnections = () => {
-    navigate("/conexoes");
-  };
-
   const displayName = fullName || user?.email?.split("@")[0] || "Usuário";
+
+  // Badge count: show higher of unread notifications vs conversation count, or sum
+  const bellBadgeCount = unreadNotifCount + (unreadConversations + waitingConversations);
 
   return (
     <div className="h-14 bg-blue-600 flex items-center justify-between px-6 text-white text-sm shrink-0 select-none">
@@ -274,21 +440,118 @@ const TopBar = () => {
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            {(unreadConversations + waitingConversations) > 0 
-              ? `${unreadConversations} não lida(s), ${waitingConversations} aguardando` 
+            {(unreadConversations + waitingConversations) > 0
+              ? `${unreadConversations} não lida(s), ${waitingConversations} aguardando`
               : "Sem mensagens pendentes"}
           </TooltipContent>
         </Tooltip>
 
-        {/* Notifications bell */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button className="hover:text-white/80 transition-colors p-1">
+        {/* Follow-up reminders panel */}
+        <FollowupPanel
+          open={followupOpen}
+          onOpenChange={setFollowupOpen}
+          reminders={followupReminders}
+          loading={followupLoading}
+          dueTodayCount={dueTodayCount}
+          onComplete={id => updateReminderStatus(id, "completed")}
+          onDismiss={id => updateReminderStatus(id, "dismissed")}
+        />
+
+        {/* Tour guide button */}
+        {onStartTour && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onStartTour}
+                className="hover:text-white/80 transition-colors p-1"
+              >
+                <HelpCircle className="h-[18px] w-[18px]" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Ver tour guiado</TooltipContent>
+          </Tooltip>
+        )}
+
+        {/* Notifications bell with dropdown */}
+        <Popover open={notifOpen} onOpenChange={setNotifOpen}>
+          <PopoverTrigger asChild>
+            <button data-tour="notifications" className="hover:text-white/80 transition-colors p-1 relative">
               <Bell className="h-[18px] w-[18px]" />
+              {bellBadgeCount > 0 && (
+                <span className="absolute -top-1 -right-1 h-4 min-w-[16px] px-0.5 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                  {bellBadgeCount > 99 ? "99+" : bellBadgeCount}
+                </span>
+              )}
             </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Notificações</TooltipContent>
-        </Tooltip>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            side="bottom"
+            className="w-80 p-0 max-h-[500px] overflow-y-auto"
+            sideOffset={8}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b sticky top-0 bg-background z-10">
+              <span className="font-semibold text-sm">Notificações</span>
+              {unreadNotifCount > 0 && (
+                <button
+                  onClick={markAllAsRead}
+                  className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                >
+                  Marcar todas como lidas
+                </button>
+              )}
+            </div>
+
+            {/* Body */}
+            <div className="divide-y">
+              {notifLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : notifications.length === 0 ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">
+                  Nenhuma notificação
+                </div>
+              ) : (
+                notifications.map(notif => (
+                  <button
+                    key={notif.id}
+                    onClick={async () => {
+                      if (!notif.read) await markAsRead(notif.id);
+                      if (notif.link) {
+                        setNotifOpen(false);
+                        navigate(notif.link);
+                      }
+                    }}
+                    className={`w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-muted/50 transition-colors ${!notif.read ? "bg-blue-50 dark:bg-blue-950/20" : ""}`}
+                  >
+                    {/* Type icon */}
+                    <div className="mt-0.5">{notifTypeIcon(notif.type)}</div>
+
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm leading-snug truncate ${!notif.read ? "font-semibold" : "font-normal"}`}>
+                        {notif.title}
+                      </p>
+                      {notif.body && (
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">{notif.body}</p>
+                      )}
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        {formatDistanceToNow(new Date(notif.created_at), { addSuffix: true, locale: ptBR })}
+                      </p>
+                    </div>
+
+                    {/* Unread dot */}
+                    {!notif.read && (
+                      <span className="mt-1.5 h-2 w-2 rounded-full bg-blue-500 shrink-0" />
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
 
         {/* Files */}
         <Tooltip>

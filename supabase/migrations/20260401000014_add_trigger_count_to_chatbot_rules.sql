@@ -1,0 +1,1 @@
+ALTER TABLE chatbot_rules ADD COLUMN IF NOT EXISTS trigger_count INTEGER DEFAULT 0;

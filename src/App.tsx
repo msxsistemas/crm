@@ -1,156 +1,230 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/ProtectedRoute";
-import AppLayout from "./components/layout/AppLayout";
-import Index from "./pages/Index";
-import Inbox from "./pages/Inbox";
-import SalesFunnel from "./pages/SalesFunnel";
-import Contacts from "./pages/Contacts";
-import Campaigns from "./pages/Campaigns";
-import Bots from "./pages/Bots";
-import AIAgent from "./pages/AIAgent";
-import ChatbotPage from "./pages/Chatbot";
-import Settings from "./pages/Settings";
-import Connections from "./pages/Connections";
-import UsersPage from "./pages/Users";
-import SubscriptionPage from "./pages/Subscription";
-import AdminDashboard from "./pages/AdminDashboard";
-import AdminResellers from "./pages/admin/AdminResellers";
-import AdminPlans from "./pages/admin/AdminPlans";
-import AdminUsers from "./pages/admin/AdminUsers";
-import AdminFinance from "./pages/admin/AdminFinance";
-import AdminConnections from "./pages/admin/AdminConnections";
-import AdminSettings from "./pages/admin/AdminSettings";
-import AdminGateway from "./pages/admin/AdminGateway";
-import AdminSubscriptions from "./pages/admin/AdminSubscriptions";
-import ResellerDashboard from "./pages/ResellerDashboard";
-import ResellerSubUsers from "./pages/reseller/ResellerSubUsers";
-import ResellerConnections from "./pages/reseller/ResellerConnections";
-import ResellerBranding from "./pages/reseller/ResellerBranding";
-import Login from "./pages/Login";
-import AdminLogin from "./pages/AdminLogin";
-import ResellerLogin from "./pages/ResellerLogin";
-import Register from "./pages/Register";
-import ResetPassword from "./pages/ResetPassword";
-import Tags from "./pages/Tags";
-import Categories from "./pages/Categories";
-import QuickReplies from "./pages/QuickReplies";
-import InternalChat from "./pages/InternalChat";
-import NotFound from "./pages/NotFound";
-// New pages
-import DashboardLegacy from "./pages/DashboardLegacy";
-import SearchPage from "./pages/Search";
-import Tasks from "./pages/Tasks";
-import Schedules from "./pages/Schedules";
-import KanbanGroups from "./pages/KanbanGroups";
-import KanbanOverview from "./pages/KanbanOverview";
-import KanbanQueues from "./pages/KanbanQueues";
-import Opportunities from "./pages/Opportunities";
-import Pipeline from "./pages/Pipeline";
-import Products from "./pages/Products";
-import HelpCenter from "./pages/HelpCenter";
-import Reviews from "./pages/Reviews";
-import QueuesChatbot from "./pages/QueuesChatbot";
-import ActivityLog from "./pages/ActivityLog";
-import FlowBuilder from "./pages/FlowBuilder";
-import FileManager from "./pages/FileManager";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import InstallPWA from "@/components/InstallPWA";
+import OfflineBanner from "@/components/OfflineBanner";
+import { Loader2 } from "lucide-react";
 
-const queryClient = new QueryClient();
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(console.error);
+  });
+}
+
+// Lazy imports para melhor performance
+const AppLayout = lazy(() => import("./components/layout/AppLayout"));
+const Index = lazy(() => import("./pages/Index"));
+const Inbox = lazy(() => import("./pages/Inbox"));
+const SalesFunnel = lazy(() => import("./pages/SalesFunnel"));
+const Contacts = lazy(() => import("./pages/Contacts"));
+const Campaigns = lazy(() => import("./pages/Campaigns"));
+const Bots = lazy(() => import("./pages/Bots"));
+const AIAgent = lazy(() => import("./pages/AIAgent"));
+const ChatbotPage = lazy(() => import("./pages/Chatbot"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Connections = lazy(() => import("./pages/Connections"));
+const UsersPage = lazy(() => import("./pages/Users"));
+const SubscriptionPage = lazy(() => import("./pages/Subscription"));
+const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
+const AdminResellers = lazy(() => import("./pages/admin/AdminResellers"));
+const AdminPlans = lazy(() => import("./pages/admin/AdminPlans"));
+const AdminUsers = lazy(() => import("./pages/admin/AdminUsers"));
+const AdminFinance = lazy(() => import("./pages/admin/AdminFinance"));
+const AdminConnections = lazy(() => import("./pages/admin/AdminConnections"));
+const AdminSettings = lazy(() => import("./pages/admin/AdminSettings"));
+const AdminGateway = lazy(() => import("./pages/admin/AdminGateway"));
+const AdminSubscriptions = lazy(() => import("./pages/admin/AdminSubscriptions"));
+const ResellerDashboard = lazy(() => import("./pages/ResellerDashboard"));
+const ResellerSubUsers = lazy(() => import("./pages/reseller/ResellerSubUsers"));
+const ResellerConnections = lazy(() => import("./pages/reseller/ResellerConnections"));
+const ResellerBranding = lazy(() => import("./pages/reseller/ResellerBranding"));
+const Login = lazy(() => import("./pages/Login"));
+const AdminLogin = lazy(() => import("./pages/AdminLogin"));
+const ResellerLogin = lazy(() => import("./pages/ResellerLogin"));
+const Register = lazy(() => import("./pages/Register"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const Tags = lazy(() => import("./pages/Tags"));
+const Categories = lazy(() => import("./pages/Categories"));
+const QuickReplies = lazy(() => import("./pages/QuickReplies"));
+const InternalChat = lazy(() => import("./pages/InternalChat"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const DashboardLegacy = lazy(() => import("./pages/DashboardLegacy"));
+const SearchPage = lazy(() => import("./pages/Search"));
+const Tasks = lazy(() => import("./pages/Tasks"));
+const Schedules = lazy(() => import("./pages/Schedules"));
+const KanbanGroups = lazy(() => import("./pages/KanbanGroups"));
+const KanbanOverview = lazy(() => import("./pages/KanbanOverview"));
+const KanbanQueues = lazy(() => import("./pages/KanbanQueues"));
+const Opportunities = lazy(() => import("./pages/Opportunities"));
+const Pipeline = lazy(() => import("./pages/Pipeline"));
+const Products = lazy(() => import("./pages/Products"));
+const HelpCenter = lazy(() => import("./pages/HelpCenter"));
+const Reviews = lazy(() => import("./pages/Reviews"));
+const QueuesChatbot = lazy(() => import("./pages/QueuesChatbot"));
+const ActivityLog = lazy(() => import("./pages/ActivityLog"));
+const FlowBuilder = lazy(() => import("./pages/FlowBuilder"));
+const FileManager = lazy(() => import("./pages/FileManager"));
+const Reports = lazy(() => import("./pages/Reports"));
+const WebhookLogs = lazy(() => import("./pages/WebhookLogs"));
+const Segments = lazy(() => import("./pages/Segments"));
+const SupervisorDashboard = lazy(() => import("./pages/SupervisorDashboard"));
+const SLAConfig = lazy(() => import("./pages/SLAConfig"));
+const HSMTemplates = lazy(() => import("./pages/HSMTemplates"));
+const ContactTimeline = lazy(() => import("./pages/ContactTimeline"));
+const ContactGroups = lazy(() => import("./pages/ContactGroups"));
+const AuditLog = lazy(() => import("./pages/AuditLog"));
+const SalesGoals = lazy(() => import("./pages/SalesGoals"));
+const Proposals = lazy(() => import("./pages/Proposals"));
+const ScheduledReports = lazy(() => import("./pages/ScheduledReports"));
+const FinancialReport = lazy(() => import("./pages/FinancialReport"));
+const BlacklistPage = lazy(() => import("./pages/Blacklist"));
+const AgentSchedulesPage = lazy(() => import("./pages/AgentSchedules"));
+const FlowTemplates = lazy(() => import("./pages/FlowTemplates"));
+const WhatsAppStatusPage = lazy(() => import("./pages/WhatsAppStatus"));
+const Deduplication = lazy(() => import("./pages/Deduplication"));
+const ContactForms = lazy(() => import("./pages/ContactForms"));
+const PublicContactForm = lazy(() => import("./pages/PublicContactForm"));
+const AutoDistribution = lazy(() => import("./pages/AutoDistribution"));
+const CustomReports = lazy(() => import("./pages/CustomReports"));
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: 1, staleTime: 30_000 },
+  },
+});
+
+const PageLoader = () => (
+  <div className="flex h-screen items-center justify-center">
+    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+  </div>
+);
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <AuthProvider>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/admin/login" element={<AdminLogin />} />
-            <Route path="/revenda/login" element={<ResellerLogin />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-            <Route
-              element={
-                <ProtectedRoute requiredRole="user">
-                  <AppLayout />
-                </ProtectedRoute>
-              }
-            >
-              <Route path="/" element={<Index />} />
-              <Route path="/dashboard-legado" element={<DashboardLegacy />} />
-              <Route path="/inbox" element={<Inbox />} />
-              <Route path="/pesquisar" element={<SearchPage />} />
-              <Route path="/kanban" element={<SalesFunnel />} />
-              <Route path="/kanban/grupos" element={<KanbanGroups />} />
-              <Route path="/kanban/visao-geral" element={<KanbanOverview />} />
-              <Route path="/kanban/filas" element={<KanbanQueues />} />
-              <Route path="/contatos" element={<Contacts />} />
-              <Route path="/tarefas" element={<Tasks />} />
-              <Route path="/agendamentos" element={<Schedules />} />
-              <Route path="/conexoes" element={<Connections />} />
-              <Route path="/campanhas" element={<Campaigns />} />
-              <Route path="/agente-ia" element={<AIAgent />} />
-              <Route path="/chatbot" element={<ChatbotPage />} />
-              <Route path="/crm/oportunidades" element={<Opportunities />} />
-              <Route path="/crm/pipeline" element={<Pipeline />} />
-              <Route path="/crm/produtos" element={<Products />} />
-              <Route path="/usuarios" element={<UsersPage />} />
-              <Route path="/tags" element={<Tags />} />
-              <Route path="/categorias" element={<Categories />} />
-              <Route path="/configuracoes" element={<Settings />} />
-              <Route path="/assinatura" element={<SubscriptionPage />} />
-              <Route path="/respostas-rapidas" element={<QuickReplies />} />
-              <Route path="/chat-interno" element={<InternalChat />} />
-              <Route path="/central-ajuda" element={<HelpCenter />} />
-              <Route path="/avaliacoes" element={<Reviews />} />
-              <Route path="/filas-chatbot" element={<QueuesChatbot />} />
-              <Route path="/registro-atividades" element={<ActivityLog />} />
-              <Route path="/flowbuilder" element={<FlowBuilder />} />
-              <Route path="/gerenciador-arquivos" element={<FileManager />} />
-            </Route>
-            <Route
-              element={
-                <ProtectedRoute requiredRole="admin">
-                  <AppLayout />
-                </ProtectedRoute>
-              }
-            >
-              <Route path="/admin" element={<AdminDashboard />} />
-              <Route path="/admin/revendedores" element={<AdminResellers />} />
-              <Route path="/admin/planos" element={<AdminPlans />} />
-              <Route path="/admin/usuarios" element={<AdminUsers />} />
-              <Route path="/admin/financeiro" element={<AdminFinance />} />
-              <Route path="/admin/conexoes" element={<AdminConnections />} />
-              <Route path="/admin/assinaturas" element={<AdminSubscriptions />} />
-              <Route path="/admin/gateway" element={<AdminGateway />} />
-              <Route path="/admin/configuracoes" element={<AdminSettings />} />
-            </Route>
-            <Route
-              element={
-                <ProtectedRoute requiredRole="reseller">
-                  <AppLayout />
-                </ProtectedRoute>
-              }
-            >
-              <Route path="/revenda" element={<ResellerDashboard />} />
-              <Route path="/revenda/subusuarios" element={<ResellerSubUsers />} />
-              <Route path="/revenda/conexoes" element={<ResellerConnections />} />
-              <Route path="/revenda/marca" element={<ResellerBranding />} />
-            </Route>
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </AuthProvider>
-      </BrowserRouter>
-    </TooltipProvider>
-    </ThemeProvider>
-  </QueryClientProvider>
+  <ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <InstallPWA />
+          <OfflineBanner />
+          <BrowserRouter>
+            <AuthProvider>
+              <Suspense fallback={<PageLoader />}>
+                <Routes>
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/admin/login" element={<AdminLogin />} />
+                  <Route path="/revenda/login" element={<ResellerLogin />} />
+                  <Route path="/register" element={<Register />} />
+                  <Route path="/reset-password" element={<ResetPassword />} />
+                  <Route
+                    element={
+                      <ProtectedRoute requiredRole="user">
+                        <AppLayout />
+                      </ProtectedRoute>
+                    }
+                  >
+                    <Route path="/" element={<Index />} />
+                    <Route path="/dashboard-legado" element={<DashboardLegacy />} />
+                    <Route path="/inbox" element={<Inbox />} />
+                    <Route path="/pesquisar" element={<SearchPage />} />
+                    <Route path="/kanban" element={<SalesFunnel />} />
+                    <Route path="/kanban/grupos" element={<KanbanGroups />} />
+                    <Route path="/kanban/visao-geral" element={<KanbanOverview />} />
+                    <Route path="/kanban/filas" element={<KanbanQueues />} />
+                    <Route path="/contatos" element={<Contacts />} />
+                    <Route path="/tarefas" element={<Tasks />} />
+                    <Route path="/agendamentos" element={<Schedules />} />
+                    <Route path="/conexoes" element={<Connections />} />
+                    <Route path="/campanhas" element={<Campaigns />} />
+                    <Route path="/agente-ia" element={<AIAgent />} />
+                    <Route path="/chatbot" element={<ChatbotPage />} />
+                    <Route path="/crm" element={<Navigate to="/crm/oportunidades" replace />} />
+                    <Route path="/crm/oportunidades" element={<Opportunities />} />
+                    <Route path="/crm/pipeline" element={<Pipeline />} />
+                    <Route path="/crm/produtos" element={<Products />} />
+                    <Route path="/usuarios" element={<UsersPage />} />
+                    <Route path="/tags" element={<Tags />} />
+                    <Route path="/categorias" element={<Categories />} />
+                    <Route path="/configuracoes" element={<Settings />} />
+                    <Route path="/assinatura" element={<SubscriptionPage />} />
+                    <Route path="/respostas-rapidas" element={<QuickReplies />} />
+                    <Route path="/chat-interno" element={<InternalChat />} />
+                    <Route path="/central-ajuda" element={<HelpCenter />} />
+                    <Route path="/avaliacoes" element={<Reviews />} />
+                    <Route path="/filas-chatbot" element={<QueuesChatbot />} />
+                    <Route path="/registro-atividades" element={<ActivityLog />} />
+                    <Route path="/flowbuilder" element={<FlowBuilder />} />
+                    <Route path="/gerenciador-arquivos" element={<FileManager />} />
+                    <Route path="/relatorios" element={<Reports />} />
+                    <Route path="/logs-webhook" element={<WebhookLogs />} />
+                    <Route path="/segmentos" element={<Segments />} />
+                    <Route path="/supervisor" element={<SupervisorDashboard />} />
+                    <Route path="/sla" element={<SLAConfig />} />
+                    <Route path="/contatos/:contactId/timeline" element={<ContactTimeline />} />
+                    <Route path="/grupos-contatos" element={<ContactGroups />} />
+                    <Route path="/auditoria" element={<AuditLog />} />
+                    <Route path="/hsm-templates" element={<HSMTemplates />} />
+                    <Route path="/metas" element={<SalesGoals />} />
+                    <Route path="/propostas" element={<Proposals />} />
+                    <Route path="/relatorios-agendados" element={<ScheduledReports />} />
+                    <Route path="/financeiro" element={<FinancialReport />} />
+                    <Route path="/blacklist" element={<BlacklistPage />} />
+                    <Route path="/horarios-agentes" element={<AgentSchedulesPage />} />
+                    <Route path="/flow-templates" element={<FlowTemplates />} />
+                    <Route path="/status-whatsapp" element={<WhatsAppStatusPage />} />
+                    <Route path="/deduplicacao" element={<Deduplication />} />
+                    <Route path="/formularios-captacao" element={<ContactForms />} />
+                    <Route path="/distribuicao-automatica" element={<AutoDistribution />} />
+                    <Route path="/relatorios-customizados" element={<CustomReports />} />
+                    <Route path="/bots" element={<Bots />} />
+                  </Route>
+                  <Route
+                    element={
+                      <ProtectedRoute requiredRole="admin">
+                        <AppLayout />
+                      </ProtectedRoute>
+                    }
+                  >
+                    <Route path="/admin" element={<AdminDashboard />} />
+                    <Route path="/admin/revendedores" element={<AdminResellers />} />
+                    <Route path="/admin/planos" element={<AdminPlans />} />
+                    <Route path="/admin/usuarios" element={<AdminUsers />} />
+                    <Route path="/admin/financeiro" element={<AdminFinance />} />
+                    <Route path="/admin/conexoes" element={<AdminConnections />} />
+                    <Route path="/admin/assinaturas" element={<AdminSubscriptions />} />
+                    <Route path="/admin/gateway" element={<AdminGateway />} />
+                    <Route path="/admin/configuracoes" element={<AdminSettings />} />
+                  </Route>
+                  <Route
+                    element={
+                      <ProtectedRoute requiredRole="reseller">
+                        <AppLayout />
+                      </ProtectedRoute>
+                    }
+                  >
+                    <Route path="/revenda" element={<ResellerDashboard />} />
+                    <Route path="/revenda/subusuarios" element={<ResellerSubUsers />} />
+                    <Route path="/revenda/conexoes" element={<ResellerConnections />} />
+                    <Route path="/revenda/marca" element={<ResellerBranding />} />
+                  </Route>
+                  <Route path="/form/:slug" element={<PublicContactForm />} />
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </Suspense>
+            </AuthProvider>
+          </BrowserRouter>
+        </TooltipProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
+  </ErrorBoundary>
 );
 
 export default App;

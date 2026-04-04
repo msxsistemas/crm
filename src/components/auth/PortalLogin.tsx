@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { usePlatformName } from "@/hooks/usePlatformName";
-import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +8,7 @@ import { toast } from "sonner";
 import { Link, Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useUserRole } from "@/hooks/useUserRole";
+import api from "@/lib/api";
 
 interface PortalLoginProps {
   portal: "user" | "admin" | "reseller";
@@ -19,8 +19,8 @@ interface PortalLoginProps {
 
 const PortalLogin = ({ portal, title, subtitle, showRegisterLink = false }: PortalLoginProps) => {
   const { platformName } = usePlatformName();
-  const { session, loading: authLoading } = useAuth();
-  const { isAdmin, isReseller, loading: roleLoading } = useUserRole();
+  const { session, loading: authLoading, refreshUser } = useAuth();
+  const { isAdmin, loading: roleLoading } = useUserRole();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -34,46 +34,25 @@ const PortalLogin = ({ portal, title, subtitle, showRegisterLink = false }: Port
     );
   }
 
-  if (!authLoading && !roleLoading && session) {
-    const redirectTo = isAdmin ? "/admin" : isReseller ? "/revenda" : "/";
+  if (!authLoading && session) {
+    const redirectTo = isAdmin ? "/admin" : "/";
     return <Navigate to={redirectTo} replace />;
   }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        toast.error(error.message);
-      } else if (portal === "admin") {
-        toast.success("Login realizado. Redirecionando para o painel admin...");
-      } else if (portal === "reseller") {
-        toast.success("Login realizado. Redirecionando para o painel de revenda...");
-      }
-    } catch (err) {
-      console.error("Login error:", err);
-      toast.error("Erro inesperado ao fazer login");
+      const data = await api.post<{ token: string; refreshToken: string }>('/auth/login', { email, password });
+      localStorage.setItem('auth_token', data.token);
+      localStorage.setItem('refresh_token', data.refreshToken);
+      await refreshUser();
+      toast.success("Login realizado com sucesso!");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erro ao fazer login";
+      toast.error(msg === "Credenciais inválidas" ? "Email ou senha incorretos" : msg);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleForgotPassword = async () => {
-    if (!email) {
-      toast.error("Digite seu email primeiro");
-      return;
-    }
-
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
-
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success("Email de recuperação enviado!");
     }
   };
 
@@ -140,12 +119,6 @@ const PortalLogin = ({ portal, title, subtitle, showRegisterLink = false }: Port
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Entrar
           </Button>
-
-          <div className="text-center">
-            <button type="button" onClick={handleForgotPassword} className="text-sm text-primary hover:underline">
-              Esqueceu sua senha?
-            </button>
-          </div>
         </form>
       </div>
 

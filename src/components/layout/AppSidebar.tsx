@@ -4,6 +4,21 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { useUserRole } from "@/hooks/useUserRole";
 import { usePlatformName } from "@/hooks/usePlatformName";
+import { supabase } from "@/integrations/supabase/client";
+
+// Map from route path patterns to permission keys
+const ROUTE_PERMISSION_MAP: Record<string, string> = {
+  "/inbox": "inbox",
+  "/contatos": "contacts",
+  "/tarefas": "tasks",
+  "/agendamentos": "schedules",
+  "/usuarios": "users",
+  "/configuracoes": "settings",
+  "/filas-chatbot": "chatbot",
+  "/avaliacoes": "reports",
+  "/crm": "funnel",
+  "/kanban": "funnel",
+};
 import {
   BarChart3,
   LayoutDashboard,
@@ -44,6 +59,19 @@ import {
   ClipboardList,
   Workflow,
   FolderOpen,
+  MonitorCheck,
+  ShieldAlert,
+  LayoutTemplate,
+  TrendingUp,
+  FileText,
+  Mail,
+  Ban,
+  Clock,
+  Radio,
+  GitMerge,
+  QrCode,
+  Shuffle,
+  PieChart,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -52,6 +80,7 @@ interface NavItemDef {
   icon: any;
   label: string;
   children?: NavItemDef[];
+  adminOnly?: boolean;
 }
 
 interface NavSection {
@@ -73,6 +102,7 @@ const userNavSections: NavSection[] = [
       { to: "/inbox", icon: MessageSquare, label: "Chats" },
       { to: "/pesquisar", icon: Search, label: "Pesquisar" },
       { to: "/contatos", icon: Contact, label: "Contatos" },
+      { to: "/grupos-contatos", icon: UsersRound, label: "Grupos de Contatos" },
       { to: "/tarefas", icon: ListTodo, label: "Tarefas" },
       { to: "/agendamentos", icon: CalendarDays, label: "Agendamentos" },
     ],
@@ -95,6 +125,9 @@ const userNavSections: NavSection[] = [
           { to: "/crm/oportunidades", icon: DollarSign, label: "Oportunidades" },
           { to: "/crm/pipeline", icon: GitBranch, label: "Pipeline" },
           { to: "/crm/produtos", icon: Package, label: "Produtos" },
+          { to: "/metas", icon: TrendingUp, label: "Metas de Vendas" },
+          { to: "/propostas", icon: FileText, label: "Propostas Comerciais" },
+          { to: "/financeiro", icon: BarChart3, label: "Financeiro" },
         ],
       },
     ],
@@ -103,9 +136,12 @@ const userNavSections: NavSection[] = [
     title: "FERRAMENTAS",
     items: [
       { to: "/tags", icon: Tag, label: "Tags" },
+      { to: "/segmentos", icon: ListFilter, label: "Segmentos" },
       { to: "/respostas-rapidas", icon: Zap, label: "Respostas Rápidas" },
       { to: "/chat-interno", icon: MessagesSquare, label: "Chat Interno" },
       { to: "/central-ajuda", icon: HelpCircle, label: "Central de Ajuda" },
+      { to: "/deduplicacao", icon: GitMerge, label: "Deduplicação" },
+      { to: "/formularios-captacao", icon: QrCode, label: "Formulários de Captação" },
     ],
   },
   {
@@ -117,19 +153,40 @@ const userNavSections: NavSection[] = [
       { to: "/categorias", icon: Tag, label: "Categorias" },
       { to: "/usuarios", icon: UsersRound, label: "Equipe" },
       { to: "/registro-atividades", icon: ClipboardList, label: "Registro de Atividades" },
+      { to: "/supervisor", icon: MonitorCheck, label: "Central do Supervisor" },
+      { to: "/sla", icon: ShieldAlert, label: "Configuração de SLA" },
+      { to: "/auditoria", icon: ShieldCheck, label: "Log de Auditoria (LGPD)", adminOnly: true },
+      { to: "/blacklist", icon: Ban, label: "Lista Negra (Blacklist)" },
+      { to: "/horarios-agentes", icon: Clock, label: "Horários dos Agentes" },
     ],
   },
   {
     title: "AUTOMAÇÃO",
     items: [
       { to: "/flowbuilder", icon: Workflow, label: "FlowBuilder Nativo" },
+      { to: "/flow-templates", icon: LayoutTemplate, label: "Templates de Atendimento" },
       { to: "/agente-ia", icon: Brain, label: "Agente IA" },
       { to: "/gerenciador-arquivos", icon: FolderOpen, label: "Gerenciador de Arquivos" },
+      { to: "/hsm-templates", icon: LayoutTemplate, label: "Templates HSM" },
+      { to: "/distribuicao-automatica", icon: Shuffle, label: "Distribuição Automática" },
+    ],
+  },
+  {
+    title: "RELATÓRIOS",
+    items: [
+      { to: "/relatorios-customizados", icon: PieChart, label: "Builder de Relatórios" },
+    ],
+  },
+  {
+    title: "WHATSAPP",
+    items: [
+      { to: "/status-whatsapp", icon: Radio, label: "Status do WhatsApp" },
     ],
   },
   {
     title: "SISTEMA",
     items: [
+      { to: "/relatorios-agendados", icon: Mail, label: "Relatórios Agendados" },
       { to: "/configuracoes", icon: Settings, label: "Configurações" },
       { to: "/assinatura", icon: CreditCard, label: "Minha Assinatura" },
     ],
@@ -180,7 +237,11 @@ const resellerNavSections: NavSection[] = [
   },
 ];
 
-const AppSidebar = () => {
+interface AppSidebarProps {
+  onStartTour?: () => void;
+}
+
+const AppSidebar = ({ onStartTour }: AppSidebarProps) => {
   const { user, signOut } = useAuth();
   const { isAdmin, isReseller } = useUserRole();
   const location = useLocation();
@@ -192,6 +253,32 @@ const AppSidebar = () => {
   });
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const { platformName } = usePlatformName();
+  const [userPermissions, setUserPermissions] = useState<Record<string, boolean> | null>(null);
+
+  useEffect(() => {
+    if (!user || isAdmin || isReseller) return;
+    supabase
+      .from("profiles")
+      .select("permissions")
+      .eq("id", user.id)
+      .single()
+      .then(({ data }) => {
+        if (data?.permissions && Object.keys(data.permissions).length > 0) {
+          setUserPermissions(data.permissions as Record<string, boolean>);
+        }
+      });
+  }, [user?.id, isAdmin, isReseller]);
+
+  const isNavItemAllowed = (item: NavItemDef): boolean => {
+    // Admin-only items are only visible to admins
+    if (item.adminOnly && !isAdmin) return false;
+    // Admins and resellers always see everything
+    if (isAdmin || isReseller || !userPermissions) return true;
+    // Check if this route maps to a permission key
+    const permKey = ROUTE_PERMISSION_MAP[item.to];
+    if (!permKey) return true; // routes without a permission key are always visible
+    return userPermissions[permKey] !== false;
+  };
 
   const navSections = isAdmin
     ? adminNavSections
@@ -291,12 +378,24 @@ const AppSidebar = () => {
     return renderLeafItem(item);
   };
 
+  // Map route paths to data-tour attribute values
+  const TOUR_ATTR_MAP: Record<string, string> = {
+    "/inbox": "inbox",
+    "/contatos": "contacts",
+    "/campanhas": "campaigns",
+    "/chatbot": "bots",
+    "/": "dashboard",
+    "/configuracoes": "settings",
+  };
+
   const renderLeafItem = (item: NavItemDef) => {
     const isActive = location.pathname === item.to;
+    const tourAttr = TOUR_ATTR_MAP[item.to];
     const link = (
       <NavLink
         key={item.to}
         to={item.to}
+        {...(tourAttr ? { "data-tour": tourAttr } : {})}
         className={cn(
           "flex items-center gap-3 rounded-l-sm rounded-r-none px-3 py-2 text-sm transition-all border-l-[3px] -mr-2 -ml-1",
           collapsed && "justify-center px-2",
@@ -366,7 +465,7 @@ const AppSidebar = () => {
                 </p>
               )}
               <div className="space-y-0.5">
-                {section.items.map(renderNavItem)}
+                {section.items.filter(isNavItemAllowed).map(renderNavItem)}
               </div>
             </div>
           ))}
@@ -400,6 +499,21 @@ const AppSidebar = () => {
                   {isDark ? "Modo claro" : "Modo escuro"}
                 </TooltipContent>
               </Tooltip>
+              {onStartTour && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={onStartTour}
+                      className="p-2 rounded-lg text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
+                    >
+                      <HelpCircle className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side={collapsed ? "right" : "top"} className="text-xs">
+                    Ver tour guiado
+                  </TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button

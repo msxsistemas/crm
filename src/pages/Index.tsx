@@ -15,8 +15,12 @@ import {
   MessageCircle, CheckCircle2, Timer, Star, Shield, FileText,
   TrendingUp, AlertTriangle, Smartphone, Download, ChevronUp, ChevronDown,
   Phone, ArrowDownToLine, ArrowUpFromLine, MessageSquare, Activity,
-  Wifi,
+  Wifi, Printer, Target, DollarSign, CheckCircle, Settings2, X, GripVertical,
+  Users, Zap, Cake, Send,
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Link } from "react-router-dom";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend,
@@ -29,6 +33,159 @@ import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 
+// ── Widget Registry ──
+interface DashboardWidget {
+  id: string;
+  title: string;
+  description: string;
+  defaultVisible: boolean;
+  defaultOrder: number;
+  minHeight: string;
+}
+
+const AVAILABLE_WIDGETS: DashboardWidget[] = [
+  { id: 'stats_cards', title: 'Cards de Métricas', description: 'Total de conversas, TMA, CSAT', defaultVisible: true, defaultOrder: 0, minHeight: 'auto' },
+  { id: 'realtime_indicator', title: 'Indicador em Tempo Real', description: 'Status ao vivo das conversas', defaultVisible: true, defaultOrder: 1, minHeight: 'auto' },
+  { id: 'conversations_chart', title: 'Gráfico de Conversas', description: 'Conversas por dia', defaultVisible: true, defaultOrder: 2, minHeight: '200px' },
+  { id: 'agent_performance', title: 'Performance dos Agentes', description: 'Tabela por agente', defaultVisible: true, defaultOrder: 3, minHeight: '200px' },
+  { id: 'heatmap', title: 'Heatmap de Horários', description: 'Volume por hora/dia', defaultVisible: true, defaultOrder: 4, minHeight: '200px' },
+  { id: 'sales_goals', title: 'Metas do Mês', description: 'Progresso das metas', defaultVisible: true, defaultOrder: 5, minHeight: '150px' },
+  { id: 'top_contacts', title: 'Top Contatos', description: 'Contatos mais ativos', defaultVisible: false, defaultOrder: 6, minHeight: '150px' },
+  { id: 'recent_activity', title: 'Atividade Recente', description: 'Últimas ações no sistema', defaultVisible: false, defaultOrder: 7, minHeight: '150px' },
+  { id: 'birthdays', title: 'Aniversários', description: 'Próximos aniversários (7 dias)', defaultVisible: true, defaultOrder: 8, minHeight: '150px' },
+];
+
+interface WidgetLayout {
+  id: string;
+  visible: boolean;
+  order: number;
+}
+
+function getDefaultWidgetLayout(): WidgetLayout[] {
+  return AVAILABLE_WIDGETS.map(w => ({ id: w.id, visible: w.defaultVisible, order: w.defaultOrder }));
+}
+
+function loadWidgetLayout(): WidgetLayout[] {
+  try {
+    const saved = localStorage.getItem('dashboard_widget_layout');
+    if (saved) return JSON.parse(saved);
+  } catch { /* ignore */ }
+  return getDefaultWidgetLayout();
+}
+
+function saveWidgetLayout(layout: WidgetLayout[]) {
+  localStorage.setItem('dashboard_widget_layout', JSON.stringify(layout));
+}
+
+// ── Top Contacts Widget ──
+function useTopContacts() {
+  const [topContacts, setTopContacts] = useState<{ name: string | null; phone: string; count: number }[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    supabase
+      .from('messages')
+      .select('conversation_id')
+      .gte('created_at', thirtyDaysAgo.toISOString())
+      .limit(200)
+      .then(async ({ data: msgs }) => {
+        if (!msgs || msgs.length === 0) { setLoading(false); return; }
+        const convCount: Record<string, number> = {};
+        for (const m of msgs) {
+          convCount[m.conversation_id] = (convCount[m.conversation_id] || 0) + 1;
+        }
+        const topConvIds = Object.entries(convCount)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([id]) => id);
+        const { data: convos } = await supabase
+          .from('conversations')
+          .select('id, contact_id, contacts(name, phone)')
+          .in('id', topConvIds);
+        const result = (convos || []).map((c: any) => ({
+          name: c.contacts?.name || null,
+          phone: c.contacts?.phone || '',
+          count: convCount[c.id] || 0,
+        })).sort((a, b) => b.count - a.count);
+        setTopContacts(result);
+        setLoading(false);
+      });
+  }, []);
+
+  return { topContacts, loading };
+}
+
+// ── Recent Activity Widget ──
+function useRecentActivity() {
+  const [activities, setActivities] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    supabase
+      .from('activity_log')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(10)
+      .then(({ data }) => {
+        setActivities(data || []);
+        setLoading(false);
+      });
+  }, []);
+
+  return { activities, loading };
+}
+
+// ── Upcoming Birthdays Hook ──
+interface BirthdayContact {
+  id: string;
+  name: string | null;
+  phone: string;
+  birthday: string;
+  daysUntil: number;
+}
+
+function useUpcomingBirthdays() {
+  const [birthdays, setBirthdays] = useState<BirthdayContact[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    supabase
+      .from('contacts')
+      .select('id, name, phone, birthday')
+      .not('birthday', 'is', null)
+      .then(({ data }) => {
+        if (!data) { setLoading(false); return; }
+        const today = new Date();
+        const todayMs = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+        const upcoming: BirthdayContact[] = [];
+        for (const c of data) {
+          if (!c.birthday) continue;
+          const bday = new Date(c.birthday as string);
+          // Use this year's birthday
+          let thisYearBday = new Date(today.getFullYear(), bday.getMonth(), bday.getDate());
+          // If already passed this year, check next year
+          if (thisYearBday.getTime() < todayMs) {
+            thisYearBday = new Date(today.getFullYear() + 1, bday.getMonth(), bday.getDate());
+          }
+          const diff = Math.round((thisYearBday.getTime() - todayMs) / (1000 * 60 * 60 * 24));
+          if (diff >= 0 && diff <= 7) {
+            upcoming.push({ id: c.id, name: c.name, phone: c.phone, birthday: c.birthday as string, daysUntil: diff });
+          }
+        }
+        upcoming.sort((a, b) => a.daysUntil - b.daysUntil);
+        setBirthdays(upcoming);
+        setLoading(false);
+      });
+  }, []);
+
+  return { birthdays, loading };
+}
+
 // ── Data hook ──
 function useDashboardData() {
   const [conversations, setConversations] = useState<any[]>([]);
@@ -39,6 +196,8 @@ function useDashboardData() {
   const [profiles, setProfiles] = useState<any[]>([]);
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isLive, setIsLive] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -66,7 +225,41 @@ function useDashboardData() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    fetchData().then(() => {
+      const convChannel = supabase
+        .channel('dashboard-conversations')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' },
+          (payload) => {
+            setLastUpdate(new Date());
+            if (payload.eventType === 'INSERT') {
+              setConversations(prev => [payload.new as any, ...prev]);
+            } else if (payload.eventType === 'UPDATE') {
+              setConversations(prev => prev.map(c => c.id === payload.new.id ? { ...c, ...payload.new } : c));
+            } else if (payload.eventType === 'DELETE') {
+              setConversations(prev => prev.filter(c => c.id !== (payload.old as any).id));
+            }
+          }
+        )
+        .subscribe(() => setIsLive(true));
+
+      const msgChannel = supabase
+        .channel('dashboard-messages')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' },
+          (payload) => {
+            setLastUpdate(new Date());
+            setMessages(prev => [payload.new as any, ...prev]);
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(convChannel);
+        supabase.removeChannel(msgChannel);
+        setIsLive(false);
+      };
+    });
+  }, []);
 
   const allConnections = useMemo(() => {
     const evo = (evoConnections).map(c => ({ ...c, type: "whatsapp_whatsmeow_pro", label: c.instance_name }));
@@ -74,7 +267,7 @@ function useDashboardData() {
     return [...evo, ...zapi];
   }, [evoConnections, zapiConnections]);
 
-  return { conversations, messages, contacts, connections: allConnections, profiles, subscriptions, loading, refresh: fetchData };
+  return { conversations, messages, contacts, connections: allConnections, profiles, subscriptions, loading, refresh: fetchData, isLive, lastUpdate };
 }
 
 // ── Helpers ──
@@ -157,11 +350,75 @@ const downloadCSV = (data: Record<string, any>[], filename: string) => {
   toast.success("Relatório exportado com sucesso!");
 };
 
+// ── Mini Goals Hook ──
+function useMyGoals(userId: string | undefined) {
+  const [goals, setGoals] = useState<any[]>([]);
+  const [currentVals, setCurrentVals] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!userId) return;
+    const now = new Date();
+    const m = now.getMonth() + 1;
+    const y = now.getFullYear();
+    const start = new Date(y, m - 1, 1).toISOString();
+    const end = new Date(y, m, 0, 23, 59, 59).toISOString();
+
+    Promise.all([
+      supabase.from("sales_goals").select("*").eq("agent_id", userId).eq("period_month", m).eq("period_year", y),
+      supabase.from("conversations").select("id").eq("assigned_to", userId).gte("created_at", start).lte("created_at", end),
+      supabase.from("opportunities").select("id, value, status").eq("assigned_to", userId).gte("created_at", start).lte("created_at", end),
+      supabase.from("reviews").select("rating").eq("agent_id", userId).gte("created_at", start).lte("created_at", end),
+    ]).then(([goalsRes, convRes, oppRes, reviewRes]) => {
+      setGoals(goalsRes.data || []);
+      const convs = convRes.data || [];
+      const opps = oppRes.data || [];
+      const reviews = reviewRes.data || [];
+      const won = opps.filter((o: any) => o.status === "won");
+      const revenue = opps.reduce((s: number, o: any) => s + (o.value || 0), 0);
+      const avgNps = reviews.length > 0
+        ? reviews.reduce((s: number, r: any) => s + (r.rating || 0), 0) / reviews.length
+        : 0;
+      setCurrentVals({
+        conversations: convs.length,
+        revenue,
+        conversions: won.length,
+        nps: parseFloat(avgNps.toFixed(1)),
+      });
+    });
+  }, [userId]);
+
+  return { goals, currentVals };
+}
+
+const GOAL_TYPE_CONFIG: Record<string, { label: string; icon: React.ReactNode; formatter: (v: number) => string }> = {
+  conversations: {
+    label: "Atendimentos",
+    icon: <MessageSquare className="h-3.5 w-3.5" />,
+    formatter: (v) => String(Math.round(v)),
+  },
+  revenue: {
+    label: "Receita",
+    icon: <DollarSign className="h-3.5 w-3.5" />,
+    formatter: (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v),
+  },
+  conversions: {
+    label: "Conversões",
+    icon: <CheckCircle className="h-3.5 w-3.5" />,
+    formatter: (v) => String(Math.round(v)),
+  },
+  nps: {
+    label: "NPS",
+    icon: <Star className="h-3.5 w-3.5" />,
+    formatter: (v) => v.toFixed(1),
+  },
+};
+
 // ── Main Component ──
 const Index = () => {
   const { user } = useAuth();
   const { platformName } = usePlatformName();
-  const { conversations, messages, contacts, connections, profiles, subscriptions, loading, refresh } = useDashboardData();
+  const { conversations, messages, contacts, connections, profiles, subscriptions, loading, refresh, isLive, lastUpdate } = useDashboardData();
+  const { goals: myGoals, currentVals: myGoalCurrentVals } = useMyGoals(user?.id);
   const [datePreset, setDatePreset] = useState("7days");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -171,6 +428,84 @@ const Index = () => {
   const [reportTab, setReportTab] = useState("operator");
   const [selectedConnection, setSelectedConnection] = useState("all");
   const [selectedOperator, setSelectedOperator] = useState("self");
+  const [agentFilter, setAgentFilter] = useState("all");
+
+  // ── Widget Layout State ──
+  const [widgetLayout, setWidgetLayout] = useState<WidgetLayout[]>(loadWidgetLayout);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+
+  const visibleWidgets = useMemo(
+    () => widgetLayout.filter(w => w.visible).sort((a, b) => a.order - b.order),
+    [widgetLayout]
+  );
+
+  const updateWidgetLayout = (newLayout: WidgetLayout[]) => {
+    setWidgetLayout(newLayout);
+    saveWidgetLayout(newLayout);
+  };
+
+  const toggleWidget = (id: string) => {
+    updateWidgetLayout(widgetLayout.map(w => w.id === id ? { ...w, visible: !w.visible } : w));
+  };
+
+  const moveWidget = (id: string, dir: -1 | 1) => {
+    const sorted = [...widgetLayout].sort((a, b) => a.order - b.order);
+    const idx = sorted.findIndex(w => w.id === id);
+    if (idx < 0) return;
+    const swapIdx = idx + dir;
+    if (swapIdx < 0 || swapIdx >= sorted.length) return;
+    const newSorted = [...sorted];
+    const aOrder = newSorted[idx].order;
+    const bOrder = newSorted[swapIdx].order;
+    newSorted[idx] = { ...newSorted[idx], order: bOrder };
+    newSorted[swapIdx] = { ...newSorted[swapIdx], order: aOrder };
+    updateWidgetLayout(newSorted);
+  };
+
+  const resetWidgetLayout = () => {
+    const defaults = getDefaultWidgetLayout();
+    updateWidgetLayout(defaults);
+  };
+
+  // Extra widget data
+  const { topContacts } = useTopContacts();
+  const { activities } = useRecentActivity();
+  const { birthdays } = useUpcomingBirthdays();
+
+  // Birthday "Enviar parabéns" dialog state
+  const [bdayDialogOpen, setBdayDialogOpen] = useState(false);
+  const [bdayContact, setBdayContact] = useState<BirthdayContact | null>(null);
+  const [bdayMessage, setBdayMessage] = useState("");
+  const [bdayConnections, setBdayConnections] = useState<{ id: string; instance_name: string }[]>([]);
+  const [bdaySelectedConn, setBdaySelectedConn] = useState("");
+  const [bdaySending, setBdaySending] = useState(false);
+
+  const openBdayDialog = (c: BirthdayContact) => {
+    setBdayContact(c);
+    setBdayMessage(`🎂 Feliz aniversário, ${c.name || c.phone}! Que seu dia seja especial! Da equipe MSX CRM`);
+    setBdaySelectedConn("");
+    setBdayDialogOpen(true);
+    supabase.from("evolution_connections").select("id, instance_name").then(({ data }) => {
+      setBdayConnections((data || []) as { id: string; instance_name: string }[]);
+    });
+  };
+
+  const handleSendBdayMessage = async () => {
+    if (!bdayContact || !bdaySelectedConn || !bdayMessage.trim()) return;
+    setBdaySending(true);
+    try {
+      const { error } = await supabase.functions.invoke("evolution-api", {
+        body: { action: "send_message", instanceName: bdaySelectedConn, data: { phone: bdayContact.phone, message: bdayMessage } },
+      });
+      if (error) throw new Error(error.message);
+      toast.success("Mensagem de aniversário enviada!");
+      setBdayDialogOpen(false);
+    } catch (err: any) {
+      toast.error("Erro ao enviar mensagem: " + (err?.message || "Tente novamente"));
+    } finally {
+      setBdaySending(false);
+    }
+  };
 
   // Subscription expiry
   const nextExpiry = useMemo(() => {
@@ -209,8 +544,10 @@ const Index = () => {
   const filteredConvos = useMemo(() =>
     filterByConnection(conversations.filter(c => {
       const d = new Date(c.created_at);
-      return d >= dateStart && d <= dateEnd;
-    })), [conversations, startDate, endDate, selectedConnection]);
+      const inDate = d >= dateStart && d <= dateEnd;
+      const inAgent = agentFilter === "all" || c.assigned_to === agentFilter;
+      return inDate && inAgent;
+    })), [conversations, startDate, endDate, selectedConnection, agentFilter]);
 
   const filteredMessages = useMemo(() =>
     messages.filter(m => {
@@ -438,23 +775,46 @@ const Index = () => {
     return Object.entries(hours).map(([h, v]) => ({ name: `${h}h`, value: v }));
   }, [filteredMessages]);
 
-  // Agent ranking
+  // Agent ranking — real per-agent stats from filtered conversations
   const agentData = useMemo(() => {
-    return profiles.slice(0, 10).map((p, idx) => {
-      const resolved = Math.max(0, resolvedTickets - idx);
+    return profiles.slice(0, 10).map((p) => {
+      const agentConvos = filteredConvos.filter(c => c.assigned_to === p.id);
+      const agentResolved = agentConvos.filter(c => c.status === "closed" || c.status === "resolved").length;
+      const agentTotal = agentConvos.length;
+      const agentRate = agentTotal > 0 ? ((agentResolved / agentTotal) * 100).toFixed(1) : "0.0";
+
+      // Avg response time for this agent's conversations
+      const agentConvoIds = new Set(agentConvos.map(c => c.id));
+      const agentMsgs = filteredMessages.filter(m => agentConvoIds.has(m.conversation_id));
+      const convGroups: Record<string, { received?: string; replied?: string }> = {};
+      for (const m of agentMsgs.filter(m => !m.from_me)) {
+        if (!convGroups[m.conversation_id]) convGroups[m.conversation_id] = {};
+        if (!convGroups[m.conversation_id].received || m.created_at < convGroups[m.conversation_id].received!)
+          convGroups[m.conversation_id].received = m.created_at;
+      }
+      for (const m of agentMsgs.filter(m => m.from_me)) {
+        if (convGroups[m.conversation_id] && !convGroups[m.conversation_id].replied)
+          convGroups[m.conversation_id].replied = m.created_at;
+      }
+      const waits = Object.values(convGroups)
+        .filter(g => g.received && g.replied)
+        .map(g => (new Date(g.replied!).getTime() - new Date(g.received!).getTime()) / 1000 / 60);
+      const agentAvgResp = waits.length > 0 ? waits.reduce((a, b) => a + b, 0) / waits.length : 0;
+
       return {
         id: p.id,
         name: p.full_name || p.email || "Agente",
         initials: (p.full_name || p.email || "A").substring(0, 2).toUpperCase(),
         email: p.email || "",
-        resolved,
-        avgTime: formatMinSec(avgResponseTime + idx * 2),
+        total: agentTotal,
+        resolved: agentResolved,
+        avgTime: formatMinSec(agentAvgResp),
         rating: 0,
-        rate: totalTickets > 0 ? ((resolved / Math.max(totalTickets, 1)) * 100).toFixed(1) : "0.0",
+        rate: agentRate,
         online: p.status === "online",
       };
     });
-  }, [profiles, resolvedTickets, totalTickets, avgResponseTime]);
+  }, [profiles, filteredConvos, filteredMessages]);
 
   // Selected operator data
   const selectedProfile = useMemo(() => {
@@ -540,6 +900,108 @@ const Index = () => {
     downloadCSV(rows, `relatorio_operador_${opName.replace(/\s/g, "_")}`);
   }, [selectedProfile, operatorReportData, resolutionRate, dateStart, dateEnd, userName]);
 
+  const handleExportPDF = useCallback(() => {
+    const periodLabel = `${formatDate(dateStart)} - ${formatDate(dateEnd)}`;
+    const generatedAt = new Date().toLocaleString("pt-BR");
+
+    const channelRows = connections.map(conn => {
+      const s = getConnectionStats(conn);
+      return `<tr><td>${conn.label || conn.instance_name}</td><td>${s.created}</td><td>${s.resolved}</td><td>${s.sent}</td><td>${s.received}</td></tr>`;
+    }).join("") || `<tr><td colspan="5" style="text-align:center;color:#999;">Nenhuma conexão</td></tr>`;
+
+    const agentRows = agentData.map(a =>
+      `<tr><td>${a.name}</td><td>${a.total}</td><td>${a.resolved}</td><td>${a.rate}%</td><td>${a.avgTime}</td></tr>`
+    ).join("") || `<tr><td colspan="5" style="text-align:center;color:#999;">Sem dados</td></tr>`;
+
+    const timelineRows = timelineData.map(t =>
+      `<tr><td>${t.name}</td><td>${t.Criados}</td><td>${t.Resolvidos}</td><td>${t.Pendentes}</td></tr>`
+    ).join("") || `<tr><td colspan="4" style="text-align:center;color:#999;">Sem dados</td></tr>`;
+
+    const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>Relatório CRM MSX</title>
+<style>
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #333; margin: 20px; }
+  h1 { color: #7C3AED; font-size: 20px; margin-bottom: 4px; }
+  h2 { color: #444; font-size: 14px; margin-top: 24px; margin-bottom: 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  p.meta { color: #666; font-size: 11px; margin: 2px 0; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+  th { background: #f0f0f0; padding: 8px; text-align: left; border: 1px solid #ddd; font-size: 11px; }
+  td { padding: 8px; border: 1px solid #ddd; font-size: 11px; }
+  tr:nth-child(even) td { background: #fafafa; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0; }
+  .kpi-box { border: 1px solid #ddd; padding: 12px; border-radius: 8px; background: #fff; }
+  .kpi-label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .kpi-value { font-size: 24px; font-weight: bold; color: #7C3AED; }
+  .kpi-sub { font-size: 10px; color: #aaa; margin-top: 2px; }
+  .print-btn { display: inline-block; margin-bottom: 16px; padding: 8px 20px; background: #7C3AED; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  @media print {
+    .print-btn { display: none; }
+    body { margin: 0; }
+    h2 { page-break-before: auto; }
+    table { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<button class="print-btn" onclick="window.print()">Imprimir / Salvar PDF</button>
+<h1>Relatório de Atendimentos — CRM MSX</h1>
+<p class="meta">Período: ${periodLabel}</p>
+<p class="meta">Gerado em: ${generatedAt}</p>
+
+<h2>Indicadores Principais (KPIs)</h2>
+<div class="kpi-grid">
+  <div class="kpi-box">
+    <div class="kpi-label">Total de Tickets</div>
+    <div class="kpi-value">${totalTickets}</div>
+    <div class="kpi-sub">Criados no período</div>
+  </div>
+  <div class="kpi-box">
+    <div class="kpi-label">Tickets Resolvidos</div>
+    <div class="kpi-value">${resolvedTickets}</div>
+    <div class="kpi-sub">Fechados com sucesso</div>
+  </div>
+  <div class="kpi-box">
+    <div class="kpi-label">Taxa de Resolução</div>
+    <div class="kpi-value">${resolutionRate}%</div>
+    <div class="kpi-sub">Resolvidos vs total</div>
+  </div>
+  <div class="kpi-box">
+    <div class="kpi-label">TMA (Tempo Médio)</div>
+    <div class="kpi-value">${avgResponseTime.toFixed(0)} min</div>
+    <div class="kpi-sub">Primeira resposta</div>
+  </div>
+</div>
+
+<h2>Estatísticas por Canal</h2>
+<table>
+  <thead><tr><th>Canal</th><th>Criados</th><th>Resolvidos</th><th>Enviadas</th><th>Recebidas</th></tr></thead>
+  <tbody>${channelRows}</tbody>
+</table>
+
+<h2>Performance por Agente</h2>
+<table>
+  <thead><tr><th>Agente</th><th>Conversas</th><th>Resolvidas</th><th>Taxa</th><th>TMA</th></tr></thead>
+  <tbody>${agentRows}</tbody>
+</table>
+
+<h2>Linha do Tempo de Tickets</h2>
+<table>
+  <thead><tr><th>Período</th><th>Criados</th><th>Resolvidos</th><th>Pendentes</th></tr></thead>
+  <tbody>${timelineRows}</tbody>
+</table>
+</body>
+</html>`;
+
+    const win = window.open("", "_blank");
+    if (!win) { toast.error("Popup bloqueado. Permita popups e tente novamente."); return; }
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => { win.print(); }, 600);
+  }, [dateStart, dateEnd, totalTickets, resolvedTickets, resolutionRate, avgResponseTime, connections, agentData, timelineData]);
+
   // ── Filter actions ──
   const handleApplyFilters = useCallback(() => {
     setDatePreset(""); // clear preset since we're using custom dates
@@ -550,6 +1012,7 @@ const Index = () => {
   const handleClearFilters = useCallback(() => {
     setDatePreset("7days");
     setSelectedConnection("all");
+    setAgentFilter("all");
     setGroupBy("day");
     setComparePrevious(false);
     toast.info("Filtros limpos");
@@ -577,81 +1040,98 @@ const Index = () => {
         <div>
           <h1 className="text-xl font-bold text-primary flex items-center gap-2">
             <BarChart3 className="h-5 w-5" /> Estatísticas e Informações
+            {isLive && (
+              <span className="flex items-center gap-1.5 text-xs font-medium text-green-600 bg-green-50 dark:bg-green-950/40 border border-green-200 dark:border-green-800 px-2 py-0.5 rounded-full">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                Ao vivo
+              </span>
+            )}
           </h1>
-          <p className="text-sm text-muted-foreground">Análise completa de performance e atendimento</p>
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-muted-foreground">Análise completa de performance e atendimento</p>
+            {lastUpdate && (
+              <p className="text-xs text-muted-foreground">
+                Última atualização: {lastUpdate.toLocaleTimeString("pt-BR")}
+              </p>
+            )}
+          </div>
         </div>
-        <Button variant="outline" size="sm" className="gap-2" onClick={() => { refresh(); toast.success("Dashboard atualizado!"); }}>
-          <RefreshCw className="h-4 w-4" /> ATUALIZAR
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => setCustomizeOpen(true)}>
+            <Settings2 className="h-4 w-4" /> Personalizar Dashboard
+          </Button>
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => { refresh(); toast.success("Dashboard atualizado!"); }}>
+            <RefreshCw className="h-4 w-4" /> ATUALIZAR
+          </Button>
+        </div>
       </motion.div>
 
-      <div className="p-6 space-y-6">
-        {/* ── Real-time Status ── */}
-        <motion.div {...fadeUp(0.1)}>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-              <Clock className="h-5 w-5" /> Status dos Atendimentos em Tempo Real
-            </h2>
-            <div className="flex items-center gap-2">
-              <FloatingSelectWrapper label="Filtrar por Conexão" hasValue={true}>
-                <Select value={selectedConnection} onValueChange={setSelectedConnection}>
-                  <SelectTrigger className="w-[200px] h-9 text-xs pt-3 pb-1">
-                    <SelectValue placeholder="Todas as Conexões" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas as Conexões</SelectItem>
-                    {connections.map(conn => (
-                      <SelectItem key={conn.id} value={conn.instance_name || conn.label}>
-                        {conn.label || conn.instance_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </FloatingSelectWrapper>
+      {/* ── Dashboard Customization Drawer ── */}
+      {customizeOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setCustomizeOpen(false)} />
+          <div className="relative w-[360px] bg-card border-l border-border flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+                <Settings2 className="h-5 w-5 text-primary" /> Personalizar Dashboard
+              </h2>
+              <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setCustomizeOpen(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-2">
+              {[...widgetLayout].sort((a, b) => a.order - b.order).map((wl) => {
+                const meta = AVAILABLE_WIDGETS.find(w => w.id === wl.id);
+                if (!meta) return null;
+                const sortedLayout = [...widgetLayout].sort((a, b) => a.order - b.order);
+                const idx = sortedLayout.findIndex(w => w.id === wl.id);
+                return (
+                  <div key={wl.id} className={`flex items-center gap-3 p-3 rounded-xl border ${wl.visible ? 'bg-primary/5 border-primary/20' : 'bg-muted/30 border-border'}`}>
+                    <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground">{meta.title}</p>
+                      <p className="text-xs text-muted-foreground">{meta.description}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        disabled={idx === 0}
+                        onClick={() => moveWidget(wl.id, -1)}
+                      >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        disabled={idx === sortedLayout.length - 1}
+                        onClick={() => moveWidget(wl.id, 1)}
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </Button>
+                      <Switch
+                        checked={wl.visible}
+                        onCheckedChange={() => toggleWidget(wl.id)}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="px-5 py-4 border-t border-border">
+              <Button variant="outline" size="sm" className="w-full gap-2" onClick={resetWidgetLayout}>
+                <RefreshCw className="h-4 w-4" /> Restaurar padrão
+              </Button>
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {/* Atendendo */}
-            <div className="rounded-xl border border-green-200 bg-green-50/50 dark:bg-green-950/20 dark:border-green-900/40 px-6 py-8">
-              <div className="p-3 rounded-xl bg-green-500 shadow-sm w-fit mb-6">
-                <Phone className="h-6 w-6 text-white" />
-              </div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
-                <span className="text-xs font-bold text-muted-foreground tracking-wider uppercase">Atendendo</span>
-              </div>
-              <p className="text-5xl font-bold text-foreground mb-2">{openConvos.length - pendingConvos.length}</p>
-              <p className="text-sm text-muted-foreground">Tickets em atendimento ativo (status: open)</p>
-            </div>
-            {/* Aguardando */}
-            <div className="rounded-xl border border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-900/40 px-6 py-8">
-              <div className="p-3 rounded-xl bg-amber-500 shadow-sm w-fit mb-6">
-                <Clock className="h-6 w-6 text-white" />
-              </div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-                <span className="text-xs font-bold text-muted-foreground tracking-wider uppercase">Aguardando</span>
-              </div>
-              <p className="text-5xl font-bold text-foreground mb-2">{pendingConvos.length}</p>
-              <p className="text-sm text-muted-foreground">Tickets aguardando atendimento (status: pending)</p>
-            </div>
-            {/* Fechados */}
-            <div className="rounded-xl border border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 dark:border-blue-900/40 px-6 py-8">
-              <div className="p-3 rounded-xl bg-primary shadow-sm w-fit mb-6">
-                <CheckCircle2 className="h-6 w-6 text-white" />
-              </div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-muted-foreground/40" />
-                <span className="text-xs font-bold text-muted-foreground tracking-wider uppercase">Fechados</span>
-              </div>
-              <p className="text-5xl font-bold text-foreground mb-2">{closedConvos.length}</p>
-              <p className="text-sm text-muted-foreground">Tickets finalizados (status: closed)</p>
-            </div>
-          </div>
-        </motion.div>
+        </div>
+      )}
 
-        {/* ── Advanced Filters ── */}
-        <motion.div {...fadeUp(0.2)}>
+      <div className="p-6 space-y-6">
+        {/* ── Advanced Filters (always visible) ── */}
+        <motion.div {...fadeUp(0.05)}>
         <Card className="p-5">
           <button
             onClick={() => setFiltersOpen(!filtersOpen)}
@@ -732,8 +1212,91 @@ const Index = () => {
         </Card>
         </motion.div>
 
-        {/* ── KPIs ── */}
-        <motion.div {...fadeUp(0.3)}>
+        {/* ── Widget-based content ── */}
+        {visibleWidgets.map((wl, wIdx) => {
+
+        if (wl.id === 'realtime_indicator') return (
+        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+              <Clock className="h-5 w-5" /> Status dos Atendimentos em Tempo Real
+            </h2>
+            <div className="flex items-center gap-2">
+              <FloatingSelectWrapper label="Filtrar por Agente" hasValue={true}>
+                <Select value={agentFilter} onValueChange={setAgentFilter}>
+                  <SelectTrigger className="w-[200px] h-9 text-xs pt-3 pb-1">
+                    <SelectValue placeholder="Todos os agentes" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os agentes</SelectItem>
+                    {profiles.map(p => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.full_name || p.email || "Agente"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FloatingSelectWrapper>
+              <FloatingSelectWrapper label="Filtrar por Conexão" hasValue={true}>
+                <Select value={selectedConnection} onValueChange={setSelectedConnection}>
+                  <SelectTrigger className="w-[200px] h-9 text-xs pt-3 pb-1">
+                    <SelectValue placeholder="Todas as Conexões" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as Conexões</SelectItem>
+                    {connections.map(conn => (
+                      <SelectItem key={conn.id} value={conn.instance_name || conn.label}>
+                        {conn.label || conn.instance_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </FloatingSelectWrapper>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {/* Atendendo */}
+            <div className="rounded-xl border border-green-200 bg-green-50/50 dark:bg-green-950/20 dark:border-green-900/40 px-6 py-8">
+              <div className="p-3 rounded-xl bg-green-500 shadow-sm w-fit mb-6">
+                <Phone className="h-6 w-6 text-white" />
+              </div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
+                <span className="text-xs font-bold text-muted-foreground tracking-wider uppercase">Atendendo</span>
+              </div>
+              <p className="text-5xl font-bold text-foreground mb-2">{openConvos.length - pendingConvos.length}</p>
+              <p className="text-sm text-muted-foreground">Tickets em atendimento ativo (status: open)</p>
+            </div>
+            {/* Aguardando */}
+            <div className="rounded-xl border border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-900/40 px-6 py-8">
+              <div className="p-3 rounded-xl bg-amber-500 shadow-sm w-fit mb-6">
+                <Clock className="h-6 w-6 text-white" />
+              </div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                <span className="text-xs font-bold text-muted-foreground tracking-wider uppercase">Aguardando</span>
+              </div>
+              <p className="text-5xl font-bold text-foreground mb-2">{pendingConvos.length}</p>
+              <p className="text-sm text-muted-foreground">Tickets aguardando atendimento (status: pending)</p>
+            </div>
+            {/* Fechados */}
+            <div className="rounded-xl border border-blue-200 bg-blue-50/50 dark:bg-blue-950/20 dark:border-blue-900/40 px-6 py-8">
+              <div className="p-3 rounded-xl bg-primary shadow-sm w-fit mb-6">
+                <CheckCircle2 className="h-6 w-6 text-white" />
+              </div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-muted-foreground/40" />
+                <span className="text-xs font-bold text-muted-foreground tracking-wider uppercase">Fechados</span>
+              </div>
+              <p className="text-5xl font-bold text-foreground mb-2">{closedConvos.length}</p>
+              <p className="text-sm text-muted-foreground">Tickets finalizados (status: closed)</p>
+            </div>
+          </div>
+        </motion.div>
+        ); // end realtime_indicator
+
+        if (wl.id === 'stats_cards') return (
+        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)}>
           <h2 className="text-lg font-semibold text-foreground flex items-center gap-2 mb-4">
             <Activity className="h-5 w-5" /> Indicadores Chave de Performance
           </h2>
@@ -790,9 +1353,10 @@ const Index = () => {
             </div>
           </div>
         </motion.div>
+        ); // end stats_cards
 
-        {/* ── Linha do Tempo de Tickets ── */}
-        <motion.div {...fadeUp(0.4)} className="rounded-xl border bg-card p-6">
+        if (wl.id === 'conversations_chart') return (
+        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)} className="rounded-xl border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-foreground">Linha do Tempo de Tickets</h3>
             <Badge variant="outline" className="text-[10px]">Agrupado por: {groupBy === "day" ? "Dia" : groupBy === "week" ? "Semana" : "Mês"}</Badge>
@@ -851,35 +1415,74 @@ const Index = () => {
             </AreaChart>
           </ResponsiveContainer>
         </motion.div>
+        ); // end conversations_chart
 
-        {/* ── Novos Contatos por Dia ── */}
-        <motion.div {...fadeUp(0.5)} className="rounded-xl border bg-card p-6">
-          <div className="flex items-center justify-between mb-5">
-            <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
-              <Activity className="h-4 w-4 text-primary" /> Novos Contatos por Dia
-            </h3>
-          </div>
-          <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={contactsData}>
-              <defs>
-                <linearGradient id="gradContatos" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(217 91% 60%)" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="hsl(217 91% 60%)" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="4 4" stroke="hsl(var(--border) / 0.15)" vertical={false} />
-              <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip />} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Area type="natural" dataKey="Novos Contatos" stroke="hsl(217 91% 60%)" fill="hsl(217 91% 60% / 0.45)" strokeWidth={2} dot={false} activeDot={{ r: 6, fill: "hsl(217 91% 60%)", strokeWidth: 2, stroke: "#fff" }} />
-              <Area type="natural" dataKey="Total Acumulado" stroke="hsl(170 70% 50%)" fill="hsl(170 70% 50% / 0.45)" strokeWidth={2} dot={false} activeDot={{ r: 6, fill: "hsl(170 70% 50%)", strokeWidth: 2, stroke: "#fff" }} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </motion.div>
+        if (wl.id === 'heatmap') {
+          const heatmapData = (() => {
+            const grid: number[][] = Array.from({ length: 7 }, () => new Array(24).fill(0));
+            filteredMessages.forEach(m => {
+              const d = new Date(m.created_at);
+              const day = d.getDay();
+              const hour = d.getHours();
+              const mondayFirst = (day + 6) % 7;
+              grid[mondayFirst][hour]++;
+            });
+            return grid;
+          })();
+          const heatmapMax = Math.max(1, ...heatmapData.flat());
+          const dayLabels = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+          const getCellClass = (count: number) => {
+            if (count === 0) return "bg-muted";
+            const pct = count / heatmapMax;
+            if (pct <= 0.25) return "bg-primary/20";
+            if (pct <= 0.50) return "bg-primary/50";
+            if (pct <= 0.75) return "bg-primary/75";
+            return "bg-primary";
+          };
+          return (
+            <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)}>
+              <Card className="p-6">
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-primary" /> Heatmap de Atividade
+                  </h3>
+                </div>
+                <p className="text-xs text-muted-foreground mb-4">Mensagens por hora e dia da semana</p>
+                <div className="flex gap-1 mb-1 ml-10">
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <div key={h} className="w-5 text-[9px] text-center text-muted-foreground shrink-0">
+                      {h % 3 === 0 ? `${h}` : ""}
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-1">
+                  {dayLabels.map((day, di) => (
+                    <div key={day} className="flex items-center gap-1">
+                      <span className="w-9 text-[10px] text-right text-muted-foreground shrink-0 pr-1">{day}</span>
+                      {heatmapData[di].map((count, h) => (
+                        <div
+                          key={h}
+                          className={`w-5 h-5 rounded-sm shrink-0 cursor-default transition-opacity hover:opacity-80 ${getCellClass(count)}`}
+                          title={`${day} ${h}h: ${count} mensagem${count !== 1 ? "s" : ""}`}
+                        />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2 mt-4">
+                  <span className="text-[10px] text-muted-foreground">Baixo</span>
+                  {["bg-muted", "bg-primary/20", "bg-primary/50", "bg-primary/75", "bg-primary"].map((cls, i) => (
+                    <div key={i} className={`w-5 h-5 rounded-sm ${cls}`} />
+                  ))}
+                  <span className="text-[10px] text-muted-foreground">Alto</span>
+                </div>
+              </Card>
+            </motion.div>
+          );
+        }
 
-        {/* ── Alerts & Agent Ranking side by side ── */}
-        <motion.div {...fadeUp(0.6)} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        if (wl.id === 'agent_performance') return (
+        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Alerts */}
           <div className="rounded-xl border bg-card p-6">
             <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-4">
@@ -933,8 +1536,9 @@ const Index = () => {
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="text-[10px] font-bold uppercase tracking-wider">#</TableHead>
                     <TableHead className="text-[10px] font-bold uppercase tracking-wider">Agente</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-wider">Resolvidos</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-wider">Tempo</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider">Conversas</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider">Resolvidas</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider">TMA</TableHead>
                     <TableHead className="text-[10px] font-bold uppercase tracking-wider">Taxa</TableHead>
                     <TableHead className="text-[10px] font-bold uppercase tracking-wider">Status</TableHead>
                   </TableRow>
@@ -942,46 +1546,193 @@ const Index = () => {
                 <TableBody>
                   {agentData.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-muted-foreground text-sm py-10">Sem dados de agentes</TableCell>
+                      <TableCell colSpan={7} className="text-center text-muted-foreground text-sm py-10">Sem dados de agentes</TableCell>
                     </TableRow>
-                  ) : (
-                    agentData.map((agent, i) => (
-                      <TableRow key={i} className="hover:bg-muted/30">
-                        <TableCell className="text-xs font-bold text-muted-foreground">{i + 1}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2.5">
-                            <Avatar className="h-8 w-8">
-                              <AvatarFallback className="text-[10px] bg-primary/10 text-primary font-bold">{agent.initials}</AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <span className="text-xs font-semibold text-foreground block">{agent.name}</span>
-                              <span className="text-[10px] text-muted-foreground">{agent.email}</span>
+                  ) : (() => {
+                    const maxRate = Math.max(...agentData.map(a => parseFloat(a.rate)));
+                    return agentData.map((agent, i) => {
+                      const isTop = parseFloat(agent.rate) === maxRate && maxRate > 0;
+                      return (
+                        <TableRow key={i} className={isTop ? "bg-green-50/60 dark:bg-green-950/20 hover:bg-green-100/40" : "hover:bg-muted/30"}>
+                          <TableCell className="text-xs font-bold text-muted-foreground">{i + 1}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2.5">
+                              <Avatar className="h-8 w-8">
+                                <AvatarFallback className={`text-[10px] font-bold ${isTop ? "bg-green-100 text-green-700" : "bg-primary/10 text-primary"}`}>{agent.initials}</AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <span className="text-xs font-semibold text-foreground block flex items-center gap-1">
+                                  {agent.name}
+                                  {isTop && <Star className="h-3 w-3 text-amber-400 inline-block ml-1" />}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground">{agent.email}</span>
+                              </div>
                             </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-xs font-bold text-green-600">{agent.resolved}</span>
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{agent.avgTime}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="text-[10px] font-semibold rounded-full">{agent.rate}%</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1.5">
-                            <span className={`w-2.5 h-2.5 rounded-full ${agent.online ? "bg-green-500" : "bg-muted-foreground/40"}`} />
-                            <span className="text-[10px] text-muted-foreground">{agent.online ? "Online" : "Offline"}</span>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
+                          </TableCell>
+                          <TableCell className="text-xs text-foreground font-medium">{agent.total}</TableCell>
+                          <TableCell>
+                            <span className="text-xs font-bold text-green-600">{agent.resolved}</span>
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{agent.avgTime}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={`text-[10px] font-semibold rounded-full ${isTop ? "border-green-400 text-green-700 bg-green-50" : ""}`}>{agent.rate}%</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`w-2.5 h-2.5 rounded-full ${agent.online ? "bg-green-500" : "bg-muted-foreground/40"}`} />
+                              <span className="text-[10px] text-muted-foreground">{agent.online ? "Online" : "Offline"}</span>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    });
+                  })()}
                 </TableBody>
               </Table>
             </div>
           </div>
         </motion.div>
+        ); // end agent_performance
 
-        {/* ── Channel Stats ── */}
+        // Channel Stats & Per-Agent Table are always visible (not in widget registry)
+        if (wl.id === 'sales_goals') return (
+        <>{myGoals.length > 0 && (
+        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)} className="rounded-xl border bg-card p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+              <Target className="h-4 w-4 text-primary" /> Metas do Mês
+            </h3>
+            <Link to="/metas" className="text-xs text-primary hover:underline flex items-center gap-1">
+              <TrendingUp className="h-3.5 w-3.5" /> Ver todas
+            </Link>
+          </div>
+          <div className="space-y-3">
+            {myGoals.slice(0, 4).map((goal: any) => {
+              const cfg = GOAL_TYPE_CONFIG[goal.goal_type];
+              if (!cfg) return null;
+              const cur = myGoalCurrentVals[goal.goal_type] ?? 0;
+              const pct = goal.target_value > 0 ? Math.min(100, (cur / goal.target_value) * 100) : 0;
+              const barColor = pct >= 100 ? "bg-green-500" : pct >= 70 ? "bg-blue-500" : pct >= 40 ? "bg-yellow-500" : "bg-red-500";
+              return (
+                <div key={goal.id}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium">
+                      {cfg.icon} {cfg.label}
+                    </span>
+                    <span className="text-xs font-semibold text-foreground">
+                      {cfg.formatter(cur)} / {cfg.formatter(goal.target_value)} — <span className={pct >= 100 ? "text-green-600" : "text-primary"}>{pct.toFixed(0)}%</span>
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </motion.div>
+        )}</>
+        ); // end sales_goals
+
+        if (wl.id === 'top_contacts') return (
+        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)} className="rounded-xl border bg-card p-6">
+          <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-4">
+            <Users className="h-4 w-4 text-primary" /> Top Contatos (últimos 30 dias)
+          </h3>
+          {topContacts.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">Nenhum dado disponível</p>
+          ) : (
+            <div className="space-y-2">
+              {topContacts.map((c, i) => (
+                <div key={i} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/30">
+                  <span className="text-lg font-bold text-muted-foreground w-6 text-center">{i + 1}</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-foreground">{c.name || c.phone}</p>
+                    <p className="text-xs text-muted-foreground">{c.phone}</p>
+                  </div>
+                  <Badge variant="outline" className="text-xs">{c.count} msgs</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </motion.div>
+        ); // end top_contacts
+
+        if (wl.id === 'recent_activity') return (
+        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)} className="rounded-xl border bg-card p-6">
+          <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-4">
+            <Zap className="h-4 w-4 text-primary" /> Atividade Recente
+          </h3>
+          {activities.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">Nenhuma atividade registrada</p>
+          ) : (
+            <div className="space-y-2">
+              {activities.map((a: any, i: number) => (
+                <div key={i} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/30">
+                  <div className="w-2 h-2 rounded-full bg-primary mt-1.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-foreground">{a.description || a.action || 'Ação registrada'}</p>
+                    <p className="text-xs text-muted-foreground">{new Date(a.created_at).toLocaleString('pt-BR')}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </motion.div>
+        ); // end recent_activity
+
+        if (wl.id === 'birthdays') return (
+        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)} className="rounded-xl border bg-card p-6">
+          <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-4">
+            <Cake className="h-4 w-4 text-pink-500" />
+            <span>🎂 Aniversários (próximos 7 dias)</span>
+            {birthdays.length > 0 && (
+              <Badge className="bg-pink-100 text-pink-700 border-pink-200 text-xs ml-1">{birthdays.length}</Badge>
+            )}
+          </h3>
+          {birthdays.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">Nenhum aniversário nos próximos 7 dias</p>
+          ) : (
+            <div className="space-y-3">
+              {birthdays.map((c) => {
+                const initials = (c.name || c.phone).substring(0, 2).toUpperCase();
+                const bday = new Date(c.birthday);
+                const formatted = bday.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+                return (
+                  <div key={c.id} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-muted/30">
+                    <div className="h-10 w-10 rounded-full bg-pink-100 flex items-center justify-center text-sm font-bold text-pink-600 shrink-0">
+                      {initials}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{c.name || c.phone}</p>
+                      <p className="text-xs text-muted-foreground">{c.phone} · {formatted}</p>
+                    </div>
+                    {c.daysUntil === 0 ? (
+                      <Badge className="bg-green-100 text-green-700 border-green-200 text-xs shrink-0">Hoje!</Badge>
+                    ) : (
+                      <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs shrink-0">Em {c.daysUntil} dia{c.daysUntil !== 1 ? 's' : ''}</Badge>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs gap-1.5 shrink-0 border-pink-300 text-pink-600 hover:bg-pink-50"
+                      onClick={() => openBdayDialog(c)}
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      Parabéns
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </motion.div>
+        ); // end birthdays
+
+        return null; // unknown widget
+        })} {/* end visibleWidgets.map */}
+
+        {/* ── Channel Stats (always visible) ── */}
         <motion.div {...fadeUp(0.7)}>
           <h2 className="text-lg font-semibold text-foreground flex items-center gap-2 mb-4">
             <Wifi className="h-5 w-5" /> Estatísticas por Canal
@@ -1059,6 +1810,75 @@ const Index = () => {
                 );
               })
             )}
+          </div>
+        </motion.div>
+
+        {/* ── Per-Agent Performance Table ── */}
+        <motion.div {...fadeUp(0.75)} className="rounded-xl border bg-card p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+              <Shield className="h-4 w-4 text-primary" /> Performance por Agente
+            </h3>
+            {agentFilter !== "all" && (
+              <Badge variant="outline" className="text-xs">
+                Filtrado: {profiles.find(p => p.id === agentFilter)?.full_name || "Agente"}
+              </Badge>
+            )}
+          </div>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-wider">Agente</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-wider">Conversas</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-wider">Resolvidas</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-wider">Taxa</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-wider">TMA</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {agentData.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-muted-foreground text-sm py-8">
+                      Nenhum agente encontrado
+                    </TableCell>
+                  </TableRow>
+                ) : (() => {
+                  const maxRate = Math.max(...agentData.map(a => parseFloat(a.rate)));
+                  const displayAgents = agentFilter === "all"
+                    ? agentData
+                    : agentData.filter(a => a.id === agentFilter);
+                  return displayAgents.map((agent) => {
+                    const isTop = parseFloat(agent.rate) === maxRate && maxRate > 0 && agentFilter === "all";
+                    return (
+                      <TableRow key={agent.id} className={isTop ? "bg-green-50/60 dark:bg-green-950/20 hover:bg-green-100/40" : "hover:bg-muted/30"}>
+                        <TableCell>
+                          <div className="flex items-center gap-2.5">
+                            <Avatar className="h-7 w-7">
+                              <AvatarFallback className={`text-[10px] font-bold ${isTop ? "bg-green-100 text-green-700" : "bg-primary/10 text-primary"}`}>{agent.initials}</AvatarFallback>
+                            </Avatar>
+                            <span className="text-xs font-semibold text-foreground">
+                              {agent.name}
+                              {isTop && <Star className="h-3 w-3 text-amber-400 inline-block ml-1" />}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs font-medium text-foreground">{agent.total}</TableCell>
+                        <TableCell>
+                          <span className="text-xs font-bold text-green-600">{agent.resolved}</span>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={`text-[10px] font-semibold rounded-full ${isTop ? "border-green-400 text-green-700 bg-green-50 dark:bg-green-950/30" : ""}`}>
+                            {agent.rate}%
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{agent.avgTime}</TableCell>
+                      </TableRow>
+                    );
+                  });
+                })()}
+              </TableBody>
+            </Table>
           </div>
         </motion.div>
 
@@ -1182,14 +2002,67 @@ const Index = () => {
           </Tabs>
         </motion.div>
 
+        {/* Metas now handled by widget system */}
+
         {/* ── Export ── */}
         <motion.div {...fadeUp(0.9)} className="flex items-center justify-between">
-          <Button className="gap-2 rounded-lg" size="sm" onClick={handleExportDashboard}>
-            <Download className="h-4 w-4" /> Exportar para Excel
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button className="gap-2 rounded-lg" size="sm" onClick={handleExportDashboard}>
+              <Download className="h-4 w-4" /> Exportar para Excel
+            </Button>
+            <Button variant="outline" className="gap-2 rounded-lg" size="sm" onClick={handleExportPDF}>
+              <Printer className="h-4 w-4" /> Exportar PDF
+            </Button>
+          </div>
           <p className="text-xs text-muted-foreground">{updatedAt}</p>
         </motion.div>
       </div>
+
+      {/* ── Birthday "Enviar Parabéns" Dialog ── */}
+      <Dialog open={bdayDialogOpen} onOpenChange={setBdayDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <span>🎂</span> Enviar parabéns para {bdayContact?.name || bdayContact?.phone}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Mensagem</label>
+              <Textarea
+                value={bdayMessage}
+                onChange={(e) => setBdayMessage(e.target.value)}
+                rows={4}
+                className="text-sm resize-none"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Conexão WhatsApp</label>
+              <Select value={bdaySelectedConn} onValueChange={setBdaySelectedConn}>
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue placeholder="Selecione a conexão..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {bdayConnections.map(c => (
+                    <SelectItem key={c.id} value={c.instance_name}>{c.instance_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setBdayDialogOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={handleSendBdayMessage}
+              disabled={bdaySending || !bdaySelectedConn || !bdayMessage.trim()}
+              className="gap-2 bg-pink-600 hover:bg-pink-700 text-white"
+            >
+              {bdaySending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Enviar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

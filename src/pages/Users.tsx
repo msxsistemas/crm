@@ -1,16 +1,38 @@
 import { useState, useEffect } from "react";
 import {
   Search, Users as UsersIcon,
-  Pencil, Trash2, LayoutGrid, List, Mail, Settings2, ShieldCheck, AlertTriangle, RefreshCw
+  Pencil, Trash2, LayoutGrid, List, Mail, Settings2, ShieldCheck, AlertTriangle, RefreshCw,
+  KeyRound
 } from "lucide-react";
+import AgentStatus from "@/components/AgentStatus";
+import { isAgentInShift, type AgentSchedule } from "@/pages/AgentSchedules";
+
+const MODULES = [
+  { key: "inbox", label: "Caixa de Entrada" },
+  { key: "contacts", label: "Contatos" },
+  { key: "tasks", label: "Tarefas" },
+  { key: "campaigns", label: "Campanhas" },
+  { key: "chatbot", label: "Chatbot" },
+  { key: "reports", label: "Relatórios" },
+  { key: "schedules", label: "Agendamentos" },
+  { key: "funnel", label: "Funil de Vendas" },
+  { key: "users", label: "Usuários" },
+  { key: "settings", label: "Configurações" },
+];
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel,
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
+} from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
@@ -20,6 +42,54 @@ import { useUserRole } from "@/hooks/useUserRole";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import UserFormDialog from "@/components/users/UserFormDialog";
+import { AgentPermissions, DEFAULT_PERMISSIONS } from "@/hooks/usePermissions";
+
+// ─── Page permission definitions ───
+const PAGE_PERMISSIONS: { key: keyof AgentPermissions["pages"]; label: string; description: string }[] = [
+  { key: "inbox", label: "Caixa de Entrada", description: "Visualizar e responder conversas" },
+  { key: "contacts", label: "Contatos", description: "Gerenciar contatos e segmentos" },
+  { key: "kanban", label: "Kanban", description: "Visualizar e mover cards no Kanban" },
+  { key: "campaigns", label: "Campanhas", description: "Criar e enviar campanhas em massa" },
+  { key: "reports", label: "Relatórios", description: "Acessar relatórios e avaliações" },
+  { key: "financial", label: "Financeiro", description: "Acessar propostas e metas de vendas" },
+  { key: "supervisor", label: "Supervisor", description: "Acessar central do supervisor" },
+  { key: "settings", label: "Configurações", description: "Acessar configurações do sistema" },
+  { key: "bots", label: "Bots & Automação", description: "Gerenciar chatbots e fluxos" },
+];
+
+const ACTION_PERMISSIONS: { key: keyof AgentPermissions["actions"]; label: string; description: string }[] = [
+  { key: "export_contacts", label: "Exportar Contatos", description: "Exportar lista de contatos como CSV" },
+  { key: "delete_contacts", label: "Excluir Contatos", description: "Excluir contatos do sistema" },
+  { key: "send_campaigns", label: "Enviar Campanhas", description: "Disparar campanhas para contatos" },
+  { key: "view_all_conversations", label: "Ver Todas as Conversas", description: "Se desativado, vê apenas as conversas atribuídas a si" },
+  { key: "transfer_conversations", label: "Transferir Conversas", description: "Transferir conversas para outros agentes" },
+  { key: "close_conversations", label: "Encerrar Conversas", description: "Encerrar conversas abertas" },
+  { key: "manage_tags", label: "Gerenciar Tags", description: "Criar, editar e excluir tags" },
+];
+
+const PRESETS: { label: string; value: AgentPermissions }[] = [
+  {
+    label: "Agente Básico",
+    value: {
+      pages: { inbox: true, contacts: true, campaigns: false, reports: false, financial: false, settings: false, supervisor: false, kanban: true, bots: false },
+      actions: { export_contacts: false, delete_contacts: false, send_campaigns: false, view_all_conversations: false, transfer_conversations: true, close_conversations: true, manage_tags: false },
+    },
+  },
+  {
+    label: "Agente Completo",
+    value: {
+      pages: { inbox: true, contacts: true, campaigns: true, reports: true, financial: false, settings: false, supervisor: false, kanban: true, bots: false },
+      actions: { export_contacts: true, delete_contacts: false, send_campaigns: true, view_all_conversations: true, transfer_conversations: true, close_conversations: true, manage_tags: true },
+    },
+  },
+  {
+    label: "Supervisor",
+    value: {
+      pages: { inbox: true, contacts: true, campaigns: true, reports: true, financial: true, settings: false, supervisor: true, kanban: true, bots: true },
+      actions: { export_contacts: true, delete_contacts: false, send_campaigns: true, view_all_conversations: true, transfer_conversations: true, close_conversations: true, manage_tags: true },
+    },
+  },
+];
 
 interface UserProfile {
   id: string;
@@ -28,6 +98,8 @@ interface UserProfile {
   email: string | null;
   role: string;
   status: string;
+  permissions: Record<string, boolean>;
+  granularPermissions: AgentPermissions;
 }
 
 const getInitials = (name: string | null) => {
@@ -63,6 +135,66 @@ const UsersPage = () => {
   const [transferTargetId, setTransferTargetId] = useState("");
   const [transferring, setTransferring] = useState(false);
 
+  const [agentSchedules, setAgentSchedules] = useState<Record<string, AgentSchedule>>({});
+
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [permissionsUser, setPermissionsUser] = useState<UserProfile | null>(null);
+  const [editingPerms, setEditingPerms] = useState<AgentPermissions>(DEFAULT_PERMISSIONS);
+  const [savingPerms, setSavingPerms] = useState(false);
+  const [presetLabel, setPresetLabel] = useState<string>("Personalizado");
+
+  const openPermissions = (u: UserProfile) => {
+    setPermissionsUser(u);
+    setEditingPerms(u.granularPermissions);
+    const matchedPreset = PRESETS.find(p =>
+      JSON.stringify(p.value) === JSON.stringify(u.granularPermissions)
+    );
+    setPresetLabel(matchedPreset?.label ?? "Personalizado");
+    setPermissionsOpen(true);
+  };
+
+  const applyPreset = (preset: typeof PRESETS[0]) => {
+    setEditingPerms(preset.value);
+    setPresetLabel(preset.label);
+  };
+
+  const togglePage = (key: keyof AgentPermissions["pages"]) => {
+    setEditingPerms(prev => ({
+      ...prev,
+      pages: { ...prev.pages, [key]: !prev.pages[key] },
+    }));
+    setPresetLabel("Personalizado");
+  };
+
+  const toggleAction = (key: keyof AgentPermissions["actions"]) => {
+    setEditingPerms(prev => ({
+      ...prev,
+      actions: { ...prev.actions, [key]: !prev.actions[key] },
+    }));
+    setPresetLabel("Personalizado");
+  };
+
+  const handleSavePermissions = async () => {
+    if (!permissionsUser) return;
+    setSavingPerms(true);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ permissions: editingPerms } as any)
+      .eq("id", permissionsUser.id);
+    setSavingPerms(false);
+    if (error) {
+      toast.error("Erro ao salvar permissões");
+    } else {
+      toast.success(`Permissões de ${permissionsUser.full_name || "usuário"} atualizadas!`);
+      setPermissionsOpen(false);
+      setUsers(prev => prev.map(u =>
+        u.id === permissionsUser.id
+          ? { ...u, granularPermissions: editingPerms }
+          : u
+      ));
+    }
+  };
+
   useEffect(() => { loadData(); }, [session]);
 
   // Realtime: atualiza status quando perfil muda
@@ -93,7 +225,7 @@ const UsersPage = () => {
 
     try {
       const [p, r, emailRes] = await Promise.all([
-        supabase.from("profiles").select("id, full_name, avatar_url, status, email"),
+        supabase.from("profiles").select("id, full_name, avatar_url, status, email, permissions"),
         supabase.from("user_roles").select("user_id, role"),
         supabase.functions.invoke("manage-users", {
           method: "GET",
@@ -113,14 +245,41 @@ const UsersPage = () => {
         }
       }
 
-      setUsers(profiles.map((prof) => ({
-        id: prof.id,
-        full_name: prof.full_name,
-        avatar_url: prof.avatar_url,
-        email: emailMap.get(prof.id) || prof.email || null,
-        role: userRoles.find(ur => ur.user_id === prof.id)?.role || "user",
-        status: prof.status || "offline",
-      })));
+      // Load agent schedules
+      const schedRes = await supabase.from("agent_schedules" as any).select("*");
+      if (schedRes.data) {
+        const map: Record<string, AgentSchedule> = {};
+        for (const s of schedRes.data as AgentSchedule[]) {
+          map[s.agent_id] = s;
+        }
+        setAgentSchedules(map);
+      }
+
+      setUsers(profiles.map((prof) => {
+        const rawPerms = prof.permissions || {};
+        // Legacy flat permissions (boolean per module key)
+        const legacyPerms: Record<string, boolean> =
+          (rawPerms && Object.keys(rawPerms).length > 0 && typeof Object.values(rawPerms)[0] === "boolean")
+            ? rawPerms as Record<string, boolean>
+            : Object.fromEntries(MODULES.map(m => [m.key, true]));
+
+        // Granular permissions (pages/actions structure)
+        const granular: AgentPermissions =
+          (rawPerms && "pages" in rawPerms && "actions" in rawPerms)
+            ? rawPerms as unknown as AgentPermissions
+            : DEFAULT_PERMISSIONS;
+
+        return {
+          id: prof.id,
+          full_name: prof.full_name,
+          avatar_url: prof.avatar_url,
+          email: emailMap.get(prof.id) || prof.email || null,
+          role: userRoles.find(ur => ur.user_id === prof.id)?.role || "user",
+          status: prof.status || "offline",
+          permissions: legacyPerms,
+          granularPermissions: granular,
+        };
+      }));
     } catch (err: any) {
       console.error("Error loading users:", err);
       setLoadError(err.message || "Erro ao carregar usuários. Tente novamente.");
@@ -144,15 +303,12 @@ const UsersPage = () => {
     if (!transferUser || !transferTargetId || !session) return;
     setTransferring(true);
     try {
-      // Get all open conversations (in a real scenario, filter by assigned user)
-      const { data: convos, error: fetchErr } = await supabase
+      const { error } = await supabase
         .from("conversations")
-        .select("id")
-        .eq("status", "open");
-      if (fetchErr) throw fetchErr;
-
-      // For now, we mark them as transferred by keeping them open
-      // In production, you'd have an assigned_to column to reassign
+        .update({ assigned_to: transferTargetId } as any)
+        .eq("assigned_to", transferUser.id)
+        .in("status", ["open", "attending"]);
+      if (error) throw error;
       toast.success(`Tickets de ${transferUser.full_name || "usuário"} transferidos com sucesso!`);
       setTransferOpen(false);
       setTransferUser(null);
@@ -168,11 +324,11 @@ const UsersPage = () => {
     if (!closeTicketsUser || !session) return;
     setClosingTickets(true);
     try {
-      // Find all open conversations assigned to this user and close them
       const { error } = await supabase
         .from("conversations")
         .update({ status: "closed" } as any)
-        .eq("status", "open");
+        .eq("assigned_to", closeTicketsUser.id)
+        .in("status", ["open", "attending"]);
       if (error) throw error;
       toast.success(`Tickets de ${closeTicketsUser.full_name || "usuário"} encerrados com sucesso!`);
       setCloseTicketsOpen(false);
@@ -288,17 +444,56 @@ const UsersPage = () => {
     );
   };
 
+  const PermissionsBadges = ({ u }: { u: UserProfile }) => {
+    const disabled = MODULES.filter(m => !(u.permissions[m.key] ?? true));
+    if (disabled.length === 0) return null;
+    return (
+      <div className="mt-2 flex flex-wrap gap-1">
+        {MODULES.map(m => {
+          const enabled = u.permissions[m.key] ?? true;
+          return (
+            <span
+              key={m.key}
+              title={`${m.label}: ${enabled ? "Habilitado" : "Desabilitado"}`}
+              className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${enabled ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600 line-through opacity-70"}`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${enabled ? "bg-green-500" : "bg-red-400"}`} />
+              {m.label}
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
+
   const UserCardGrid = ({ u }: { u: UserProfile }) => (
     <Card className="rounded-xl border border-border bg-card overflow-hidden">
       <div className="p-5 pb-4">
         <div className="flex items-center gap-3 mb-2">
-          <div className="h-12 w-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-base shrink-0">
-            {getInitials(u.full_name)}
+          <div className="relative shrink-0">
+            <div className="h-12 w-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-base">
+              {getInitials(u.full_name)}
+            </div>
+            <span className="absolute bottom-0 right-0">
+              <AgentStatus
+                status={u.status === "online" ? "online" : u.status === "ausente" || u.status === "away" ? "away" : "offline"}
+                size="sm"
+                className="ring-2 ring-card rounded-full"
+              />
+            </span>
           </div>
           <p className="font-bold text-foreground text-sm">{u.full_name || "Sem nome"}</p>
         </div>
         <div className="mb-1"><RoleSelector u={u} /></div>
-        <div className="mb-3">{getStatusBadges(u.status)}</div>
+        <div className="mb-1 flex items-center gap-1.5 flex-wrap">
+          {getStatusBadges(u.status)}
+          {agentSchedules[u.id] && (
+            isAgentInShift(agentSchedules[u.id])
+              ? <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700"><span className="h-1.5 w-1.5 rounded-full bg-green-500" />Em turno</span>
+              : <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />Fora do turno</span>
+          )}
+        </div>
+        <div className="mb-3"><PermissionsBadges u={u} /></div>
         <div className="space-y-0.5 text-xs text-muted-foreground mb-4">
           <p className="flex items-center gap-1.5"><Settings2 className="h-3 w-3" /> ID: {u.id.substring(0, 8)}</p>
           <p className="flex items-center gap-1.5"><Mail className="h-3 w-3" /> {u.email || "—"}</p>
@@ -312,6 +507,11 @@ const UsersPage = () => {
           </Button>
         </div>
         <div className="flex items-center justify-center gap-3">
+          {isAdmin && (
+            <button className="text-muted-foreground hover:text-blue-600 transition-colors" onClick={() => openPermissions(u)} title="Permissões">
+              <KeyRound className="h-4 w-4" />
+            </button>
+          )}
           <button className="text-muted-foreground hover:text-foreground transition-colors" onClick={() => openEdit(u)}>
             <Pencil className="h-4 w-4" />
           </button>
@@ -326,23 +526,45 @@ const UsersPage = () => {
   const UserCardList = ({ u }: { u: UserProfile }) => (
     <Card className="rounded-xl border border-border bg-card overflow-hidden">
       <div className="flex items-center gap-4 p-4">
-        <div className="h-12 w-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-base shrink-0">
-          {getInitials(u.full_name)}
+        <div className="relative shrink-0">
+          <div className="h-12 w-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-base">
+            {getInitials(u.full_name)}
+          </div>
+          <span className="absolute bottom-0 right-0">
+            <AgentStatus
+              status={u.status === "online" ? "online" : u.status === "ausente" || u.status === "away" ? "away" : "offline"}
+              size="sm"
+              className="ring-2 ring-card rounded-full"
+            />
+          </span>
         </div>
         <div className="flex-1 min-w-0 space-y-0.5">
           <p className="font-bold text-foreground text-sm">{u.full_name || "Sem nome"}</p>
           <RoleSelector u={u} />
-          <div>{getStatusBadges(u.status)}</div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {getStatusBadges(u.status)}
+            {agentSchedules[u.id] && (
+              isAgentInShift(agentSchedules[u.id])
+                ? <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700"><span className="h-1.5 w-1.5 rounded-full bg-green-500" />Em turno</span>
+                : <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />Fora do turno</span>
+            )}
+          </div>
+          <PermissionsBadges u={u} />
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Settings2 className="h-3 w-3" /> ID: {u.id.substring(0, 8)}</p>
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Mail className="h-3 w-3" /> {u.email || "—"}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <Button variant="outline" size="sm" className="gap-1.5 text-xs font-semibold h-8 text-blue-600 border-blue-200 hover:bg-blue-50">
+          <Button variant="outline" size="sm" className="gap-1.5 text-xs font-semibold h-8 text-blue-600 border-blue-200 hover:bg-blue-50" onClick={() => openCloseTickets(u)}>
             Encerrar
           </Button>
-          <Button variant="outline" size="sm" className="gap-1.5 text-xs font-semibold h-8 text-blue-600 border-blue-200 hover:bg-blue-50">
+          <Button variant="outline" size="sm" className="gap-1.5 text-xs font-semibold h-8 text-blue-600 border-blue-200 hover:bg-blue-50" onClick={() => openTransfer(u)}>
             Transferir
           </Button>
+          {isAdmin && (
+            <button className="text-muted-foreground hover:text-blue-600 transition-colors" onClick={() => openPermissions(u)} title="Permissões">
+              <KeyRound className="h-4 w-4" />
+            </button>
+          )}
           <button className="text-muted-foreground hover:text-foreground transition-colors" onClick={() => openEdit(u)}>
             <Pencil className="h-4 w-4" />
           </button>
@@ -416,6 +638,97 @@ const UsersPage = () => {
         editUserEmail={editUserEmail}
         onSaved={loadData}
       />
+
+      {/* Permissions Dialog */}
+      <Dialog open={permissionsOpen} onOpenChange={setPermissionsOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-blue-600" />
+              Permissões de {permissionsUser?.full_name || "usuário"}
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* Presets */}
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Presets rápidos</p>
+            <div className="flex flex-wrap gap-2">
+              {PRESETS.map(p => (
+                <button
+                  key={p.label}
+                  onClick={() => applyPreset(p)}
+                  className={cn(
+                    "text-xs px-3 py-1.5 rounded-full border font-medium transition-colors",
+                    presetLabel === p.label
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "border-border text-foreground hover:bg-muted"
+                  )}
+                >
+                  {p.label}
+                </button>
+              ))}
+              <span className={cn(
+                "text-xs px-3 py-1.5 rounded-full border font-medium",
+                presetLabel === "Personalizado"
+                  ? "bg-muted text-foreground border-border"
+                  : "border-transparent text-muted-foreground"
+              )}>
+                Personalizado
+              </span>
+            </div>
+          </div>
+
+          {/* Pages */}
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Páginas</p>
+            <div className="space-y-2">
+              {PAGE_PERMISSIONS.map(perm => (
+                <div key={perm.key} className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{perm.label}</p>
+                    <p className="text-xs text-muted-foreground">{perm.description}</p>
+                  </div>
+                  <Switch
+                    checked={editingPerms.pages[perm.key]}
+                    onCheckedChange={() => togglePage(perm.key)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Ações</p>
+            <div className="space-y-2">
+              {ACTION_PERMISSIONS.map(perm => (
+                <div key={perm.key} className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">{perm.label}</p>
+                    <p className="text-xs text-muted-foreground">{perm.description}</p>
+                  </div>
+                  <Switch
+                    checked={editingPerms.actions[perm.key]}
+                    onCheckedChange={() => toggleAction(perm.key)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 pt-2">
+            <Button variant="outline" onClick={() => setPermissionsOpen(false)}>Cancelar</Button>
+            <Button
+              className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
+              onClick={handleSavePermissions}
+              disabled={savingPerms}
+            >
+              {savingPerms ? <RefreshCw className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+              Salvar permissões
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent className="sm:max-w-xl">

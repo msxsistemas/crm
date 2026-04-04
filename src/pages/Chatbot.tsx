@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Plus, Search, Filter, MessageSquare, Play, Clock, Bot,
-  Edit, Trash2, List, MousePointerClick, LayoutList, X
+  Edit, Trash2, List, MousePointerClick, LayoutList, X, BarChart2,
+  Send, RotateCcw, Zap, CalendarClock, Save, CheckCircle2, XCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,32 @@ import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+
+// ─── Business Hours Types ─────────────────────────────────────────────────────
+interface BusinessHourRow {
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  active: boolean;
+}
+
+interface BusinessHoursConfig {
+  enabled: boolean;
+  outside_hours_message: string;
+  timezone: string;
+}
+
+const DAY_NAMES = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
+const DEFAULT_SCHEDULE: BusinessHourRow[] = [
+  { day_of_week: 0, start_time: "08:00", end_time: "18:00", active: false }, // Dom
+  { day_of_week: 1, start_time: "08:00", end_time: "18:00", active: true },  // Seg
+  { day_of_week: 2, start_time: "08:00", end_time: "18:00", active: true },  // Ter
+  { day_of_week: 3, start_time: "08:00", end_time: "18:00", active: true },  // Qua
+  { day_of_week: 4, start_time: "08:00", end_time: "18:00", active: true },  // Qui
+  { day_of_week: 5, start_time: "08:00", end_time: "18:00", active: true },  // Sex
+  { day_of_week: 6, start_time: "08:00", end_time: "18:00", active: false }, // Sáb
+];
 
 interface MenuOption {
   label: string;
@@ -32,9 +59,20 @@ interface ChatbotRule {
   is_active: boolean;
   priority: number;
   created_at: string;
+  trigger_count: number;
+  flow_data?: unknown;
+}
+
+interface SimulatorMessage {
+  id: string;
+  text: string;
+  fromMe: boolean;
+  matchedRule?: string;
+  timestamp: Date;
 }
 
 const Chatbot = () => {
+  const [activeTab, setActiveTab] = useState<"regras" | "horario">("regras");
   const [rules, setRules] = useState<ChatbotRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -43,6 +81,16 @@ const Chatbot = () => {
   const [editing, setEditing] = useState<ChatbotRule | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [ruleToDelete, setRuleToDelete] = useState<ChatbotRule | null>(null);
+
+  // Business Hours state
+  const [bhSchedule, setBhSchedule] = useState<BusinessHourRow[]>(DEFAULT_SCHEDULE);
+  const [bhConfig, setBhConfig] = useState<BusinessHoursConfig>({
+    enabled: false,
+    outside_hours_message: "Nosso atendimento está fechado no momento. Retornaremos em breve!",
+    timezone: "America/Sao_Paulo",
+  });
+  const [bhLoading, setBhLoading] = useState(false);
+  const [bhSaving, setBhSaving] = useState(false);
 
   // Form
   const [formName, setFormName] = useState("");
@@ -57,7 +105,100 @@ const Chatbot = () => {
   const [formListButtonText, setFormListButtonText] = useState("VER OPÇÕES");
   const [formListFooter, setFormListFooter] = useState("");
 
+  // Simulator state
+  const [showSimulator, setShowSimulator] = useState(false);
+  const [simulatorMessages, setSimulatorMessages] = useState<SimulatorMessage[]>([]);
+  const [simulatorInput, setSimulatorInput] = useState("");
+  const [activeMatchedRule, setActiveMatchedRule] = useState<ChatbotRule | null>(null);
+  const simulatorEndRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => { loadRules(); }, []);
+  useEffect(() => { loadBusinessHours(); }, []);
+
+  const loadBusinessHours = async () => {
+    setBhLoading(true);
+    try {
+      const [{ data: configData }, { data: scheduleData }] = await Promise.all([
+        supabase.from("business_hours_config").select("enabled, outside_hours_message, timezone").maybeSingle(),
+        supabase.from("business_hours").select("day_of_week, start_time, end_time, active").order("day_of_week"),
+      ]);
+
+      if (configData) {
+        setBhConfig({
+          enabled: configData.enabled ?? false,
+          outside_hours_message: configData.outside_hours_message ?? "Nosso atendimento está fechado no momento. Retornaremos em breve!",
+          timezone: configData.timezone ?? "America/Sao_Paulo",
+        });
+      }
+
+      if (scheduleData && scheduleData.length > 0) {
+        // Merge with defaults to ensure all 7 days exist
+        const merged = DEFAULT_SCHEDULE.map((def) => {
+          const found = scheduleData.find((r) => r.day_of_week === def.day_of_week);
+          if (found) {
+            return {
+              day_of_week: found.day_of_week,
+              start_time: found.start_time ? found.start_time.slice(0, 5) : def.start_time,
+              end_time: found.end_time ? found.end_time.slice(0, 5) : def.end_time,
+              active: found.active ?? def.active,
+            };
+          }
+          return def;
+        });
+        setBhSchedule(merged);
+      }
+    } catch (err) {
+      console.error("Error loading business hours:", err);
+    } finally {
+      setBhLoading(false);
+    }
+  };
+
+  const saveBusinessHours = async () => {
+    setBhSaving(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { toast.error("Usuário não autenticado"); return; }
+
+      // Upsert config
+      const { error: configError } = await supabase.from("business_hours_config").upsert({
+        user_id: user.id,
+        enabled: bhConfig.enabled,
+        outside_hours_message: bhConfig.outside_hours_message,
+        timezone: bhConfig.timezone,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id" });
+      if (configError) throw configError;
+
+      // Upsert schedule rows
+      const rows = bhSchedule.map((row) => ({
+        user_id: user.id,
+        day_of_week: row.day_of_week,
+        start_time: row.start_time,
+        end_time: row.end_time,
+        active: row.active,
+      }));
+
+      const { error: scheduleError } = await supabase.from("business_hours").upsert(rows, { onConflict: "user_id,day_of_week" });
+      if (scheduleError) throw scheduleError;
+
+      toast.success("Horários salvos com sucesso!");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erro ao salvar";
+      toast.error("Erro ao salvar: " + msg);
+    } finally {
+      setBhSaving(false);
+    }
+  };
+
+  const isCurrentlyOpen = () => {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", hour12: false });
+    const todayRow = bhSchedule.find((r) => r.day_of_week === dayOfWeek);
+    if (!todayRow || !todayRow.active) return false;
+    return timeStr >= todayRow.start_time && timeStr <= todayRow.end_time;
+  };
 
   const loadRules = async () => {
     const { data, error } = await supabase
@@ -189,10 +330,93 @@ const Chatbot = () => {
     if (!error) setRules(prev => prev.map(r => r.id === rule.id ? { ...r, is_active: !r.is_active } : r));
   };
 
+  const resetStats = async () => {
+    if (!window.confirm("Deseja zerar as estatísticas de todas as regras?")) return;
+    const { error } = await supabase.from("chatbot_rules").update({ trigger_count: 0 }).gte("priority", -999999);
+    if (error) toast.error("Erro ao zerar estatísticas");
+    else {
+      toast.success("Estatísticas zeradas!");
+      setRules(prev => prev.map(r => ({ ...r, trigger_count: 0 })));
+    }
+  };
+
   const addMenuOption = () => setFormMenuOptions(prev => [...prev, { label: "", response: "", description: "" }]);
   const removeMenuOption = (idx: number) => setFormMenuOptions(prev => prev.filter((_, i) => i !== idx));
   const updateMenuOption = (idx: number, field: keyof MenuOption, value: string) => {
     setFormMenuOptions(prev => prev.map((o, i) => i === idx ? { ...o, [field]: value } : o));
+  };
+
+  // Simulator scroll
+  useEffect(() => {
+    simulatorEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [simulatorMessages]);
+
+  const handleSimulatorSend = () => {
+    const text = simulatorInput.trim();
+    if (!text) return;
+
+    const userMsg: SimulatorMessage = {
+      id: crypto.randomUUID(),
+      text,
+      fromMe: true,
+      timestamp: new Date(),
+    };
+    const newMessages = [...simulatorMessages, userMsg];
+    setSimulatorMessages(newMessages);
+    setSimulatorInput("");
+
+    // Matching logic
+    const isFirstMessage = newMessages.filter(m => m.fromMe).length <= 1;
+    const lower = text.toLowerCase().trim();
+
+    let matched: ChatbotRule | null = null;
+    for (const rule of rules.filter(r => r.is_active)) {
+      if (rule.trigger_type === "first_message" && isFirstMessage) { matched = rule; break; }
+      if (rule.trigger_type === "keyword" && rule.trigger_value) {
+        const kws = rule.trigger_value.split(",").map((k: string) => k.trim().toLowerCase());
+        if (kws.some((k: string) => lower.includes(k))) { matched = rule; break; }
+      }
+      if (rule.trigger_type === "always") matched = rule;
+    }
+
+    setActiveMatchedRule(matched);
+
+    let botText = "Nenhuma regra correspondente para esta mensagem.";
+    if (matched) {
+      if (matched.response_type === "menu_numbered") {
+        const options = (matched.menu_options || []).map((o, i) => `${i + 1}. ${o.label}`).join("\n");
+        botText = `${matched.response_text}\n\n${options}`;
+      } else if (matched.response_type === "menu_list" || matched.response_type === "menu_buttons") {
+        try {
+          const meta = JSON.parse(matched.response_text);
+          const opts = (matched.menu_options || []).map((o, i) => `${i + 1}. ${o.label}`).join("\n");
+          botText = `${meta.body || matched.response_text}\n\n${opts}`;
+        } catch {
+          const opts = (matched.menu_options || []).map((o, i) => `${i + 1}. ${o.label}`).join("\n");
+          botText = `${matched.response_text}\n\n${opts}`;
+        }
+      } else {
+        botText = matched.response_text;
+      }
+    }
+
+    const botMsg: SimulatorMessage = {
+      id: crypto.randomUUID(),
+      text: botText,
+      fromMe: false,
+      matchedRule: matched?.name,
+      timestamp: new Date(),
+    };
+
+    setTimeout(() => {
+      setSimulatorMessages(prev => [...prev, botMsg]);
+    }, 400);
+  };
+
+  const handleSimulatorClear = () => {
+    setSimulatorMessages([]);
+    setActiveMatchedRule(null);
+    setSimulatorInput("");
   };
 
   const activeCount = rules.filter(r => r.is_active).length;
@@ -253,11 +477,161 @@ const Chatbot = () => {
     <div className="flex flex-col h-screen">
       {/* Header */}
       <div className="flex items-center justify-between mx-6 py-4 border-b border-border">
-        <h1 className="text-xl font-bold text-blue-600">Chatbot</h1>
-        <Button variant="action" className="gap-2 px-5" onClick={openNew}>
-          <Plus className="h-4 w-4" /> Nova Regra
-        </Button>
+        <div className="flex items-center gap-4">
+          <h1 className="text-xl font-bold text-blue-600">Chatbot</h1>
+          {/* Tabs */}
+          <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+            <button
+              onClick={() => setActiveTab("regras")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+                activeTab === "regras"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Bot className="h-4 w-4" /> Regras
+            </button>
+            <button
+              onClick={() => setActiveTab("horario")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+                activeTab === "horario"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <CalendarClock className="h-4 w-4" /> Horário
+            </button>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {activeTab === "regras" ? (
+            <>
+              <Button variant="outline" className="gap-2 px-4" onClick={() => setShowSimulator(true)}>
+                <Play className="h-4 w-4 text-emerald-500" /> Simular
+              </Button>
+              <Button variant="action" className="gap-2 px-5" onClick={openNew}>
+                <Plus className="h-4 w-4" /> Nova Regra
+              </Button>
+            </>
+          ) : (
+            <Button onClick={saveBusinessHours} disabled={bhSaving} className="gap-2 px-5 bg-blue-600 hover:bg-blue-700 text-white">
+              <Save className="h-4 w-4" /> {bhSaving ? "Salvando..." : "Salvar Horários"}
+            </Button>
+          )}
+        </div>
       </div>
+
+      {activeTab === "horario" ? (
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {bhLoading ? (
+            <p className="text-sm text-muted-foreground">Carregando...</p>
+          ) : (
+            <>
+              {/* Config card */}
+              <Card className="p-5 space-y-4">
+                <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+                  <CalendarClock className="h-4 w-4 text-primary" /> Configurações de Horário
+                </h2>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Ativar controle de horário</p>
+                    <p className="text-xs text-muted-foreground">Quando ativo, mensagens fora do horário recebem a mensagem configurada abaixo</p>
+                  </div>
+                  <Switch checked={bhConfig.enabled} onCheckedChange={(v) => setBhConfig((c) => ({ ...c, enabled: v }))} />
+                </div>
+                <div>
+                  <label className="text-sm text-muted-foreground mb-1 block">Fuso horário</label>
+                  <Select value={bhConfig.timezone} onValueChange={(v) => setBhConfig((c) => ({ ...c, timezone: v }))}>
+                    <SelectTrigger className="w-60">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="America/Sao_Paulo">America/Sao_Paulo (BRT)</SelectItem>
+                      <SelectItem value="America/Manaus">America/Manaus (AMT)</SelectItem>
+                      <SelectItem value="America/Belem">America/Belem (BRT)</SelectItem>
+                      <SelectItem value="America/Fortaleza">America/Fortaleza (BRT)</SelectItem>
+                      <SelectItem value="America/Noronha">America/Noronha (FNT)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm text-muted-foreground mb-1 block">Mensagem fora do horário</label>
+                  <Textarea
+                    value={bhConfig.outside_hours_message}
+                    onChange={(e) => setBhConfig((c) => ({ ...c, outside_hours_message: e.target.value }))}
+                    placeholder="Ex: Nosso atendimento está fechado no momento. Retornaremos em breve!"
+                    className="min-h-[80px]"
+                  />
+                </div>
+              </Card>
+
+              {/* Preview badge */}
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium border",
+                  isCurrentlyOpen()
+                    ? "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400"
+                    : "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-400"
+                )}>
+                  {isCurrentlyOpen() ? (
+                    <><CheckCircle2 className="h-4 w-4" /> Agora estaria: ABERTO</>
+                  ) : (
+                    <><XCircle className="h-4 w-4" /> Agora estaria: FECHADO</>
+                  )}
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {new Date().toLocaleString("pt-BR", { weekday: "long", hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+
+              {/* Weekly schedule grid */}
+              <Card className="p-5">
+                <h2 className="text-base font-semibold text-foreground mb-4">Grade de Horários</h2>
+                <div className="space-y-3">
+                  {bhSchedule.map((row, idx) => (
+                    <div key={row.day_of_week} className={cn(
+                      "flex items-center gap-3 p-3 rounded-lg border transition-colors",
+                      row.active ? "bg-muted/30 border-border" : "bg-muted/10 border-border/40 opacity-60"
+                    )}>
+                      <div className="w-10 text-center">
+                        <span className="text-sm font-semibold text-foreground">{DAY_NAMES[row.day_of_week]}</span>
+                      </div>
+                      <Switch
+                        checked={row.active}
+                        onCheckedChange={(v) => {
+                          setBhSchedule((prev) => prev.map((r, i) => i === idx ? { ...r, active: v } : r));
+                        }}
+                      />
+                      <div className="flex items-center gap-2 flex-1">
+                        <Input
+                          type="time"
+                          value={row.start_time}
+                          disabled={!row.active}
+                          onChange={(e) => setBhSchedule((prev) => prev.map((r, i) => i === idx ? { ...r, start_time: e.target.value } : r))}
+                          className="w-32 text-sm"
+                        />
+                        <span className="text-muted-foreground">–</span>
+                        <Input
+                          type="time"
+                          value={row.end_time}
+                          disabled={!row.active}
+                          onChange={(e) => setBhSchedule((prev) => prev.map((r, i) => i === idx ? { ...r, end_time: e.target.value } : r))}
+                          className="w-32 text-sm"
+                        />
+                      </div>
+                      {!row.active && (
+                        <span className="text-xs text-muted-foreground italic">Fechado</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </>
+          )}
+        </div>
+      ) : (
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Stats */}
@@ -319,6 +693,13 @@ const Chatbot = () => {
                         <Badge variant={rule.is_active ? "default" : "secondary"} className="text-xs">
                           {rule.is_active ? "Ativo" : "Inativo"}
                         </Badge>
+                        {(rule.trigger_count || 0) > 0 ? (
+                          <span className="text-xs font-medium text-blue-600 bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-800">
+                            {rule.trigger_count} ativações
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Nunca ativado</span>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground truncate mt-0.5">
                         {rule.response_type !== "text"
@@ -340,7 +721,58 @@ const Chatbot = () => {
             })}
           </div>
         )}
+
+        {/* Statistics Panel */}
+        {rules.length > 0 && (() => {
+          const top5 = [...rules]
+            .filter(r => (r.trigger_count || 0) > 0)
+            .sort((a, b) => (b.trigger_count || 0) - (a.trigger_count || 0))
+            .slice(0, 5);
+          const maxCount = top5.length > 0 ? (top5[0].trigger_count || 1) : 1;
+          return (
+            <Card className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+                  <BarChart2 className="h-4 w-4 text-primary" /> Estatísticas de Ativação
+                </h2>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-destructive"
+                  onClick={resetStats}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Zerar estatísticas
+                </Button>
+              </div>
+              {top5.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">Nenhuma regra foi ativada ainda.</p>
+              ) : (
+                <div className="space-y-3">
+                  {top5.map(rule => {
+                    const pct = Math.max(4, Math.round(((rule.trigger_count || 0) / maxCount) * 100));
+                    return (
+                      <div key={rule.id} className="flex items-center gap-3">
+                        <span className="text-sm text-foreground w-40 truncate shrink-0">{rule.name}</span>
+                        <div className="flex-1 bg-muted rounded-full h-2.5">
+                          <div
+                            className="bg-blue-500 h-2.5 rounded-full transition-all"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        <span className="text-sm font-semibold text-foreground w-10 text-right shrink-0">
+                          {rule.trigger_count}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
+          );
+        })()}
       </div>
+
+      )}
 
       {/* Dialog */}
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
@@ -567,6 +999,162 @@ const Chatbot = () => {
           <div className="flex justify-end gap-2 px-6 pb-4">
             <Button variant="outline" className="uppercase font-semibold text-xs" onClick={() => setDeleteOpen(false)}>CANCELAR</Button>
             <Button className="bg-blue-600 hover:bg-blue-700 text-white uppercase font-semibold text-xs px-6" onClick={handleDelete}>OK</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Simulator Dialog */}
+      <Dialog open={showSimulator} onOpenChange={setShowSimulator}>
+        <DialogContent className="sm:max-w-4xl p-0 overflow-hidden gap-0 [&>button.absolute]:hidden" style={{ maxHeight: "90vh" }}>
+          {/* Simulator Header */}
+          <div className="bg-emerald-600 px-6 py-4 flex items-center gap-3 shrink-0">
+            <div className="h-10 w-10 rounded-full bg-white/20 flex items-center justify-center">
+              <Bot className="h-5 w-5 text-white" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-lg font-bold text-white">Simulador de Chatbot</h2>
+              <p className="text-sm text-white/70">{rules.filter(r => r.is_active).length} regras ativas carregadas</p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-white/80 hover:text-white hover:bg-white/10 gap-1.5 text-xs"
+              onClick={handleSimulatorClear}
+            >
+              <RotateCcw className="h-3.5 w-3.5" /> Limpar conversa
+            </Button>
+            <button onClick={() => setShowSimulator(false)} className="text-white/70 hover:text-white ml-1">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Simulator Body */}
+          <div className="flex" style={{ height: "70vh" }}>
+            {/* Left: Chat */}
+            <div className="flex flex-col flex-1 min-w-0" style={{ background: "#e5ddd5" }}>
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                {simulatorMessages.length === 0 && (
+                  <div className="flex flex-col items-center justify-center h-full text-center opacity-60">
+                    <MessageSquare className="h-12 w-12 text-gray-400 mb-3" />
+                    <p className="text-sm text-gray-500">Digite uma mensagem para iniciar a simulação</p>
+                  </div>
+                )}
+                {simulatorMessages.map(msg => (
+                  <div
+                    key={msg.id}
+                    className={cn("flex", msg.fromMe ? "justify-end" : "justify-start")}
+                  >
+                    <div
+                      className={cn(
+                        "max-w-[75%] rounded-xl px-3 py-2 shadow-sm text-sm",
+                        msg.fromMe
+                          ? "bg-[#dcf8c6] text-gray-800 rounded-br-sm"
+                          : "bg-white text-gray-800 rounded-bl-sm"
+                      )}
+                    >
+                      <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
+                      <p className={cn("text-[10px] mt-1 text-right", msg.fromMe ? "text-gray-500" : "text-gray-400")}>
+                        {msg.timestamp.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+                <div ref={simulatorEndRef} />
+              </div>
+
+              {/* Input */}
+              <div className="p-3 bg-white border-t border-gray-200 flex items-center gap-2 shrink-0">
+                <Input
+                  value={simulatorInput}
+                  onChange={e => setSimulatorInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSimulatorSend(); } }}
+                  placeholder="Digite uma mensagem..."
+                  className="flex-1 border-gray-200 bg-gray-50 focus:bg-white"
+                />
+                <Button
+                  onClick={handleSimulatorSend}
+                  disabled={!simulatorInput.trim()}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white h-10 w-10 p-0 rounded-full shrink-0"
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Right: Rule Info */}
+            <div className="w-64 shrink-0 border-l border-border bg-background flex flex-col overflow-y-auto">
+              <div className="px-4 py-3 border-b border-border">
+                <h3 className="text-sm font-semibold text-foreground">Regra Correspondente</h3>
+              </div>
+              <div className="p-4 flex-1">
+                {activeMatchedRule ? (
+                  <div className="space-y-3">
+                    <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Zap className="h-4 w-4 text-emerald-600" />
+                        <span className="text-xs font-semibold text-emerald-700">Regra ativada</span>
+                      </div>
+                      <p className="text-sm font-bold text-foreground">{activeMatchedRule.name}</p>
+                    </div>
+                    <div className="space-y-2">
+                      <div>
+                        <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">Gatilho</p>
+                        <Badge variant="outline" className="text-xs">{getTriggerLabel(activeMatchedRule.trigger_type)}</Badge>
+                      </div>
+                      {activeMatchedRule.trigger_value && (
+                        <div>
+                          <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">Palavra-chave</p>
+                          <p className="text-xs text-foreground font-mono bg-muted px-2 py-1 rounded">{activeMatchedRule.trigger_value}</p>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">Tipo de resposta</p>
+                        <Badge variant="secondary" className="text-xs">{getResponseTypeLabel(activeMatchedRule.response_type)}</Badge>
+                      </div>
+                      {activeMatchedRule.flow_data && (
+                        <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 mt-2">
+                          <p className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+                            Esta regra usa FlowBuilder — simulação de fluxo não disponível no simulador.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : simulatorMessages.length > 0 ? (
+                  <div className="flex flex-col items-center justify-center text-center py-6 opacity-60">
+                    <X className="h-8 w-8 text-muted-foreground mb-2" />
+                    <p className="text-xs text-muted-foreground">Nenhuma regra correspondeu à última mensagem</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-center py-6 opacity-60">
+                    <Bot className="h-8 w-8 text-muted-foreground mb-2" />
+                    <p className="text-xs text-muted-foreground">Aguardando mensagem para mostrar informações da regra</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Active rules list */}
+              <div className="border-t border-border px-4 py-3">
+                <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-2">Regras ativas ({rules.filter(r => r.is_active).length})</p>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {rules.filter(r => r.is_active).map(rule => (
+                    <div key={rule.id} className={cn(
+                      "text-xs px-2 py-1.5 rounded-md flex items-center gap-1.5",
+                      activeMatchedRule?.id === rule.id
+                        ? "bg-emerald-100 dark:bg-emerald-950/30 text-emerald-700 font-semibold"
+                        : "text-muted-foreground hover:bg-muted/50"
+                    )}>
+                      {activeMatchedRule?.id === rule.id && <Zap className="h-3 w-3 shrink-0" />}
+                      <span className="truncate">{rule.name}</span>
+                    </div>
+                  ))}
+                  {rules.filter(r => r.is_active).length === 0 && (
+                    <p className="text-xs text-muted-foreground italic">Nenhuma regra ativa</p>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
