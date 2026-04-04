@@ -28,8 +28,8 @@ const PortalLogin = ({ portal, title, subtitle, showRegisterLink = false }: Port
 
   if (authLoading || (session && roleLoading)) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="flex min-h-screen items-center justify-center bg-primary">
+        <Loader2 className="h-8 w-8 animate-spin text-primary-foreground" />
       </div>
     );
   }
