@@ -113,6 +113,12 @@ const TABLE_MAP: Record<string, string> = {
   lead_scoring_rules: '/lead-scoring-rules',
   contact_segments: '/contact-segments',
   message_templates: '/message-templates',
+  whatsapp_cloud_connections: '/__skip__',
+  reseller_plans: '/__skip__',
+  reseller_accounts: '/__skip__',
+  subscriptions: '/__skip__',
+  reseller_sub_users: '/__skip__',
+  reseller_transactions: '/__skip__',
 };
 
 type FilterOp = { col: string; val: unknown; op: string };
@@ -132,14 +138,16 @@ class QueryBuilder {
   private _returnSelect = false;
   private _upsert = false;
   private _idFilter?: string;
+  private _countOnly = false;
 
   constructor(table: string) {
     this._table = table;
     this._endpoint = TABLE_MAP[table] || `/${table.replace(/_/g, '-')}`;
   }
 
-  select(cols?: string) {
+  select(cols?: string, opts?: { count?: string; head?: boolean }) {
     this._selectCols = cols;
+    if (opts?.head) this._countOnly = true;
     // Only switch to GET if no write method was set — allows insert().select() pattern
     if (this._method !== 'POST' && this._method !== 'PATCH' && this._method !== 'DELETE') {
       this._method = 'GET';
@@ -221,6 +229,10 @@ class QueryBuilder {
 
         const data = await apiFetch('GET', url);
         const normalized = this._normalizeGetResult(data);
+        if (this._countOnly) {
+          const count = Array.isArray(normalized) ? normalized.length : (typeof normalized === 'number' ? normalized : 0);
+          return { data: null, count, error: null };
+        }
         return { data: normalized, error: null };
       }
 
