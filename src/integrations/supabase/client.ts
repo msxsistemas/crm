@@ -327,7 +327,11 @@ class StorageBucketProxy {
 // ── Realtime shim ─────────────────────────────────────────────────────────────
 class ChannelProxy {
   on(_event: string, _filter: unknown, _callback?: unknown) { return this; }
-  subscribe(_cb?: unknown) { return this; }
+  subscribe(cb?: (status: string) => void) {
+    // Signal connected so TopBar shows green status
+    if (cb) setTimeout(() => cb('SUBSCRIBED'), 100);
+    return this;
+  }
   unsubscribe() {}
 }
 
