@@ -228,6 +228,10 @@ class QueryBuilder {
   }
 
   private _normalizeGetResult(data: unknown) {
+    // Unwrap paginated responses: { data: [...], total: N, ... }
+    if (data && typeof data === 'object' && !Array.isArray(data) && Array.isArray((data as any).data)) {
+      data = (data as any).data;
+    }
     if (this._isSingle) {
       if (Array.isArray(data)) return data[0] || null;
       return data;
