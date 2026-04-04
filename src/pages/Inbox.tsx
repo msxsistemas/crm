@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import type { RealtimeChannel } from "@supabase/supabase-js";
+type RealtimeChannel = { unsubscribe: () => void; on: (...args: unknown[]) => unknown; subscribe: (...args: unknown[]) => unknown };
 import whatsappLightWallpaper from "@/assets/whatsapp-light-wallpaper.png";
 import whatsappDarkWallpaper from "@/assets/whatsapp-dark-wallpaper.png";
 import { formatPhoneBR, unformatPhone } from "@/lib/phone-mask";

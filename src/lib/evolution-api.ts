@@ -1,7 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 
-
-const PROJECT_ID = import.meta.env.VITE_SUPABASE_PROJECT_ID;
+const API_URL = import.meta.env.VITE_API_URL || 'https://api.msxzap.pro';
 
 async function callEvolutionApi(action: string, instanceName?: string, data?: Record<string, unknown>) {
   try {
@@ -49,6 +48,6 @@ export async function listInstances() {
 }
 
 export async function setupWebhook(instanceName: string) {
-  const webhookUrl = `https://${PROJECT_ID}.supabase.co/functions/v1/evolution-webhook`;
+  const webhookUrl = `${API_URL}/webhook/evolution`;
   return callEvolutionApi("set_webhook", instanceName, { webhookUrl });
 }

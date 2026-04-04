@@ -229,7 +229,7 @@ const UsersPage = () => {
         supabase.from("user_roles").select("user_id, role"),
         supabase.functions.invoke("manage-users", {
           method: "GET",
-          headers: { Authorization: `Bearer ${session.access_token}` },
+          headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` },
         }),
       ]);
 
@@ -347,7 +347,7 @@ const UsersPage = () => {
       const { error } = await supabase.functions.invoke("manage-users", {
         method: "POST",
         body: { action: "delete", userId: deleteUser.id },
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` },
       });
       if (error) throw error;
       toast.success("Usuário excluído com sucesso!");
@@ -367,7 +367,7 @@ const UsersPage = () => {
       const { error } = await supabase.functions.invoke("manage-users", {
         method: "POST",
         body: { action: "set-role", userId: targetUserId, role: newRole },
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` },
       });
       if (error) throw error;
       toast.success("Role atualizada com sucesso!");
