@@ -5,8 +5,14 @@ export default async function userRoutes(fastify) {
   const auth = { preHandler: fastify.authenticate };
 
   fastify.get('/users', auth, async (req) => {
-    const { rows } = await query('SELECT id, name, name as full_name, email, role, avatar_url, permissions, created_at, last_login FROM profiles ORDER BY name');
+    const { rows } = await query('SELECT id, name, name as full_name, email, role, avatar_url, permissions, status, signing_enabled, created_at, last_login FROM profiles ORDER BY name');
     return rows;
+  });
+
+  // manage-users function shim — returns { users: [...] }
+  fastify.get('/manage-users', auth, async (req) => {
+    const { rows } = await query('SELECT id, name, name as full_name, email, role, avatar_url, permissions, status, signing_enabled, created_at, last_login FROM profiles ORDER BY name');
+    return { users: rows };
   });
 
   fastify.get('/users/:id', auth, async (req, reply) => {

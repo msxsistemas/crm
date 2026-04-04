@@ -453,7 +453,7 @@ const authShim = {
 
 // ── Functions shim ────────────────────────────────────────────────────────────
 const FUNCTION_MAP: Record<string, string> = {
-  'manage-users': '/users',
+  'manage-users': '/manage-users',
   'ai-agent': '/ai-agent',
   'evolution-api': '/evolution-proxy',
   'zapi': '/zapi-proxy',

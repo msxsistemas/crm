@@ -5,11 +5,11 @@ export default async function misc2Routes(fastify) {
   const auth = { preHandler: fastify.authenticate };
 
   // ── Tasks ─────────────────────────────────────────────────────────────────
-  fastify.get('/tasks', auth, async (req) => {
+  fastify.get('/tasks', auth, async () => {
     const { rows } = await query(`
       SELECT t.*,
-        p1.name as assigned_name,
-        p2.name as creator_name
+        jsonb_build_object('full_name', p1.name) as assigned_profile,
+        jsonb_build_object('full_name', p2.name) as creator_profile
       FROM tasks t
       LEFT JOIN profiles p1 ON p1.id = t.assigned_to
       LEFT JOIN profiles p2 ON p2.id = t.user_id
@@ -18,19 +18,22 @@ export default async function misc2Routes(fastify) {
     return rows;
   });
   fastify.post('/tasks', auth, async (req, reply) => {
-    const { title, description, priority, status, due_date, assigned_to, reminder_minutes, repeat_interval } = req.body;
+    const { title, description, priority, status, due_date, assigned_to, reminder_minutes, repeat_interval, user_id } = req.body;
     const { rows } = await query(
       'INSERT INTO tasks (title, description, priority, status, due_date, assigned_to, user_id, reminder_minutes, repeat_interval) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-      [title, description, priority || 'medium', status || 'pending', due_date, assigned_to, req.user.id, reminder_minutes, repeat_interval || 'none']
+      [title, description, priority || 'medium', status || 'pending', due_date, assigned_to, user_id || req.user.id, reminder_minutes, repeat_interval || 'none']
     );
     return reply.status(201).send(rows[0]);
   });
   fastify.patch('/tasks/:id', auth, async (req) => {
     const f = req.body;
-    const { rows } = await query(
-      'UPDATE tasks SET title=COALESCE($1,title), description=COALESCE($2,description), priority=COALESCE($3,priority), status=COALESCE($4,status), due_date=COALESCE($5,due_date), assigned_to=COALESCE($6,assigned_to), updated_at=NOW() WHERE id=$7 RETURNING *',
-      [f.title, f.description, f.priority, f.status, f.due_date, f.assigned_to, req.params.id]
-    );
+    const allowed = ['title', 'description', 'priority', 'status', 'due_date', 'assigned_to', 'reminder_minutes'];
+    const updates = []; const params = []; let p = 1;
+    for (const k of allowed) { if (f[k] !== undefined) { updates.push(`${k}=$${p}`); params.push(f[k]); p++; } }
+    if (!updates.length) return {};
+    updates.push('updated_at=NOW()');
+    params.push(req.params.id);
+    const { rows } = await query(`UPDATE tasks SET ${updates.join(',')} WHERE id=$${p} RETURNING *`, params);
     return rows[0];
   });
   fastify.delete('/tasks/:id', auth, async (req) => {
@@ -53,10 +56,10 @@ export default async function misc2Routes(fastify) {
     return rows;
   });
   fastify.post('/internal-channels', auth, async (req, reply) => {
-    const { title, participant_ids = [] } = req.body;
+    const { title, participant_ids = [], created_by } = req.body;
     const { rows: [conv] } = await query(
       'INSERT INTO internal_conversations (title, created_by) VALUES ($1,$2) RETURNING *',
-      [title, req.user.id]
+      [title, created_by || req.user.id]
     );
     // Add creator as participant
     const allParticipants = [...new Set([req.user.id, ...participant_ids])];
@@ -64,6 +67,14 @@ export default async function misc2Routes(fastify) {
       await query('INSERT INTO internal_conversation_participants (conversation_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [conv.id, uid]);
     }
     return reply.status(201).send(conv);
+  });
+  fastify.patch('/internal-channels/:id', auth, async (req) => {
+    const { title, updated_at } = req.body;
+    const { rows } = await query(
+      'UPDATE internal_conversations SET title=COALESCE($1,title), updated_at=COALESCE($2::timestamptz,NOW()) WHERE id=$3 RETURNING *',
+      [title, updated_at, req.params.id]
+    );
+    return rows[0];
   });
 
   fastify.get('/internal-messages', auth, async (req) => {
@@ -106,18 +117,31 @@ export default async function misc2Routes(fastify) {
   });
 
   // ── Webhooks ──────────────────────────────────────────────────────────────
-  fastify.get('/webhooks', auth, async () => {
-    const { rows } = await query('SELECT * FROM webhooks ORDER BY created_at DESC');
+  fastify.get('/webhooks', auth, async (req) => {
+    const { user_id } = req.query;
+    if (user_id) {
+      const { rows } = await query('SELECT * FROM webhooks WHERE user_id=$1 ORDER BY created_at DESC', [user_id]);
+      return rows;
+    }
+    const { rows } = await query('SELECT * FROM webhooks WHERE user_id=$1 ORDER BY created_at DESC', [req.user.id]);
     return rows;
   });
   fastify.post('/webhooks', auth, async (req, reply) => {
-    const { name, url, events, secret, is_active } = req.body;
-    const { rows } = await query('INSERT INTO webhooks (name, url, events, secret, is_active) VALUES ($1,$2,$3,$4,$5) RETURNING *', [name, url, events, secret, is_active ?? true]);
+    const { name, url, events, secret, is_active, active, user_id } = req.body;
+    const activeVal = is_active ?? active ?? true;
+    const { rows } = await query(
+      'INSERT INTO webhooks (name, url, events, secret, is_active, active, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [name, url, events || [], secret, activeVal, activeVal, user_id || req.user.id]
+    );
     return reply.status(201).send(rows[0]);
   });
   fastify.patch('/webhooks/:id', auth, async (req) => {
     const f = req.body;
-    const { rows } = await query('UPDATE webhooks SET name=COALESCE($1,name), url=COALESCE($2,url), events=COALESCE($3,events), is_active=COALESCE($4,is_active) WHERE id=$5 RETURNING *', [f.name, f.url, f.events, f.is_active, req.params.id]);
+    const activeVal = f.is_active ?? f.active;
+    const { rows } = await query(
+      'UPDATE webhooks SET name=COALESCE($1,name), url=COALESCE($2,url), events=COALESCE($3,events), secret=COALESCE($4,secret), is_active=COALESCE($5,is_active), active=COALESCE($5,active) WHERE id=$6 RETURNING *',
+      [f.name, f.url, f.events, f.secret, activeVal, req.params.id]
+    );
     return rows[0];
   });
   fastify.delete('/webhooks/:id', auth, async (req) => {
@@ -198,6 +222,11 @@ export default async function misc2Routes(fastify) {
     const token = uuidv4().replace(/-/g, '') + uuidv4().replace(/-/g, '');
     const { rows } = await query('INSERT INTO api_tokens (user_id, name, token, scopes, expires_at) VALUES ($1,$2,$3,$4,$5) RETURNING *', [req.user.id, name, token, scopes || ['read', 'write'], expires_at]);
     return reply.status(201).send(rows[0]);
+  });
+  fastify.patch('/api-tokens/:id', auth, async (req) => {
+    const { is_active } = req.body;
+    const { rows } = await query('UPDATE api_tokens SET is_active=$1 WHERE id=$2 AND user_id=$3 RETURNING *', [is_active, req.params.id, req.user.id]);
+    return rows[0] || {};
   });
   fastify.delete('/api-tokens/:id', auth, async (req) => {
     await query('DELETE FROM api_tokens WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
@@ -405,6 +434,11 @@ export default async function misc2Routes(fastify) {
     const { name, color } = req.body;
     const { rows } = await query('INSERT INTO conversation_labels (name, color) VALUES ($1,$2) ON CONFLICT (name) DO UPDATE SET color=$2 RETURNING *', [name, color || '#3b82f6']);
     return reply.status(201).send(rows[0]);
+  });
+  fastify.patch('/conversation-labels/:id', auth, async (req) => {
+    const { name, color } = req.body;
+    const { rows } = await query('UPDATE conversation_labels SET name=COALESCE($1,name), color=COALESCE($2,color) WHERE id=$3 RETURNING *', [name, color, req.params.id]);
+    return rows[0];
   });
   fastify.delete('/conversation-labels/:id', auth, async (req) => {
     await query('DELETE FROM conversation_labels WHERE id=$1', [req.params.id]); return { ok: true };

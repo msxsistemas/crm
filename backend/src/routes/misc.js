@@ -39,18 +39,35 @@ export default async function miscRoutes(fastify) {
   });
 
   // ── Quick Replies ─────────────────────────────────────────────────────────
-  fastify.get('/quick-replies', auth, async () => {
-    const { rows } = await query('SELECT * FROM quick_replies ORDER BY title');
+  fastify.get('/quick-replies', auth, async (req) => {
+    const { user_id } = req.query;
+    if (user_id) {
+      const { rows } = await query('SELECT *, COALESCE(shortcut, title) as shortcut, COALESCE(message, content) as message FROM quick_replies WHERE user_id=$1 ORDER BY created_at DESC', [user_id]);
+      return rows;
+    }
+    const { rows } = await query('SELECT *, COALESCE(shortcut, title) as shortcut, COALESCE(message, content) as message FROM quick_replies ORDER BY created_at DESC');
     return rows;
   });
   fastify.post('/quick-replies', auth, async (req, reply) => {
-    const { title, content, tags } = req.body;
-    const { rows } = await query('INSERT INTO quick_replies (title, content, tags) VALUES ($1,$2,$3) RETURNING *', [title, content, tags]);
+    const { title, content, shortcut, message, tags, user_id } = req.body;
+    const titleVal = title || shortcut || '';
+    const contentVal = content || message || '';
+    const shortcutVal = shortcut || title || '';
+    const messageVal = message || content || '';
+    const { rows } = await query(
+      'INSERT INTO quick_replies (title, content, shortcut, message, tags, user_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [titleVal, contentVal, shortcutVal, messageVal, tags || [], user_id || req.user.id]
+    );
     return reply.status(201).send(rows[0]);
   });
   fastify.patch('/quick-replies/:id', auth, async (req) => {
-    const { title, content, tags } = req.body;
-    const { rows } = await query('UPDATE quick_replies SET title=COALESCE($1,title), content=COALESCE($2,content), tags=COALESCE($3,tags) WHERE id=$4 RETURNING *', [title, content, tags, req.params.id]);
+    const { title, content, shortcut, message, tags } = req.body;
+    const titleVal = title || shortcut;
+    const contentVal = content || message;
+    const { rows } = await query(
+      'UPDATE quick_replies SET title=COALESCE($1,title), content=COALESCE($2,content), shortcut=COALESCE($3,shortcut), message=COALESCE($4,message), tags=COALESCE($5,tags) WHERE id=$6 RETURNING *',
+      [titleVal, contentVal, shortcut || title, message || content, tags, req.params.id]
+    );
     return rows[0];
   });
   fastify.delete('/quick-replies/:id', auth, async (req) => {
@@ -272,12 +289,24 @@ export default async function miscRoutes(fastify) {
     return rows;
   });
   fastify.post('/opportunities', auth, async (req, reply) => {
-    const { title, contact_id, value, stage, probability, description } = req.body;
-    const { rows } = await query('INSERT INTO opportunities (title, contact_id, value, stage, probability, description, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *', [title, contact_id, value, stage, probability, description, req.user.id]);
+    const { title, contact_id, value, stage, status, probability, description, notes, close_date, assigned_to, user_id } = req.body;
+    const { rows } = await query(
+      'INSERT INTO opportunities (title, contact_id, value, stage, status, probability, description, notes, close_date, assigned_to, created_by, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *',
+      [title, contact_id, value || 0, stage || status || 'lead', status || stage || 'open', probability || 50, description || notes, notes || description, close_date, assigned_to, req.user.id, user_id || req.user.id]
+    );
     return reply.status(201).send(rows[0]);
   });
   fastify.patch('/opportunities/:id', auth, async (req) => {
-    const f = req.body; const { rows } = await query('UPDATE opportunities SET title=COALESCE($1,title), value=COALESCE($2,value), stage=COALESCE($3,stage), probability=COALESCE($4,probability), description=COALESCE($5,description), updated_at=NOW() WHERE id=$6 RETURNING *', [f.title, f.value, f.stage, f.probability, f.description, req.params.id]);
+    const f = req.body;
+    const { rows } = await query(
+      `UPDATE opportunities SET
+        title=COALESCE($1,title), value=COALESCE($2,value), stage=COALESCE($3,stage),
+        status=COALESCE($4,status), probability=COALESCE($5,probability),
+        description=COALESCE($6,description), notes=COALESCE($7,notes),
+        close_date=COALESCE($8,close_date), assigned_to=COALESCE($9,assigned_to), updated_at=NOW()
+       WHERE id=$10 RETURNING *`,
+      [f.title, f.value, f.stage || f.status, f.status || f.stage, f.probability, f.description || f.notes, f.notes || f.description, f.close_date, f.assigned_to, req.params.id]
+    );
     return rows[0];
   });
   fastify.delete('/opportunities/:id', auth, async (req) => {
