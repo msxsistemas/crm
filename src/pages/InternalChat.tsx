@@ -69,8 +69,8 @@ const InternalChat = () => {
         title: c.title,
         created_by: c.created_by,
         created_at: c.created_at,
-        participants: (c.internal_conversation_participants || [])
-          .map((p: any) => p.profiles)
+        participants: (c.participants || c.internal_conversation_participants || [])
+          .map((p: any) => p.profiles || { id: p.id, full_name: p.name })
           .filter(Boolean),
       })));
     }

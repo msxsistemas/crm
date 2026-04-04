@@ -480,6 +480,19 @@ export default async function misc2Routes(fastify) {
     await query('DELETE FROM contact_group_members WHERE id=$1', [req.params.id]); return { ok: true };
   });
 
+  // ── Internal Conversation Participants ───────────────────────────────────
+  fastify.post('/internal-conversation-participants', auth, async (req, reply) => {
+    const body = req.body;
+    const participants = Array.isArray(body) ? body : [body];
+    for (const p of participants) {
+      await query(
+        'INSERT INTO internal_conversation_participants (conversation_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+        [p.conversation_id, p.user_id]
+      ).catch(() => {});
+    }
+    return reply.status(201).send({ ok: true });
+  });
+
   // ── Evolution Proxy ───────────────────────────────────────────────────────
   fastify.post('/evolution-proxy', auth, async (req, reply) => {
     const { action, instanceName, data: body } = req.body || {};

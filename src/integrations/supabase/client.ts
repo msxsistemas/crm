@@ -99,6 +99,7 @@ const TABLE_MAP: Record<string, string> = {
   conversation_labels: '/conversation-labels',
   internal_messages: '/internal-messages',
   internal_channels: '/internal-channels',
+  internal_conversations: '/internal-channels',
   products: '/products',
   tasks: '/tasks',
   user_roles: '/__skip__',
@@ -127,7 +128,14 @@ class QueryBuilder {
     this._endpoint = TABLE_MAP[table] || `/${table.replace(/_/g, '-')}`;
   }
 
-  select(cols?: string) { this._selectCols = cols; this._method = 'GET'; return this; }
+  select(cols?: string) {
+    this._selectCols = cols;
+    // Only switch to GET if no write method was set — allows insert().select() pattern
+    if (this._method !== 'POST' && this._method !== 'PATCH' && this._method !== 'DELETE') {
+      this._method = 'GET';
+    }
+    return this;
+  }
   insert(data: unknown) { this._method = 'POST'; this._body = data; return this; }
   update(data: unknown) { this._method = 'PATCH'; this._body = data; return this; }
   delete() { this._method = 'DELETE'; return this; }
@@ -152,6 +160,12 @@ class QueryBuilder {
   overlaps(col: string, val: unknown) { this._filters.push({ col, val, op: 'overlaps' }); return this; }
   filter(col: string, op: string, val: unknown) { this._filters.push({ col, val, op }); return this; }
   textSearch(col: string, query: string) { this._filters.push({ col, val: query, op: 'search' }); return this; }
+  or(filter: string) {
+    // Parse "col.ilike.%term%" patterns and extract as search
+    const m = filter.match(/\.ilike\.%([^%,]+)%/);
+    if (m) this._filters.push({ col: 'search', val: m[1], op: 'eq' });
+    return this;
+  }
 
   order(col: string, opts?: { ascending?: boolean }) {
     this._orderCol = col;

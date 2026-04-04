@@ -18,7 +18,8 @@ export default async function messageRoutes(fastify) {
   // Generic /messages route for shim compatibility
   fastify.get('/messages', auth, async (req) => {
     const { conversation_id, limit: lim = 50 } = req.query;
-    if (!conversation_id) return [];
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!conversation_id || !UUID_RE.test(conversation_id)) return [];
     const { rows } = await query(
       `SELECT *, content as body, (direction = 'outbound') as from_me FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC LIMIT $2`,
       [conversation_id, lim]
