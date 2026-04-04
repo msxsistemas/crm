@@ -601,76 +601,6 @@ const Inbox = () => {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Keyboard shortcuts (J/K/R/Esc/N/S/Ctrl+/)
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // Only fire if no input/textarea/select/contenteditable is focused
-      const tag = (document.activeElement as HTMLElement)?.tagName;
-      const isEditable = (document.activeElement as HTMLElement)?.isContentEditable;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || isEditable) return;
-
-      // Ctrl+/ → toggle shortcuts modal
-      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
-        e.preventDefault();
-        setShowShortcutsModal((prev) => !prev);
-        return;
-      }
-
-      if (e.key === "Escape") {
-        if (showShortcutsModal) { setShowShortcutsModal(false); return; }
-        if (globalSearchOpen) { setGlobalSearchOpen(false); return; }
-        setSelected(null);
-        return;
-      }
-
-      // J → next conversation
-      if (e.key === "j" || e.key === "J") {
-        e.preventDefault();
-        const idx = focusFiltered.findIndex((c) => c.id === selected);
-        const next = focusFiltered[idx + 1];
-        if (next) handleSelectConvo(next.id);
-        return;
-      }
-
-      // K → previous conversation
-      if (e.key === "k" || e.key === "K") {
-        e.preventDefault();
-        const idx = focusFiltered.findIndex((c) => c.id === selected);
-        const prev = focusFiltered[Math.max(0, idx - 1)];
-        if (prev) handleSelectConvo(prev.id);
-        return;
-      }
-
-      // R → focus reply textarea
-      if (e.key === "r" || e.key === "R") {
-        e.preventDefault();
-        (document.querySelector('textarea[placeholder*="mensagem"]') as HTMLTextAreaElement | null)?.focus();
-        return;
-      }
-
-      // N → mark current conversation as read
-      if (e.key === "n" || e.key === "N") {
-        if (!selected) return;
-        e.preventDefault();
-        supabase.from("conversations").update({ unread_count: 0 }).eq("id", selected).then(() => {
-          setConversations((prev) => prev.map((c) => c.id === selected ? { ...c, unread_count: 0 } : c));
-        });
-        return;
-      }
-
-      // S → toggle star on current conversation
-      if (e.key === "s" || e.key === "S") {
-        if (!selected) return;
-        e.preventDefault();
-        const conv = conversations.find((c) => c.id === selected);
-        if (conv) toggleStarred(conv.id, conv.starred);
-        return;
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, focusFiltered, conversations, showShortcutsModal, globalSearchOpen]);
 
   const toggleFavorite = (convoId: string) => {
     setFavorites((prev) => {
@@ -2091,6 +2021,70 @@ const Inbox = () => {
     : focusFiltered0.filter(c => !blacklistedPhones.has(c.contacts?.phone || ""));
 
   const blockedInView = focusFiltered0.filter(c => blacklistedPhones.has(c.contacts?.phone || "")).length;
+
+  // Keyboard shortcuts (J/K/R/Esc/N/S/Ctrl+/) — must be after focusFiltered declaration
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      const isEditable = (document.activeElement as HTMLElement)?.isContentEditable;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || isEditable) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault();
+        setShowShortcutsModal((prev) => !prev);
+        return;
+      }
+
+      if (e.key === "Escape") {
+        if (showShortcutsModal) { setShowShortcutsModal(false); return; }
+        if (globalSearchOpen) { setGlobalSearchOpen(false); return; }
+        setSelected(null);
+        return;
+      }
+
+      if (e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        const idx = focusFiltered.findIndex((c) => c.id === selected);
+        const next = focusFiltered[idx + 1];
+        if (next) handleSelectConvo(next.id);
+        return;
+      }
+
+      if (e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        const idx = focusFiltered.findIndex((c) => c.id === selected);
+        const prev = focusFiltered[Math.max(0, idx - 1)];
+        if (prev) handleSelectConvo(prev.id);
+        return;
+      }
+
+      if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        (document.querySelector('textarea[placeholder*="mensagem"]') as HTMLTextAreaElement | null)?.focus();
+        return;
+      }
+
+      if (e.key === "n" || e.key === "N") {
+        if (!selected) return;
+        e.preventDefault();
+        supabase.from("conversations").update({ unread_count: 0 }).eq("id", selected).then(() => {
+          setConversations((prev) => prev.map((c) => c.id === selected ? { ...c, unread_count: 0 } : c));
+        });
+        return;
+      }
+
+      if (e.key === "s" || e.key === "S") {
+        if (!selected) return;
+        e.preventDefault();
+        const conv = conversations.find((c) => c.id === selected);
+        if (conv) toggleStarred(conv.id, conv.starred);
+        return;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, focusFiltered, conversations, showShortcutsModal, globalSearchOpen]);
 
   const paginatedConvos = focusFiltered.slice(0, convoPage * CONVO_PAGE_SIZE);
   const hasMoreConvos = focusFiltered.length > convoPage * CONVO_PAGE_SIZE;
