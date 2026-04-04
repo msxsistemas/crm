@@ -58,6 +58,24 @@ export default async function miscRoutes(fastify) {
     return { ok: true };
   });
 
+  // ── Contact Tags ──────────────────────────────────────────────────────────
+  fastify.get('/contact-tags', auth, async (req) => {
+    const { contact_id } = req.query;
+    if (!contact_id) return [];
+    const { rows } = await query('SELECT * FROM contact_tags WHERE contact_id = $1', [contact_id]);
+    return rows;
+  });
+  fastify.post('/contact-tags', auth, async (req, reply) => {
+    const { contact_id, tag_id } = req.body;
+    const { rows } = await query('INSERT INTO contact_tags (contact_id, tag_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING *', [contact_id, tag_id]);
+    return reply.status(201).send(rows[0] || {});
+  });
+  fastify.delete('/contact-tags', auth, async (req) => {
+    const { contact_id, tag_id } = req.query;
+    await query('DELETE FROM contact_tags WHERE contact_id=$1 AND tag_id=$2', [contact_id, tag_id]);
+    return { ok: true };
+  });
+
   // ── Notifications ─────────────────────────────────────────────────────────
   fastify.get('/notifications', auth, async (req) => {
     const { rows } = await query('SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50', [req.user.id]);
@@ -109,6 +127,95 @@ export default async function miscRoutes(fastify) {
   fastify.delete('/connections/:id', auth, async (req) => {
     await query('DELETE FROM evolution_connections WHERE id = $1', [req.params.id]);
     return { ok: true };
+  });
+
+  // ── Kanban ────────────────────────────────────────────────────────────────
+  fastify.get('/kanban-boards', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM kanban_boards WHERE user_id = $1 ORDER BY created_at ASC', [req.user.id]);
+    return rows;
+  });
+  fastify.post('/kanban-boards', auth, async (req, reply) => {
+    const { name, is_default } = req.body;
+    const { rows } = await query('INSERT INTO kanban_boards (user_id, name, is_default) VALUES ($1,$2,$3) RETURNING *', [req.user.id, name, is_default ?? false]);
+    return reply.status(201).send(rows[0]);
+  });
+  fastify.patch('/kanban-boards/:id', auth, async (req) => {
+    const f = req.body;
+    const { rows } = await query('UPDATE kanban_boards SET name=COALESCE($1,name), is_default=COALESCE($2,is_default), updated_at=NOW() WHERE id=$3 AND user_id=$4 RETURNING *', [f.name, f.is_default, req.params.id, req.user.id]);
+    return rows[0];
+  });
+  fastify.delete('/kanban-boards/:id', auth, async (req) => {
+    await query('DELETE FROM kanban_boards WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    return { ok: true };
+  });
+
+  fastify.get('/kanban-columns', auth, async (req) => {
+    const { board_id } = req.query;
+    if (board_id) {
+      const { rows } = await query('SELECT * FROM kanban_columns WHERE board_id = $1 ORDER BY position ASC', [board_id]);
+      return rows;
+    }
+    const { rows } = await query('SELECT kc.* FROM kanban_columns kc JOIN kanban_boards kb ON kb.id = kc.board_id WHERE kb.user_id = $1 ORDER BY kc.position ASC', [req.user.id]);
+    return rows;
+  });
+  fastify.post('/kanban-columns', auth, async (req, reply) => {
+    const { board_id, name, color, position, is_default, is_finalized } = req.body;
+    if (Array.isArray(req.body)) {
+      const inserted = [];
+      for (const col of req.body) {
+        const { rows } = await query('INSERT INTO kanban_columns (board_id, name, color, position, is_default, is_finalized) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [col.board_id, col.name, col.color || '#3B82F6', col.position || 0, col.is_default ?? false, col.is_finalized ?? false]);
+        inserted.push(rows[0]);
+      }
+      return reply.status(201).send(inserted);
+    }
+    const { rows } = await query('INSERT INTO kanban_columns (board_id, name, color, position, is_default, is_finalized) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [board_id, name, color || '#3B82F6', position || 0, is_default ?? false, is_finalized ?? false]);
+    return reply.status(201).send(rows[0]);
+  });
+  fastify.patch('/kanban-columns/:id', auth, async (req) => {
+    const f = req.body;
+    const { rows } = await query('UPDATE kanban_columns SET name=COALESCE($1,name), color=COALESCE($2,color), position=COALESCE($3,position), is_finalized=COALESCE($4,is_finalized), updated_at=NOW() WHERE id=$5 RETURNING *', [f.name, f.color, f.position, f.is_finalized, req.params.id]);
+    return rows[0];
+  });
+  fastify.delete('/kanban-columns/:id', auth, async (req) => {
+    await query('DELETE FROM kanban_columns WHERE id=$1', [req.params.id]); return { ok: true };
+  });
+
+  fastify.get('/kanban-cards', auth, async (req) => {
+    const { column_id, board_id } = req.query;
+    if (column_id) {
+      const ids = Array.isArray(column_id) ? column_id : column_id.split(',');
+      const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+      const { rows } = await query(`SELECT kc.*, c.name as contact_name, c.phone as contact_phone FROM kanban_cards kc LEFT JOIN contacts c ON c.id = kc.contact_id WHERE kc.column_id IN (${placeholders}) ORDER BY kc.position ASC, kc.created_at ASC`, ids);
+      return rows;
+    }
+    if (board_id) {
+      const { rows } = await query('SELECT kc.*, c.name as contact_name, c.phone as contact_phone FROM kanban_cards kc JOIN kanban_columns col ON col.id = kc.column_id LEFT JOIN contacts c ON c.id = kc.contact_id WHERE col.board_id = $1 ORDER BY kc.position ASC', [board_id]);
+      return rows;
+    }
+    return [];
+  });
+  fastify.post('/kanban-cards', auth, async (req, reply) => {
+    const b = Array.isArray(req.body) ? req.body : [req.body];
+    const inserted = [];
+    for (const card of b) {
+      const { rows } = await query('INSERT INTO kanban_cards (column_id, board_id, contact_id, name, phone, value, priority, tags, labels, assigned_to, due_date, notes, position) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *', [card.column_id, card.board_id, card.contact_id, card.name, card.phone, card.value || 0, card.priority || 'medium', card.tags || [], card.labels || [], card.assigned_to, card.due_date, card.notes, card.position || 0]);
+      inserted.push(rows[0]);
+    }
+    return reply.status(201).send(b.length === 1 ? inserted[0] : inserted);
+  });
+  fastify.patch('/kanban-cards/:id', auth, async (req) => {
+    const f = req.body;
+    const allowed = ['column_id','board_id','name','phone','value','priority','tags','labels','assigned_to','due_date','notes','position'];
+    const updates = []; const params = []; let p = 1;
+    for (const k of allowed) { if (f[k] !== undefined) { updates.push(`${k}=$${p}`); params.push(f[k]); p++; } }
+    if (!updates.length) return {};
+    updates.push(`updated_at=NOW()`);
+    params.push(req.params.id);
+    const { rows } = await query(`UPDATE kanban_cards SET ${updates.join(',')} WHERE id=$${p} RETURNING *`, params);
+    return rows[0];
+  });
+  fastify.delete('/kanban-cards/:id', auth, async (req) => {
+    await query('DELETE FROM kanban_cards WHERE id=$1', [req.params.id]); return { ok: true };
   });
 
   // ── Campaigns ────────────────────────────────────────────────────────────

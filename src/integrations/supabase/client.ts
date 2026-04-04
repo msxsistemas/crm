@@ -102,7 +102,11 @@ const TABLE_MAP: Record<string, string> = {
   internal_conversations: '/internal-channels',
   products: '/products',
   tasks: '/tasks',
+  kanban_boards: '/kanban-boards',
+  kanban_columns: '/kanban-columns',
+  kanban_cards: '/kanban-cards',
   user_roles: '/__skip__',
+  contact_tags: '/contact-tags',
 };
 
 type FilterOp = { col: string; val: unknown; op: string };
@@ -230,7 +234,13 @@ class QueryBuilder {
 
       if (this._method === 'DELETE') {
         const idF = this._filters.find(f => f.col === 'id' && f.op === 'eq');
-        if (idF) url = `${url}/${idF.val}`;
+        if (idF) {
+          url = `${url}/${idF.val}`;
+        } else {
+          // For junction tables with no id, pass filters as query params
+          const qParts = this._filters.map(f => `${encodeURIComponent(f.col)}=${encodeURIComponent(String(f.val))}`);
+          if (qParts.length) url += `?${qParts.join('&')}`;
+        }
         const data = await apiFetch('DELETE', url);
         return { data, error: null };
       }
