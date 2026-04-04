@@ -1,20 +1,21 @@
 import { Component, ErrorInfo, ReactNode } from "react";
 
 interface Props { children: ReactNode; }
-interface State { hasError: boolean; error: Error | null; }
+interface State { hasError: boolean; error: Error | null; componentStack: string | null; }
 
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false, error: null, componentStack: null };
   }
 
   static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error };
+    return { hasError: true, error, componentStack: null };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("ErrorBoundary caught:", error, info);
+    this.setState({ componentStack: info.componentStack });
   }
 
   render() {
@@ -33,6 +34,9 @@ export class ErrorBoundary extends Component<Props, State> {
               <details className="text-left text-xs bg-muted p-3 rounded-md">
                 <summary className="cursor-pointer font-medium mb-1">Detalhes do erro</summary>
                 <pre className="whitespace-pre-wrap break-all">{this.state.error.message}</pre>
+                {this.state.componentStack && (
+                  <pre className="whitespace-pre-wrap break-all mt-2 opacity-70">{this.state.componentStack}</pre>
+                )}
               </details>
             )}
             <button

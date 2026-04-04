@@ -1,1 +1,0 @@
-DELETE FROM evolution_connections WHERE status != 'open';

@@ -1,2 +1,0 @@
-UPDATE public.contacts SET name = phone WHERE name = 'Camila Suporte';
-UPDATE public.kanban_cards SET name = (SELECT phone FROM contacts WHERE contacts.id = kanban_cards.contact_id) WHERE name = 'Camila Suporte';

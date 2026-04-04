@@ -1,1 +1,0 @@
-ALTER TABLE public.reseller_plans RENAME COLUMN max_campaigns TO max_contacts;
