@@ -12,8 +12,8 @@ export default async function conversationRoutes(fastify) {
     let p = 1;
 
     if (status) { conditions.push(`c.status = $${p}`); params.push(status); p++; }
-    if (assigned_to) { conditions.push(`c.assigned_to = $${p}`); params.push(assigned_to); p++; }
-    if (connection_name) { conditions.push(`c.connection_name = $${p}`); params.push(connection_name); p++; }
+    if (assigned_to && assigned_to !== 'null') { conditions.push(`c.assigned_to = $${p}`); params.push(assigned_to); p++; }
+    if (connection_name && connection_name !== 'null') { conditions.push(`c.connection_name = $${p}`); params.push(connection_name); p++; }
     if (search) {
       conditions.push(`(ct.name ILIKE $${p} OR ct.phone ILIKE $${p})`);
       params.push(`%${search}%`); p++;

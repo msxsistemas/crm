@@ -5,7 +5,7 @@ export default async function contactRoutes(fastify) {
 
   // List contacts
   fastify.get('/contacts', auth, async (req) => {
-    const { search, tag, page = 1, limit = 50, sort = 'created_at', order = 'desc' } = req.query;
+    const { search, tag, page = 1, limit = 50, order } = req.query;
     const offset = (page - 1) * limit;
     const conditions = ['1=1'];
     const params = [];
@@ -20,9 +20,18 @@ export default async function contactRoutes(fastify) {
       params.push(tag); p++;
     }
 
+    // order param: 'name' = ASC, '-name' = DESC, default = created_at DESC
+    const ALLOWED_COLS = ['name','phone','email','created_at','updated_at','lead_score'];
+    let orderClause = 'created_at DESC';
+    if (order) {
+      const desc = order.startsWith('-');
+      const col = desc ? order.slice(1) : order;
+      if (ALLOWED_COLS.includes(col)) orderClause = `"${col}" ${desc ? 'DESC' : 'ASC'}`;
+    }
+
     const where = conditions.join(' AND ');
     const [{ rows }, { rows: countRows }] = await Promise.all([
-      query(`SELECT * FROM contacts WHERE ${where} ORDER BY ${sort} ${order} LIMIT $${p} OFFSET $${p+1}`, [...params, limit, offset]),
+      query(`SELECT * FROM contacts WHERE ${where} ORDER BY ${orderClause} LIMIT $${p} OFFSET $${p+1}`, [...params, limit, offset]),
       query(`SELECT COUNT(*) FROM contacts WHERE ${where}`, params),
     ]);
 
