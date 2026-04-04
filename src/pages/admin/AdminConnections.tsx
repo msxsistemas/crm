@@ -18,15 +18,11 @@ const AdminConnections = () => {
 
   const loadConnections = async () => {
     setLoading(true);
-    const [evo, zapi, prof] = await Promise.all([
+    const [evo, prof] = await Promise.all([
       supabase.from("evolution_connections").select("*"),
-      supabase.from("zapi_connections").select("*"),
       supabase.from("profiles").select("id, full_name"),
     ]);
-    const all = [
-      ...((evo.data || []) as any[]).map(c => ({ ...c, provider: "Evolution" })),
-      ...((zapi.data || []) as any[]).map(c => ({ ...c, provider: "Z-API", instance_name: c.label })),
-    ];
+    const all = ((evo.data || []) as any[]).map(c => ({ ...c, provider: "Evolution" }));
     setConnections(all);
     setProfiles((prof.data as any[]) || []);
     setLoading(false);
@@ -39,8 +35,7 @@ const AdminConnections = () => {
 
   const deleteConnection = async (conn: any) => {
     if (!confirm("Remover esta conexão?")) return;
-    const table = conn.provider === "Evolution" ? "evolution_connections" : "zapi_connections";
-    await supabase.from(table).delete().eq("id", conn.id);
+    await supabase.from("evolution_connections").delete().eq("id", conn.id);
     toast.success("Conexão removida!");
     loadConnections();
   };

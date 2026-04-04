@@ -13,12 +13,11 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     const load = async () => {
-      const [r, p, t, evo, zapi, prof] = await Promise.all([
+      const [r, p, t, evo, prof] = await Promise.all([
         supabase.from("reseller_accounts").select("id, is_active, created_at"),
         supabase.from("reseller_plans").select("id"),
         supabase.from("reseller_transactions").select("amount, status, created_at"),
         supabase.from("evolution_connections").select("id"),
-        supabase.from("zapi_connections").select("id"),
         supabase.from("profiles").select("id, created_at"),
       ]);
 
@@ -32,7 +31,7 @@ const AdminDashboard = () => {
         active: resellers.filter(x => x.is_active).length,
         plans: (p.data || []).length,
         revenue,
-        connections: ((evo.data || []).length) + ((zapi.data || []).length),
+        connections: (evo.data || []).length,
         users: profiles.length,
       });
 

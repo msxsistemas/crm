@@ -202,10 +202,9 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
   const fetchData = useCallback(async () => {
     if (!user) return;
 
-    const [profileRes, evoRes, zapiRes, cloudRes, unreadRes, waitingRes] = await Promise.all([
+    const [profileRes, evoRes, cloudRes, unreadRes, waitingRes] = await Promise.all([
       supabase.from("profiles").select("full_name, status").eq("id", user.id).maybeSingle(),
       supabase.from("evolution_connections").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "open"),
-      supabase.from("zapi_connections").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("connected", true),
       supabase.from("whatsapp_cloud_connections").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "active"),
       supabase.from("conversations").select("id", { count: "exact", head: true }).gt("unread_count", 0),
       supabase.from("conversations").select("id", { count: "exact", head: true }).eq("status", "open"),
@@ -213,7 +212,7 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
 
     if (profileRes.data?.full_name) setFullName(profileRes.data.full_name);
     if (profileRes.data?.status) setStatus(profileRes.data.status as UserStatus);
-    setConnectionCount((evoRes.count ?? 0) + (zapiRes.count ?? 0) + (cloudRes.count ?? 0));
+    setConnectionCount((evoRes.count ?? 0) + (cloudRes.count ?? 0));
     setUnreadConversations(unreadRes.count ?? 0);
     setWaitingConversations(waitingRes.count ?? 0);
   }, [user]);

@@ -5,44 +5,42 @@
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'https://api.msxzap.pro';
 
-function getToken(): string | null {
-  return localStorage.getItem('auth_token');
+function getCsrfToken(): string | null {
+  const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  return match ? match[1] : null;
 }
 
 async function apiFetch(method: string, path: string, body?: unknown): Promise<unknown> {
-  const token = getToken();
+  const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (!SAFE_METHODS.has(method)) {
+    const csrf = getCsrfToken();
+    if (csrf) headers['X-CSRF-Token'] = csrf;
+  }
 
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
     headers,
+    credentials: 'include',
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
   if (res.status === 401) {
-    const refreshToken = localStorage.getItem('refresh_token');
-    if (refreshToken) {
-      const rr = await fetch(`${BASE_URL}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken }),
+    const rr = await fetch(`${BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+    });
+    if (rr.ok) {
+      const r2 = await fetch(`${BASE_URL}${path}`, {
+        method,
+        headers,
+        credentials: 'include',
+        body: body !== undefined ? JSON.stringify(body) : undefined,
       });
-      if (rr.ok) {
-        const d = await rr.json();
-        localStorage.setItem('auth_token', d.token);
-        localStorage.setItem('refresh_token', d.refreshToken);
-        const r2 = await fetch(`${BASE_URL}${path}`, {
-          method,
-          headers: { ...headers, Authorization: `Bearer ${d.token}` },
-          body: body !== undefined ? JSON.stringify(body) : undefined,
-        });
-        if (!r2.ok) throw new Error((await r2.json().catch(() => ({}))).error || r2.statusText);
-        return r2.json().catch(() => null);
-      }
+      if (!r2.ok) throw new Error((await r2.json().catch(() => ({}))).error || r2.statusText);
+      return r2.json().catch(() => null);
     }
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('refresh_token');
     window.location.href = '/login';
     throw new Error('Sessão expirada');
   }
@@ -61,7 +59,6 @@ const TABLE_MAP: Record<string, string> = {
   settings: '/settings',
   evolution_connections: '/evolution-connections',
   connections: '/evolution-connections',
-  zapi_connections: '/zapi-connections',
   tags: '/tags',
   categories: '/categories',
   contacts: '/contacts',
@@ -315,12 +312,15 @@ class StorageBucketProxy {
   constructor(bucket: string) { this.bucket = bucket; }
 
   async upload(path: string, file: File | Blob, _opts?: unknown) {
-    const token = getToken();
     const fd = new FormData();
     fd.append('file', file);
+    const headers: Record<string, string> = {};
+    const csrf = getCsrfToken();
+    if (csrf) headers['X-CSRF-Token'] = csrf;
     const res = await fetch(`${BASE_URL}/upload/${this.bucket}/${path}`, {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      headers,
+      credentials: 'include',
       body: fd,
     });
     if (!res.ok) return { data: null, error: new Error(res.statusText) };
@@ -353,16 +353,13 @@ const authShim = {
       const res = await fetch(`${BASE_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email, password }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         return { data: null, error: { message: err.error || 'Credenciais inválidas' } };
       }
-      const data = await res.json();
-      localStorage.setItem('auth_token', data.token);
-      localStorage.setItem('refresh_token', data.refreshToken);
-      // Get user profile
       const me = await apiFetch('GET', '/auth/me').catch(() => null) as Record<string, unknown> | null;
       const session = me ? { user: { id: me.id, email: me.email } } : null;
       return { data: { session }, error: null };
@@ -376,6 +373,7 @@ const authShim = {
       const res = await fetch(`${BASE_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email, password, name: options?.data?.name || options?.data?.full_name || email }),
       });
       if (!res.ok) {
@@ -383,8 +381,6 @@ const authShim = {
         return { data: null, error: { message: err.error || 'Erro ao criar conta' } };
       }
       const data = await res.json();
-      localStorage.setItem('auth_token', data.token);
-      localStorage.setItem('refresh_token', data.refreshToken);
       return { data: { user: { id: data.user?.id, email } }, error: null };
     } catch (err) {
       return { data: null, error: { message: (err as Error).message } };
@@ -392,14 +388,11 @@ const authShim = {
   },
 
   async signOut() {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('refresh_token');
+    await fetch(`${BASE_URL}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {});
     return { error: null };
   },
 
   async getSession() {
-    const token = localStorage.getItem('auth_token');
-    if (!token) return { data: { session: null }, error: null };
     try {
       const me = await apiFetch('GET', '/auth/me') as Record<string, unknown>;
       return { data: { session: { user: { id: me.id, email: me.email, user_metadata: { name: me.name } } } }, error: null };
@@ -409,8 +402,6 @@ const authShim = {
   },
 
   async getUser() {
-    const token = localStorage.getItem('auth_token');
-    if (!token) return { data: { user: null }, error: null };
     try {
       const me = await apiFetch('GET', '/auth/me') as Record<string, unknown>;
       return { data: { user: { id: me.id, email: me.email } }, error: null };
@@ -438,15 +429,9 @@ const authShim = {
   },
 
   onAuthStateChange(callback: (event: string, session: unknown) => void) {
-    // Fire immediately with current state
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-      apiFetch('GET', '/auth/me').then(me => {
-        callback('SIGNED_IN', { user: { id: (me as Record<string, unknown>)?.id, email: (me as Record<string, unknown>)?.email } });
-      }).catch(() => callback('SIGNED_OUT', null));
-    } else {
-      setTimeout(() => callback('SIGNED_OUT', null), 0);
-    }
+    apiFetch('GET', '/auth/me').then(me => {
+      callback('SIGNED_IN', { user: { id: (me as Record<string, unknown>)?.id, email: (me as Record<string, unknown>)?.email } });
+    }).catch(() => callback('SIGNED_OUT', null));
     return { data: { subscription: { unsubscribe: () => {} } } };
   },
 };
@@ -456,7 +441,6 @@ const FUNCTION_MAP: Record<string, string> = {
   'manage-users': '/manage-users',
   'ai-agent': '/ai-agent',
   'evolution-api': '/evolution-proxy',
-  'zapi': '/zapi-proxy',
 };
 
 const functionsShim = {

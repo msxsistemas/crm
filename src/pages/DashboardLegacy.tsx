@@ -18,7 +18,6 @@ const DashboardLegacy = () => {
   const [messages, setMessages] = useState<any[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
   const [evoConns, setEvoConns] = useState<any[]>([]);
-  const [zapiConns, setZapiConns] = useState<any[]>([]);
   const [profiles, setProfiles] = useState<any[]>([]);
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,12 +34,11 @@ const DashboardLegacy = () => {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      const [c, m, ct, evo, zapi, pr, sub] = await Promise.all([
+      const [c, m, ct, evo, pr, sub] = await Promise.all([
         supabase.from("conversations").select("*"),
         supabase.from("messages").select("*"),
         supabase.from("contacts").select("*"),
         supabase.from("evolution_connections").select("*"),
-        supabase.from("zapi_connections").select("*"),
         supabase.from("profiles").select("*"),
         supabase.from("subscriptions").select("*"),
       ]);
@@ -48,7 +46,6 @@ const DashboardLegacy = () => {
       setMessages(m.data || []);
       setContacts(ct.data || []);
       setEvoConns(evo.data || []);
-      setZapiConns(zapi.data || []);
       setProfiles(pr.data || []);
       setSubscriptions(sub.data || []);
       setLoading(false);
@@ -61,7 +58,7 @@ const DashboardLegacy = () => {
   const pendingConvos = conversations.filter(c => c.status === "open" && c.unread_count > 0);
   const closedConvos = conversations.filter(c => c.status === "closed" || c.status === "resolved");
   const onlineUsers = profiles.filter(p => p.status === "online");
-  const totalConnections = evoConns.length + zapiConns.length;
+  const totalConnections = evoConns.length;
 
   const sentMessages = messages.filter(m => m.from_me);
   const receivedMessages = messages.filter(m => !m.from_me);

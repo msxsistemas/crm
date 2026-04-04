@@ -1,10 +1,22 @@
 import bcrypt from 'bcryptjs';
 import { query } from '../database.js';
 import { generateTokens, verifyRefreshToken } from '../auth.js';
+import { refreshCsrfToken } from '../middleware/csrf.js';
 
 export default async function authRoutes(fastify) {
   // Login — máximo 10 tentativas por IP a cada 15 minutos
   fastify.post('/auth/login', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['email', 'password'],
+        properties: {
+          email: { type: 'string', format: 'email', maxLength: 254 },
+          password: { type: 'string', minLength: 1, maxLength: 128 },
+        },
+        additionalProperties: false,
+      },
+    },
     config: {
       rateLimit: {
         max: 10,
@@ -28,11 +40,27 @@ export default async function authRoutes(fastify) {
     const { token, refreshToken } = generateTokens(user);
     await query('UPDATE profiles SET last_login = NOW() WHERE id = $1', [user.id]);
 
-    return { token, refreshToken, user: sanitizeUser(user) };
+    setCookies(reply, token, refreshToken);
+    const csrfToken = refreshCsrfToken(reply);
+    return { token, refreshToken, csrfToken, user: sanitizeUser(user) };
   });
 
   // Register
-  fastify.post('/auth/register', async (req, reply) => {
+  fastify.post('/auth/register', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['name', 'email', 'password'],
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 100 },
+          email: { type: 'string', format: 'email', maxLength: 254 },
+          password: { type: 'string', minLength: 6, maxLength: 128 },
+          role: { type: 'string', enum: ['admin', 'manager', 'agent'] },
+        },
+        additionalProperties: false,
+      },
+    },
+  }, async (req, reply) => {
     const { name, email, password, role = 'agent' } = req.body;
     if (!name || !email || !password) return reply.status(400).send({ error: 'Dados incompletos' });
 
@@ -46,24 +74,35 @@ export default async function authRoutes(fastify) {
     );
 
     const { token, refreshToken } = generateTokens(rows[0]);
+    setCookies(reply, token, refreshToken);
     return reply.status(201).send({ token, refreshToken, user: sanitizeUser(rows[0]) });
   });
 
-  // Refresh token
+  // Refresh token — accepts token from body (legacy) or httpOnly cookie
   fastify.post('/auth/refresh', async (req, reply) => {
-    const { refreshToken } = req.body;
-    if (!refreshToken) return reply.status(400).send({ error: 'Refresh token obrigatório' });
+    const token = req.body?.refreshToken || req.cookies?.refresh_token;
+    if (!token) return reply.status(400).send({ error: 'Refresh token obrigatório' });
 
     try {
-      const payload = verifyRefreshToken(refreshToken);
+      const payload = verifyRefreshToken(token);
       const { rows } = await query('SELECT * FROM profiles WHERE id = $1', [payload.id]);
       if (!rows[0]) return reply.status(401).send({ error: 'Usuário não encontrado' });
 
       const tokens = generateTokens(rows[0]);
+      setCookies(reply, tokens.token, tokens.refreshToken);
       return tokens;
     } catch {
       return reply.status(401).send({ error: 'Refresh token inválido' });
     }
+  });
+
+  // Short-lived socket token — used by Socket.io client (can't read httpOnly cookies from JS)
+  fastify.get('/auth/socket-token', { preHandler: fastify.authenticate }, async (req) => {
+    const { generateTokens } = await import('../auth.js');
+    const { rows } = await query('SELECT * FROM profiles WHERE id = $1', [req.user.id]);
+    if (!rows[0]) return { token: null };
+    const { token } = generateTokens(rows[0]);
+    return { token };
   });
 
   // Get current user
@@ -75,12 +114,53 @@ export default async function authRoutes(fastify) {
 
   // Update profile
   fastify.patch('/auth/me', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { name, avatar_url, permissions } = req.body;
+    const { name, avatar_url, permissions, two_factor_enabled } = req.body;
+    const updates = [];
+    const params = [];
+    let p = 1;
+    if (name !== undefined) { updates.push(`name = $${p}`); params.push(name); p++; }
+    if (avatar_url !== undefined) { updates.push(`avatar_url = $${p}`); params.push(avatar_url); p++; }
+    if (permissions !== undefined) { updates.push(`permissions = $${p}`); params.push(JSON.stringify(permissions)); p++; }
+    if (two_factor_enabled !== undefined) { updates.push(`two_factor_enabled = $${p}`); params.push(two_factor_enabled); p++; }
+    if (!updates.length) return reply.status(400).send({ error: 'Nada para atualizar' });
+    updates.push(`updated_at = NOW()`);
+    params.push(req.user.id);
     const { rows } = await query(
-      'UPDATE profiles SET name = COALESCE($1, name), avatar_url = COALESCE($2, avatar_url), permissions = COALESCE($3, permissions), updated_at = NOW() WHERE id = $4 RETURNING *',
-      [name, avatar_url, permissions ? JSON.stringify(permissions) : null, req.user.id]
+      `UPDATE profiles SET ${updates.join(', ')} WHERE id = $${p} RETURNING *`,
+      params
     );
     return sanitizeUser(rows[0]);
+  });
+
+  // Upload avatar
+  fastify.post('/auth/me/avatar', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const data = await req.file();
+    if (!data) return reply.status(400).send({ error: 'Arquivo não encontrado' });
+    if (data.file.truncated) return reply.status(413).send({ error: 'Arquivo muito grande (máx 2MB)' });
+
+    const { uploadToMinio, ensureBucket } = await import('../minio.js');
+    await ensureBucket();
+
+    const ext = data.filename.split('.').pop() || 'jpg';
+    const objectName = `avatars/${req.user.id}/avatar.${ext}`;
+    const buffer = await data.toBuffer();
+    const url = await uploadToMinio(objectName, buffer, data.mimetype);
+
+    await query('UPDATE profiles SET avatar_url = $1 WHERE id = $2', [url, req.user.id]);
+    return { avatar_url: url };
+  });
+
+  // CSRF token — frontend calls this on init to get a token for mutating requests
+  fastify.get('/auth/csrf-token', async (req, reply) => {
+    const token = refreshCsrfToken(reply);
+    return { token };
+  });
+
+  // Logout — clear httpOnly cookies
+  fastify.post('/auth/logout', async (req, reply) => {
+    reply.clearCookie('access_token', { path: '/' });
+    reply.clearCookie('refresh_token', { path: '/' });
+    return { ok: true };
   });
 
   // Change password
@@ -100,4 +180,22 @@ function sanitizeUser(u) {
   const { password_hash, ...rest } = u;
   // full_name alias for backward compat with frontend
   return { ...rest, full_name: rest.name };
+}
+
+function setCookies(reply, token, refreshToken) {
+  const secure = process.env.NODE_ENV === 'production';
+  reply.setCookie('access_token', token, {
+    httpOnly: true,
+    secure,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 60 * 60 * 24, // 1 day
+  });
+  reply.setCookie('refresh_token', refreshToken, {
+    httpOnly: true,
+    secure,
+    sameSite: 'lax',
+    path: '/auth/refresh',
+    maxAge: 60 * 60 * 24 * 30, // 30 days
+  });
 }

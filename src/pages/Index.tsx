@@ -192,7 +192,6 @@ function useDashboardData() {
   const [messages, setMessages] = useState<any[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
   const [evoConnections, setEvoConnections] = useState<any[]>([]);
-  const [zapiConnections, setZapiConnections] = useState<any[]>([]);
   const [profiles, setProfiles] = useState<any[]>([]);
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -206,12 +205,11 @@ function useDashboardData() {
     ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
     const cutoff = ninetyDaysAgo.toISOString();
 
-    const [convRes, msgRes, contRes, evoRes, zapiRes, profRes, subRes] = await Promise.all([
+    const [convRes, msgRes, contRes, evoRes, profRes, subRes] = await Promise.all([
       supabase.from("conversations").select("id, status, unread_count, last_message_at, created_at, instance_name, contact_id, assigned_to").order("last_message_at", { ascending: false }),
       supabase.from("messages").select("id, conversation_id, from_me, created_at, status").gte("created_at", cutoff).order("created_at", { ascending: false }),
       supabase.from("contacts").select("id, name, phone, created_at"),
       supabase.from("evolution_connections").select("id, instance_name, status"),
-      supabase.from("zapi_connections").select("id, label, connected"),
       supabase.from("profiles").select("id, full_name, status"),
       supabase.from("subscriptions").select("id, user_id, expires_at, status"),
     ]);
@@ -219,7 +217,6 @@ function useDashboardData() {
     setMessages(msgRes.data || []);
     setContacts(contRes.data || []);
     setEvoConnections(evoRes.data || []);
-    setZapiConnections(zapiRes.data || []);
     setProfiles(profRes.data || []);
     setSubscriptions(subRes.data || []);
     setLoading(false);
@@ -262,10 +259,8 @@ function useDashboardData() {
   }, []);
 
   const allConnections = useMemo(() => {
-    const evo = (evoConnections).map(c => ({ ...c, type: "whatsapp_whatsmeow_pro", label: c.instance_name }));
-    const zapi = (zapiConnections).map(c => ({ ...c, type: "zapi" }));
-    return [...evo, ...zapi];
-  }, [evoConnections, zapiConnections]);
+    return evoConnections.map(c => ({ ...c, type: "whatsapp_whatsmeow_pro", label: c.instance_name }));
+  }, [evoConnections]);
 
   return { conversations, messages, contacts, connections: allConnections, profiles, subscriptions, loading, refresh: fetchData, isLive, lastUpdate };
 }

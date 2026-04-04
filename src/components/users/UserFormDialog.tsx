@@ -102,15 +102,13 @@ const UserFormDialog = ({ open, onOpenChange, editUserId, editUserEmail, onSaved
   }, [open, editUserId]);
 
   const loadSelectData = async () => {
-    const [deptRes, evoRes, zapiRes] = await Promise.all([
+    const [deptRes, evoRes] = await Promise.all([
       supabase.from("categories").select("id, name"),
       supabase.from("evolution_connections").select("id, instance_name"),
-      supabase.from("zapi_connections").select("id, label"),
     ]);
     setDepartments((deptRes.data || []) as Department[]);
     const evoConns = (evoRes.data || []).map((c: any) => ({ id: c.id, label: c.instance_name, type: "Evolution" }));
-    const zapiConns = (zapiRes.data || []).map((c: any) => ({ id: c.id, label: c.label, type: "Z-API" }));
-    setConnections([...evoConns, ...zapiConns]);
+    setConnections(evoConns);
   };
 
   const loadUser = async (id: string) => {

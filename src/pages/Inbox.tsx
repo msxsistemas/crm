@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 type RealtimeChannel = { unsubscribe: () => void; on: (...args: unknown[]) => unknown; subscribe: (...args: unknown[]) => unknown };
 import whatsappLightWallpaper from "@/assets/whatsapp-light-wallpaper.png";
 import whatsappDarkWallpaper from "@/assets/whatsapp-dark-wallpaper.png";
@@ -315,8 +316,7 @@ const Inbox = () => {
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const [quickRepliesForSlash, setQuickRepliesForSlash] = useState<{ shortcut: string; message: string }[]>([]);
-  const CONVO_PAGE_SIZE = 30;
-  const [convoPage, setConvoPage] = useState(1);
+  const convoListRef = useRef<HTMLDivElement>(null);
 
   // File Manager state
   const [fileManagerOpen, setFileManagerOpen] = useState(false);
@@ -2093,11 +2093,16 @@ const Inbox = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, focusFiltered, conversations, showShortcutsModal, globalSearchOpen]);
 
-  const paginatedConvos = focusFiltered.slice(0, convoPage * CONVO_PAGE_SIZE);
-  const hasMoreConvos = focusFiltered.length > convoPage * CONVO_PAGE_SIZE;
+  const convoVirtualizer = useVirtualizer({
+    count: focusFiltered.length,
+    getScrollElement: () => convoListRef.current,
+    estimateSize: () => compactMode ? 48 : 80,
+    overscan: 5,
+  });
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setConvoPage(1); }, [activeTab, filterDepartment, filterConnection, filterAgent, filterTag, filterLabel, search]);
+  // Reset virtualizer scroll when filters change
+  useEffect(() => { convoListRef.current?.scrollTo({ top: 0 }); }, [activeTab, filterDepartment, filterConnection, filterAgent, filterTag, filterLabel, search]);
 
   const selectedConvo = conversations.find((c) => c.id === selected);
 
@@ -2474,7 +2479,7 @@ const Inbox = () => {
         )}
 
         {/* Conversation list */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin">
+        <div ref={convoListRef} className="flex-1 overflow-y-auto scrollbar-thin">
           {loading ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
               Carregando...
@@ -2485,7 +2490,16 @@ const Inbox = () => {
               <p className="text-sm">Nenhuma conversa encontrada</p>
             </div>
           ) : (
-            paginatedConvos.map((convo) => {
+            <div style={{ height: `${convoVirtualizer.getTotalSize()}px`, position: 'relative' }}>
+            {convoVirtualizer.getVirtualItems().map((virtualRow) => {
+              const convo = focusFiltered[virtualRow.index];
+              return (
+              <div
+                key={convo.id}
+                data-index={virtualRow.index}
+                ref={convoVirtualizer.measureElement}
+                style={{ position: 'absolute', top: `${virtualRow.start}px`, left: 0, right: 0 }}
+              >{(() => {
               const convoTagIds = contactTagMap.get(convo.contact_id) || [];
               const matchingTags = convoTagIds.map(id => tags.find(t => t.id === id)).filter(Boolean) as typeof tags;
               const sla = getSLAStatus(convo.last_message_at, convo.unread_count);
@@ -2729,15 +2743,11 @@ const Inbox = () => {
                   </div>
                 </div>
               );
-            })
-          )}
-          {hasMoreConvos && (
-            <button
-              onClick={() => setConvoPage(p => p + 1)}
-              className="w-full py-3 text-xs text-primary font-medium hover:bg-muted/50 transition-colors border-t border-border"
-            >
-              Carregar mais ({focusFiltered.length - paginatedConvos.length} restantes)
-            </button>
+            })()}
+            </div>
+            );
+            })}
+            </div>
           )}
         </div>
 

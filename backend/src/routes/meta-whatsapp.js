@@ -1,8 +1,12 @@
+import { createHmac } from 'crypto';
 import { query } from '../database.js';
-import { authorize } from '../middleware/authorize.js';
+import { uploadToMinio, ensureBucket } from '../minio.js';
 
 const GRAPH_URL = 'https://graph.facebook.com/v19.0';
 const VERIFY_TOKEN = process.env.META_WEBHOOK_VERIFY_TOKEN || 'msxcrm_meta_webhook_2026';
+const APP_SECRET = process.env.META_APP_SECRET || '';
+
+ensureBucket().catch(() => {});
 
 export default async function metaWhatsAppRoutes(fastify) {
   const auth = { preHandler: fastify.authenticate };
@@ -19,7 +23,18 @@ export default async function metaWhatsAppRoutes(fastify) {
   });
 
   // ── Webhook receiver (Meta sends messages here) ─────────────────────────
-  fastify.post('/webhook/meta', async (req, reply) => {
+  fastify.post('/webhook/meta', {
+    config: { rawBody: true }, // need raw body for signature
+  }, async (req, reply) => {
+    // Verify X-Hub-Signature-256 if APP_SECRET is configured
+    if (APP_SECRET) {
+      const sig = req.headers['x-hub-signature-256'];
+      if (!sig) return reply.status(403).send('Missing signature');
+      const rawBody = req.rawBody || JSON.stringify(req.body);
+      const expected = 'sha256=' + createHmac('sha256', APP_SECRET).update(rawBody).digest('hex');
+      if (sig !== expected) return reply.status(403).send('Invalid signature');
+    }
+
     const body = req.body;
     try {
       for (const entry of body?.entry || []) {
@@ -27,10 +42,15 @@ export default async function metaWhatsAppRoutes(fastify) {
           if (change.field !== 'messages') continue;
           const val = change.value;
           const phoneNumberId = val?.metadata?.phone_number_id;
+          // Find access token for this phone number (for media download)
+          const { rows: connRows } = await query(
+            'SELECT access_token FROM meta_connections WHERE phone_number_id=$1 LIMIT 1',
+            [phoneNumberId]
+          );
+          const accessToken = connRows[0]?.access_token;
           for (const msg of val?.messages || []) {
-            await handleIncomingMetaMessage({ msg, phoneNumberId, contacts: val?.contacts || [], fastify });
+            await handleIncomingMetaMessage({ msg, phoneNumberId, contacts: val?.contacts || [], accessToken, fastify });
           }
-          // Status updates (delivered, read, etc.)
           for (const status of val?.statuses || []) {
             await handleMetaStatusUpdate(status);
           }
@@ -102,15 +122,46 @@ export default async function metaWhatsAppRoutes(fastify) {
     await query('DELETE FROM meta_connections WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
     return { ok: true };
   });
+
+  // ── Send HSM Template via Meta API ──────────────────────────────────────
+  fastify.post('/meta-connections/:id/send-template', auth, async (req, reply) => {
+    const { to, template_name, language_code = 'pt_BR', components = [] } = req.body;
+    if (!to || !template_name) return reply.status(400).send({ error: 'to e template_name são obrigatórios' });
+
+    const { rows } = await query(
+      'SELECT phone_number_id, access_token FROM meta_connections WHERE id=$1 AND user_id=$2',
+      [req.params.id, req.user.id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Conexão não encontrada' });
+
+    const result = await sendMetaTemplate({
+      phoneNumberId: rows[0].phone_number_id,
+      accessToken: rows[0].access_token,
+      to,
+      templateName: template_name,
+      languageCode: language_code,
+      components,
+    });
+
+    if (result.error) return reply.status(400).send({ error: result.error.message });
+    return result;
+  });
 }
 
-// ── Send message via Meta Graph API ────────────────────────────────────────
+// ── Send text/media message via Meta Graph API ─────────────────────────────
 export async function sendMetaMessage({ phoneNumberId, accessToken, to, content, type = 'text', mediaUrl }) {
   let msgBody;
+
   if (type === 'text') {
     msgBody = { type: 'text', text: { body: content, preview_url: false } };
-  } else if (type === 'image' || type === 'video' || type === 'audio' || type === 'document') {
-    msgBody = { type, [type]: mediaUrl?.startsWith('http') ? { link: mediaUrl } : { id: mediaUrl } };
+  } else if (type === 'image') {
+    msgBody = { type: 'image', image: { link: mediaUrl, caption: content || undefined } };
+  } else if (type === 'video') {
+    msgBody = { type: 'video', video: { link: mediaUrl, caption: content || undefined } };
+  } else if (type === 'audio') {
+    msgBody = { type: 'audio', audio: { link: mediaUrl } };
+  } else if (type === 'document') {
+    msgBody = { type: 'document', document: { link: mediaUrl, caption: content || undefined, filename: mediaUrl?.split('/').pop() || 'arquivo' } };
   } else {
     msgBody = { type: 'text', text: { body: content } };
   }
@@ -131,69 +182,138 @@ export async function sendMetaMessage({ phoneNumberId, accessToken, to, content,
   return res.json();
 }
 
-// ── Incoming message handler ────────────────────────────────────────────────
-async function handleIncomingMetaMessage({ msg, phoneNumberId, contacts, fastify }) {
-  if (msg.type === 'text' || msg.type === 'image' || msg.type === 'video' || msg.type === 'audio' || msg.type === 'document') {
-    const from = msg.from; // phone number (international, no +)
-    const profileName = contacts.find(c => c.wa_id === from)?.profile?.name || from;
+// ── Send HSM template via Meta Graph API ──────────────────────────────────
+export async function sendMetaTemplate({ phoneNumberId, accessToken, to, templateName, languageCode = 'pt_BR', components = [] }) {
+  const res = await fetch(`${GRAPH_URL}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+        components,
+      },
+    }),
+  });
+  return res.json();
+}
 
-    // Find or create contact
-    let { rows: ctRows } = await query('SELECT * FROM contacts WHERE phone=$1 LIMIT 1', [from]);
+// ── Download Meta media and upload to MinIO ────────────────────────────────
+async function downloadMetaMedia(mediaId, accessToken) {
+  try {
+    // Get media URL
+    const urlRes = await fetch(`${GRAPH_URL}/${mediaId}`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    const urlData = await urlRes.json();
+    if (!urlData.url) return null;
+
+    // Download the actual file
+    const fileRes = await fetch(urlData.url, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (!fileRes.ok) return null;
+
+    const buffer = Buffer.from(await fileRes.arrayBuffer());
+    const mime = urlData.mime_type || 'application/octet-stream';
+    const ext = mime.split('/')[1]?.split(';')[0] || 'bin';
+    const objectName = `meta-media/${mediaId}.${ext}`;
+
+    const publicUrl = await uploadToMinio(objectName, buffer, mime);
+    return { url: publicUrl, mime };
+  } catch (e) {
+    console.error('Meta media download error:', e.message);
+    return null;
+  }
+}
+
+// ── Incoming message handler ────────────────────────────────────────────────
+async function handleIncomingMetaMessage({ msg, phoneNumberId, contacts, accessToken, fastify }) {
+  const SUPPORTED = ['text', 'image', 'video', 'audio', 'document', 'sticker'];
+  if (!SUPPORTED.includes(msg.type)) return;
+
+  const from = msg.from;
+  const profileName = contacts.find(c => c.wa_id === from)?.profile?.name || from;
+
+  // Find or create contact + conversation in a transaction
+  const client = await (await import('../database.js')).pool.connect();
+  let conv, msgRow;
+  try {
+    await client.query('BEGIN');
+
+    let { rows: ctRows } = await client.query('SELECT * FROM contacts WHERE phone=$1 LIMIT 1', [from]);
     let contact = ctRows[0];
     if (!contact) {
-      const { rows } = await query('INSERT INTO contacts (name, phone) VALUES ($1,$2) RETURNING *', [profileName, from]);
+      const { rows } = await client.query('INSERT INTO contacts (name, phone) VALUES ($1,$2) RETURNING *', [profileName, from]);
       contact = rows[0];
     } else if (contact.name === from && profileName !== from) {
-      await query('UPDATE contacts SET name=$1 WHERE id=$2', [profileName, contact.id]);
-      contact.name = profileName;
+      await client.query('UPDATE contacts SET name=$1 WHERE id=$2', [profileName, contact.id]);
     }
 
-    // Find or create conversation
-    let { rows: convRows } = await query(
+    let { rows: convRows } = await client.query(
       "SELECT * FROM conversations WHERE contact_id=$1 AND connection_name=$2 AND status!='closed' ORDER BY created_at DESC LIMIT 1",
       [contact.id, phoneNumberId]
     );
-    let conv = convRows[0];
+    conv = convRows[0];
     if (!conv) {
-      const { rows } = await query(
+      const { rows } = await client.query(
         "INSERT INTO conversations (contact_id, connection_name, status) VALUES ($1,$2,'open') RETURNING *",
         [contact.id, phoneNumberId]
       );
       conv = rows[0];
     }
 
-    // Extract content
-    let content = '[mídia]';
+    // Extract content and media
+    let content = '';
     let msgType = msg.type;
     let mediaUrl = null;
 
     if (msg.type === 'text') {
       content = msg.text?.body || '';
-    } else if (msg[msg.type]?.caption) {
-      content = msg[msg.type].caption;
-    }
-    if (msg[msg.type]?.id) {
-      mediaUrl = `meta_media:${msg[msg.type].id}`;
+    } else {
+      content = msg[msg.type]?.caption || '';
+      const mediaId = msg[msg.type]?.id;
+      if (mediaId && accessToken) {
+        // Download async — don't block webhook response
+        downloadMetaMedia(mediaId, accessToken).then(async (result) => {
+          if (result?.url) {
+            await query('UPDATE messages SET media_url=$1 WHERE external_id=$2', [result.url, msg.id]).catch(() => {});
+          }
+        });
+        mediaUrl = `pending:${mediaId}`; // temporary placeholder
+      }
     }
 
-    // Insert message
-    const { rows: msgRows } = await query(
+    const { rows: msgRows } = await client.query(
       'INSERT INTO messages (conversation_id, content, direction, type, media_url, external_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [conv.id, content, 'inbound', msgType, mediaUrl, msg.id]
     );
+    msgRow = msgRows[0];
 
-    await query(
+    await client.query(
       'UPDATE conversations SET last_message_at=NOW(), unread_count=unread_count+1, updated_at=NOW() WHERE id=$1',
       [conv.id]
     );
 
-    fastify.io?.emit('message:new', { ...msgRows[0], conversation_id: conv.id });
-    fastify.io?.emit('conversation:updated', { id: conv.id });
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
   }
+
+  fastify.io?.emit('message:new', { ...msgRow, conversation_id: conv.id });
+  fastify.io?.emit('conversation:updated', { id: conv.id });
 }
 
 async function handleMetaStatusUpdate(status) {
-  // Update message status (sent/delivered/read/failed)
   const STATUS_MAP = { sent: 'sent', delivered: 'delivered', read: 'read', failed: 'failed' };
   const mapped = STATUS_MAP[status.status];
   if (mapped && status.id) {

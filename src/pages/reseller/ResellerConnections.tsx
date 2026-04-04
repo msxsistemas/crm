@@ -16,15 +16,8 @@ const ResellerConnections = () => {
 
   const loadConnections = async () => {
     setLoading(true);
-    const [evo, zapi] = await Promise.all([
-      supabase.from("evolution_connections").select("*").eq("user_id", user!.id),
-      supabase.from("zapi_connections").select("*").eq("user_id", user!.id),
-    ]);
-    const all = [
-      ...((evo.data || []) as any[]).map(c => ({ ...c, provider: "Evolution" })),
-      ...((zapi.data || []) as any[]).map(c => ({ ...c, provider: "Z-API", instance_name: c.label })),
-    ];
-    setConnections(all);
+    const evo = await supabase.from("evolution_connections").select("*").eq("user_id", user!.id);
+    setConnections(((evo.data || []) as any[]).map(c => ({ ...c, provider: "Evolution" })));
     setLoading(false);
   };
 

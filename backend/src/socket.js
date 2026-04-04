@@ -1,5 +1,6 @@
 import { Server } from 'socket.io';
 import { verifyToken } from './auth.js';
+import { wsConnections } from './metrics.js';
 
 export function setupSocket(httpServer) {
   const io = new Server(httpServer, {
@@ -25,7 +26,7 @@ export function setupSocket(httpServer) {
 
   io.on('connection', (socket) => {
     const userId = socket.user?.id;
-    console.log(`Socket connected: ${userId}`);
+    wsConnections.inc();
 
     // Join personal room
     socket.join(`user:${userId}`);
@@ -58,8 +59,8 @@ export function setupSocket(httpServer) {
     });
 
     socket.on('disconnect', () => {
+      wsConnections.dec();
       socket.broadcast.emit('presence:changed', { userId, status: 'offline' });
-      console.log(`Socket disconnected: ${userId}`);
     });
   });
 

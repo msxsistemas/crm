@@ -2,13 +2,26 @@ import bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
 import { query } from '../database.js';
 import { authorize } from '../middleware/authorize.js';
+import { notifyTempPassword } from '../notifications/email.js';
 
 export default async function userRoutes(fastify) {
   const auth = { preHandler: fastify.authenticate };
   const adminOnly = { preHandler: [fastify.authenticate, authorize('admin', 'manager')] };
 
   fastify.get('/users', auth, async (req) => {
-    const { rows } = await query('SELECT id, name, name as full_name, email, role, avatar_url, permissions, status, signing_enabled, created_at, last_login FROM profiles ORDER BY name');
+    const { page = 1, limit = 200, search, role } = req.query;
+    const offset = (page - 1) * limit;
+    const conditions = [];
+    const params = [];
+    let p = 1;
+    if (search) { conditions.push(`(name ILIKE $${p} OR email ILIKE $${p})`); params.push(`%${search}%`); p++; }
+    if (role) { conditions.push(`role = $${p}`); params.push(role); p++; }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(limit, offset);
+    const { rows } = await query(
+      `SELECT id, name, name as full_name, email, role, avatar_url, permissions, status, signing_enabled, created_at, last_login FROM profiles ${where} ORDER BY name LIMIT $${p} OFFSET $${p + 1}`,
+      params
+    );
     return rows;
   });
 
@@ -34,6 +47,9 @@ export default async function userRoutes(fastify) {
       'INSERT INTO profiles (name, email, password_hash, role, must_change_password) VALUES ($1,$2,$3,$4,$5) RETURNING id, name, email, role, created_at',
       [name, email.toLowerCase(), hash, role, !password]
     );
+    if (!password) {
+      notifyTempPassword({ email: email.toLowerCase(), name, tempPassword }).catch(() => {});
+    }
     return reply.status(201).send({ ...rows[0], ...(password ? {} : { tempPassword }) });
   });
 

@@ -1,5 +1,7 @@
-import { query } from '../database.js';
+import { query, pool } from '../database.js';
 import { sendMetaMessage } from './meta-whatsapp.js';
+import { enqueueSend } from '../jobs/messageQueue.js';
+import { deliverWebhook } from '../jobs/webhookDelivery.js';
 
 export default async function messageRoutes(fastify) {
   const auth = { preHandler: fastify.authenticate };
@@ -45,7 +47,25 @@ export default async function messageRoutes(fastify) {
   });
 
   // Send message (text/audio/file)
-  fastify.post('/conversations/:id/messages', auth, async (req, reply) => {
+  fastify.post('/conversations/:id/messages', {
+    preHandler: fastify.authenticate,
+    schema: {
+      params: {
+        type: 'object',
+        required: ['id'],
+        properties: { id: { type: 'string', format: 'uuid' } },
+      },
+      body: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', maxLength: 65535 },
+          type: { type: 'string', enum: ['text', 'image', 'video', 'audio', 'document', 'template'] },
+          media_url: { type: 'string', maxLength: 2048, nullable: true },
+          quoted_message_id: { type: 'string', nullable: true },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const { content, type = 'text', media_url, quoted_message_id } = req.body;
     const convId = req.params.id;
 
@@ -72,38 +92,35 @@ export default async function messageRoutes(fastify) {
     // Update conversation last_message_at
     await query('UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1', [convId]);
 
-    // Send via Meta API (official) or Evolution API
+    // Enqueue send (with automatic retry on failure)
     if (conv.meta_phone_number_id && conv.meta_access_token) {
-      try {
-        await sendMetaMessage({
-          phoneNumberId: conv.meta_phone_number_id,
-          accessToken: conv.meta_access_token,
-          to: conv.phone,
-          content,
-          type,
-          mediaUrl: media_url,
-        });
-      } catch (e) {
-        console.error('Meta API error:', e.message);
-      }
+      await enqueueSend({
+        conversationId: convId,
+        messageId: message.id,
+        phone: conv.phone,
+        content, type, mediaUrl: media_url,
+        provider: 'meta',
+        phoneNumberId: conv.meta_phone_number_id,
+        accessToken: conv.meta_access_token,
+      }).catch(e => console.error('Enqueue error:', e.message));
     } else if (conv.evolution_url && conv.connection_name) {
-      try {
-        await sendEvolutionMessage({
-          evolutionUrl: conv.evolution_url,
-          evolutionKey: conv.evolution_key,
-          instance: conv.connection_name,
-          phone: conv.phone,
-          content,
-          type,
-          media_url,
-        });
-      } catch (e) {
-        console.error('Evolution API error:', e.message);
-      }
+      await enqueueSend({
+        conversationId: convId,
+        messageId: message.id,
+        phone: conv.phone,
+        content, type, mediaUrl: media_url,
+        provider: 'evolution',
+        evolutionUrl: conv.evolution_url,
+        evolutionKey: conv.evolution_key,
+        instance: conv.connection_name,
+      }).catch(e => console.error('Enqueue error:', e.message));
     }
 
     // Emit via Socket.io
     fastify.io?.to(`conversation:${convId}`).emit('message:new', message);
+
+    // Dispatch webhook event
+    deliverWebhook.dispatchEvent('message.new', { message, conversation_id: convId }).catch(() => {});
 
     return reply.status(201).send(message);
   });
@@ -152,46 +169,56 @@ async function handleEvolutionWebhook(payload, fastify) {
     const phone = msg.key?.remoteJid?.replace('@s.whatsapp.net', '').replace('@g.us', '');
     if (!phone || msg.key?.fromMe) return;
 
-    // Find or create contact
-    let { rows: contacts } = await query('SELECT * FROM contacts WHERE phone = $1', [phone]);
-    let contact = contacts[0];
-    if (!contact) {
-      const name = data.pushName || phone;
-      const { rows } = await query('INSERT INTO contacts (name, phone) VALUES ($1,$2) RETURNING *', [name, phone]);
-      contact = rows[0];
-    }
-
-    // Find or create conversation
-    let { rows: convs } = await query(
-      "SELECT * FROM conversations WHERE contact_id = $1 AND connection_name = $2 AND status != 'closed' ORDER BY created_at DESC LIMIT 1",
-      [contact.id, instance]
-    );
-    let conv = convs[0];
-    if (!conv) {
-      const { rows } = await query(
-        "INSERT INTO conversations (contact_id, connection_name, status) VALUES ($1,$2,'open') RETURNING *",
-        [contact.id, instance]
-      );
-      conv = rows[0];
-    }
-
-    // Extract message content
     const content = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '[mídia]';
     const type = msg.message?.conversation ? 'text' : 'media';
 
-    // Insert message
-    const { rows: msgRows } = await query(
-      'INSERT INTO messages (conversation_id, content, direction, type, external_id) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [conv.id, content, 'inbound', type, msg.key?.id]
-    );
+    // Use DB transaction for contact + conversation + message creation
+    const client = await pool.connect();
+    let conv, msgRow;
+    try {
+      await client.query('BEGIN');
 
-    await query(
-      'UPDATE conversations SET last_message_at = NOW(), unread_count = unread_count + 1, updated_at = NOW() WHERE id = $1',
-      [conv.id]
-    );
+      let { rows: contacts } = await client.query('SELECT * FROM contacts WHERE phone = $1', [phone]);
+      let contact = contacts[0];
+      if (!contact) {
+        const name = data.pushName || phone;
+        const { rows } = await client.query('INSERT INTO contacts (name, phone) VALUES ($1,$2) RETURNING *', [name, phone]);
+        contact = rows[0];
+      }
 
-    // Emit realtime
-    fastify.io?.emit('message:new', { ...msgRows[0], conversation_id: conv.id });
+      let { rows: convs } = await client.query(
+        "SELECT * FROM conversations WHERE contact_id = $1 AND connection_name = $2 AND status != 'closed' ORDER BY created_at DESC LIMIT 1",
+        [contact.id, instance]
+      );
+      conv = convs[0];
+      if (!conv) {
+        const { rows } = await client.query(
+          "INSERT INTO conversations (contact_id, connection_name, status) VALUES ($1,$2,'open') RETURNING *",
+          [contact.id, instance]
+        );
+        conv = rows[0];
+      }
+
+      const { rows: msgRows } = await client.query(
+        'INSERT INTO messages (conversation_id, content, direction, type, external_id) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+        [conv.id, content, 'inbound', type, msg.key?.id]
+      );
+      msgRow = msgRows[0];
+
+      await client.query(
+        'UPDATE conversations SET last_message_at = NOW(), unread_count = unread_count + 1, updated_at = NOW() WHERE id = $1',
+        [conv.id]
+      );
+
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    fastify.io?.emit('message:new', { ...msgRow, conversation_id: conv.id });
     fastify.io?.emit('conversation:updated', { id: conv.id });
   }
 }

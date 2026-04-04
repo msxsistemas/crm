@@ -1,4 +1,5 @@
 import { query } from '../database.js';
+import { cached, invalidate } from '../redis.js';
 
 export default async function contactRoutes(fastify) {
   const auth = { preHandler: fastify.authenticate };
@@ -30,12 +31,20 @@ export default async function contactRoutes(fastify) {
     }
 
     const where = conditions.join(' AND ');
-    const [{ rows }, { rows: countRows }] = await Promise.all([
+    const cacheKey = !search && !tag
+      ? `contacts:list:${orderClause}:${page}:${limit}`
+      : null;
+
+    const fetchData = () => Promise.all([
       query(`SELECT * FROM contacts WHERE ${where} ORDER BY ${orderClause} LIMIT $${p} OFFSET $${p+1}`, [...params, limit, offset]),
       query(`SELECT COUNT(*) FROM contacts WHERE ${where}`, params),
-    ]);
+    ]).then(([{ rows }, { rows: countRows }]) => ({ data: rows, total: parseInt(countRows[0].count), page: +page, limit: +limit }));
 
-    return { data: rows, total: parseInt(countRows[0].count), page: +page, limit: +limit };
+    const result = cacheKey
+      ? await cached(cacheKey, 30, fetchData)
+      : await fetchData();
+
+    return result;
   });
 
   // Get single contact
@@ -46,7 +55,24 @@ export default async function contactRoutes(fastify) {
   });
 
   // Create contact
-  fastify.post('/contacts', auth, async (req, reply) => {
+  fastify.post('/contacts', {
+    preHandler: fastify.authenticate,
+    schema: {
+      body: {
+        type: 'object',
+        required: ['name', 'phone'],
+        properties: {
+          name: { type: 'string', minLength: 1, maxLength: 200 },
+          phone: { type: 'string', minLength: 5, maxLength: 30 },
+          email: { type: 'string', format: 'email', maxLength: 254, nullable: true },
+          tags: { type: 'array', items: { type: 'string' } },
+          notes: { type: 'string', maxLength: 5000, nullable: true },
+          birthday: { type: 'string', nullable: true },
+          custom_fields: { type: 'object' },
+        },
+      },
+    },
+  }, async (req, reply) => {
     const { name, phone, email, tags = [], notes, birthday, custom_fields = {} } = req.body;
     if (!name || !phone) return reply.status(400).send({ error: 'Nome e telefone obrigatórios' });
 
@@ -81,6 +107,7 @@ export default async function contactRoutes(fastify) {
 
     const { rows } = await query(`UPDATE contacts SET ${updates.join(',')} WHERE id = $${p} RETURNING *`, params);
     if (!rows[0]) return reply.status(404).send({ error: 'Contato não encontrado' });
+    invalidate('contacts:list:*').catch(() => {});
     return rows[0];
   });
 

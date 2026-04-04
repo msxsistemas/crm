@@ -1,4 +1,6 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import api from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Search, Plus, X, RefreshCw, ChevronLeft, ChevronRight,
@@ -10,7 +12,6 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FloatingInput, FloatingTextarea, FloatingSelectWrapper } from "@/components/ui/floating-input";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
@@ -50,14 +51,13 @@ const isRecurring = (s: Schedule) =>
 
 const Schedules = () => {
   const { user } = useAuth();
-  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"month" | "day" | "history">("month");
   const [calendarDate, setCalendarDate] = useState(new Date());
 
   // Dialog
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [formContact, setFormContact] = useState("");
   const [formConnection, setFormConnection] = useState("");
   const [formQueue, setFormQueue] = useState("");
   const [formMessage, setFormMessage] = useState("");
@@ -78,7 +78,6 @@ const Schedules = () => {
   const [showContactDropdown, setShowContactDropdown] = useState(false);
 
   // Connections
-  const [connections, setConnections] = useState<{ id: string; name: string }[]>([]);
   const [editingSchedule, setEditingSchedule] = useState<Schedule | null>(null);
   const [deleteScheduleId, setDeleteScheduleId] = useState<string | null>(null);
   const [deletingSchedule, setDeletingSchedule] = useState(false);
@@ -86,53 +85,65 @@ const Schedules = () => {
   // Sending state: scheduleId -> loading
   const [sendingIds, setSendingIds] = useState<Record<string, boolean>>({});
 
-  const loadSchedules = useCallback(async () => {
-    if (!user) return;
-    const { data } = await supabase
-      .from("schedules")
-      .select("*")
-      .order("send_at", { ascending: true });
-    if (data) {
-      setSchedules(data.map((s: any) => ({
+  // TanStack Query: schedules
+  const { data: schedulesData = [], refetch: loadSchedules } = useQuery<Schedule[]>({
+    queryKey: ['schedules'],
+    queryFn: async () => {
+      const rows = await api.get<any[]>('/schedules');
+      return rows.map((s: any) => ({
         id: s.id,
         contact_name: s.contact_name,
         contact_phone: s.contact_phone,
-        connection: s.connection_id || "",
+        connection: s.connection_name || s.connection_id || "",
         queue: s.queue || "",
         message: s.message,
-        send_at: s.send_at,
+        send_at: s.send_at || s.scheduled_at,
         status: s.status,
         open_ticket: s.open_ticket,
         create_note: s.create_note,
         repeat_interval: s.repeat_interval,
         repeat_daily: s.repeat_daily,
         repeat_count: s.repeat_count,
-      })));
-    }
-  }, [user]);
+      }));
+    },
+    enabled: !!user,
+  });
+  const schedules = schedulesData;
 
-  useEffect(() => {
-    const fetchConnections = async () => {
-      const { data } = await supabase.from("evolution_connections").select("id, instance_name");
-      if (data) setConnections(data.map(c => ({ id: c.id, name: c.instance_name })));
-    };
-    fetchConnections();
-  }, []);
+  // TanStack Query: connections
+  const { data: connectionsData = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ['evolution-connections'],
+    queryFn: async () => {
+      const rows = await api.get<any[]>('/evolution-connections');
+      return rows.map(c => ({ id: c.id || c.instance_name, name: c.instance_name || c.name }));
+    },
+    enabled: !!user,
+  });
+  const connections = connectionsData;
 
-  useEffect(() => { loadSchedules(); }, [loadSchedules]);
+  // Schedule mutations
+  const saveMutation = useMutation({
+    mutationFn: (payload: { id?: string; data: any }) =>
+      payload.id
+        ? api.patch(`/schedules/${payload.id}`, payload.data)
+        : api.post('/schedules', payload.data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['schedules'] }),
+  });
 
-  const searchContacts = async (query: string) => {
-    setContactSearch(query);
-    if (query.length < 3) { setContacts([]); setShowContactDropdown(false); return; }
-    const { data } = await supabase.from("contacts").select("id, name, phone").or(`name.ilike.%${query}%,phone.ilike.%${query}%`).limit(10);
-    if (data) {
-      setContacts(data.map(c => ({ id: c.id, name: c.name || c.phone, phone: c.phone })));
-      setShowContactDropdown(true);
-    }
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/schedules/${id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['schedules'] }),
+  });
+
+  const searchContacts = async (q: string) => {
+    setContactSearch(q);
+    if (q.length < 3) { setContacts([]); setShowContactDropdown(false); return; }
+    const data = await api.get<any[]>(`/contacts?search=${encodeURIComponent(q)}&limit=10`);
+    setContacts((data || []).map((c: any) => ({ id: c.id, name: c.name || c.phone, phone: c.phone })));
+    setShowContactDropdown(true);
   };
 
   const selectContact = (c: { id: string; name: string; phone: string }) => {
-    setFormContact(c.name);
     setContactSearch(c.name);
     setFormContactPhone(c.phone);
     setShowContactDropdown(false);
@@ -150,7 +161,6 @@ const Schedules = () => {
   }, [schedules, search]);
 
   const resetForm = () => {
-    setFormContact("");
     setContactSearch("");
     setFormContactPhone("");
     setFormConnection("");
@@ -199,9 +209,10 @@ const Schedules = () => {
   const handleDeleteSchedule = async () => {
     if (!deleteScheduleId) return;
     setDeletingSchedule(true);
-    const { error } = await supabase.from("schedules").delete().eq("id", deleteScheduleId);
-    if (error) { toast.error("Erro ao excluir agendamento"); }
-    else { toast.success("Agendamento excluído!"); await loadSchedules(); }
+    try {
+      await deleteMutation.mutateAsync(deleteScheduleId);
+      toast.success("Agendamento excluído!");
+    } catch { toast.error("Erro ao excluir agendamento"); }
     setDeleteScheduleId(null);
     setDeletingSchedule(false);
   };
@@ -226,7 +237,7 @@ const Schedules = () => {
     const payload = {
       contact_name: contactSearch,
       contact_phone: formContactPhone,
-      connection_id: formConnection || null,
+      connection_name: formConnection || null,
       queue: formQueue || null,
       message: formMessage,
       send_at: new Date(formDateTime).toISOString(),
@@ -237,23 +248,18 @@ const Schedules = () => {
       repeat_count: buildRepeatCount(),
     };
 
-    if (editingSchedule) {
-      const { error } = await supabase.from("schedules").update(payload).eq("id", editingSchedule.id);
-      if (error) { toast.error("Erro ao atualizar agendamento"); return; }
-      toast.success("Agendamento atualizado!");
-    } else {
-      const { error } = await supabase.from("schedules").insert({
-        ...payload,
-        user_id: user.id,
-        status: "pending",
-      });
-      if (error) { toast.error("Erro ao criar agendamento"); return; }
-      toast.success("Agendamento criado!");
-    }
-    setEditingSchedule(null);
-    setDialogOpen(false);
-    resetForm();
-    await loadSchedules();
+    try {
+      if (editingSchedule) {
+        await saveMutation.mutateAsync({ id: editingSchedule.id, data: payload });
+        toast.success("Agendamento atualizado!");
+      } else {
+        await saveMutation.mutateAsync({ data: { ...payload, status: "pending" } });
+        toast.success("Agendamento criado!");
+      }
+      setEditingSchedule(null);
+      setDialogOpen(false);
+      resetForm();
+    } catch { toast.error("Erro ao salvar agendamento"); }
   };
 
   const toggleWeekday = (val: string) => {
@@ -262,40 +268,17 @@ const Schedules = () => {
     );
   };
 
-  // "Enviar agora" — direct send via Evolution API edge function
+  // "Enviar agora" — mark as processing so the schedules worker picks it up immediately
   const handleSendNow = async (s: Schedule) => {
     setSendingIds(prev => ({ ...prev, [s.id]: true }));
     try {
-      // Get instance_name for this connection id
-      const conn = connections.find(c => c.id === s.connection);
-      if (!conn) {
-        toast.error("Conexão não encontrada");
-        return;
-      }
-      const { data, error } = await supabase.functions.invoke("evolution-api", {
-        body: {
-          action: "send_message",
-          instanceName: conn.name,
-          data: { phone: s.contact_phone, message: s.message },
-        },
-      });
-
-      if (error) throw new Error(error.message);
-
-      // Update status to sent
-      await supabase.from("schedules").update({ status: "sent" }).eq("id", s.id);
-      toast.success("Mensagem enviada com sucesso!");
-      await loadSchedules();
+      await api.patch(`/schedules/${s.id}`, { status: "pending", send_at: new Date().toISOString() });
+      toast.success("Agendamento enviado para processamento!");
+      queryClient.invalidateQueries({ queryKey: ['schedules'] });
     } catch (err: any) {
-      await supabase.from("schedules").update({ status: "failed" }).eq("id", s.id);
       toast.error("Erro ao enviar: " + (err?.message || "desconhecido"));
-      await loadSchedules();
     } finally {
-      setSendingIds(prev => {
-        const next = { ...prev };
-        delete next[s.id];
-        return next;
-      });
+      setSendingIds(prev => { const next = { ...prev }; delete next[s.id]; return next; });
     }
   };
 
@@ -318,7 +301,7 @@ const Schedules = () => {
       <div className="flex items-center justify-between mx-6 py-4 border-b border-border">
         <h1 className="text-xl font-bold text-blue-600">Agendamentos</h1>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={loadSchedules}><RefreshCw className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" onClick={() => loadSchedules()}><RefreshCw className="h-4 w-4" /></Button>
           <Button onClick={() => { resetForm(); setDialogOpen(true); }} className="bg-blue-600 hover:bg-blue-700 text-white uppercase text-xs font-semibold gap-1.5">
             <Plus className="h-4 w-4" /> NOVO AGENDAMENTO
           </Button>

@@ -1,4 +1,7 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { io, Socket } from "socket.io-client";
+import api from "@/lib/api";
 import { MessagesSquare, Users, X, Send, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FloatingInput } from "@/components/ui/floating-input";
@@ -7,7 +10,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 
 interface Profile {
@@ -33,159 +35,147 @@ interface Message {
   created_at: string;
 }
 
+const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
 const InternalChat = () => {
   const { user } = useAuth();
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const queryClient = useQueryClient();
   const [selectedConvoId, setSelectedConvoId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [messageInput, setMessageInput] = useState("");
-  const [sending, setSending] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
-  const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
-  const [creating, setCreating] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const socketRef = useRef<Socket | null>(null);
 
-  const selectedConvo = conversations.find((c) => c.id === selectedConvoId) || null;
-
-  // Load all profiles for participant selection
-  useEffect(() => {
-    supabase.from("profiles").select("id, full_name").then(({ data }) => {
-      setAllProfiles((data || []).filter((p) => p.id !== user?.id));
-    });
-  }, [user]);
-
-  const loadConversations = useCallback(async () => {
-    if (!user) return;
-    const { data } = await supabase
-      .from("internal_conversations")
-      .select("id, title, created_by, created_at, internal_conversation_participants(user_id, profiles(id, full_name))")
-      .order("updated_at", { ascending: false });
-
-    if (data) {
-      setConversations(data.map((c: any) => ({
+  // TanStack Query: conversations
+  const { data: conversations = [] } = useQuery<Conversation[]>({
+    queryKey: ['internal-channels'],
+    queryFn: async () => {
+      const rows = await api.get<any[]>('/internal-channels');
+      return rows.map((c: any) => ({
         id: c.id,
         title: c.title,
         created_by: c.created_by,
         created_at: c.created_at,
-        participants: (c.participants || c.internal_conversation_participants || [])
-          .map((p: any) => p.profiles || { id: p.id, full_name: p.name })
-          .filter(Boolean),
-      })));
-    }
-  }, [user]);
+        participants: (c.participants || []).filter(Boolean),
+      }));
+    },
+    enabled: !!user,
+  });
 
-  const loadMessages = useCallback(async (convoId: string) => {
-    const { data } = await supabase
-      .from("internal_messages")
-      .select("id, conversation_id, sender_id, text, created_at, profiles(full_name)")
-      .eq("conversation_id", convoId)
-      .order("created_at", { ascending: true });
+  const selectedConvo = conversations.find((c) => c.id === selectedConvoId) || null;
 
-    if (data) {
-      setMessages(data.map((m: any) => ({
+  // TanStack Query: messages for selected conversation
+  const { data: messages = [] } = useQuery<Message[]>({
+    queryKey: ['internal-messages', selectedConvoId],
+    queryFn: async () => {
+      const rows = await api.get<any[]>(`/internal-messages?conversation_id=${selectedConvoId}`);
+      return rows.map((m: any) => ({
         id: m.id,
         conversation_id: m.conversation_id,
         sender_id: m.sender_id,
-        sender_name: m.profiles?.full_name || "Usuário",
+        sender_name: m.sender_name || "Usuário",
         text: m.text,
         created_at: m.created_at,
-      })));
-    }
-  }, []);
+      }));
+    },
+    enabled: !!selectedConvoId,
+  });
 
-  useEffect(() => {
-    loadConversations();
-  }, [loadConversations]);
+  // TanStack Query: profiles for participant selection
+  const { data: allProfiles = [] } = useQuery<Profile[]>({
+    queryKey: ['users-profiles'],
+    queryFn: async () => {
+      const rows = await api.get<any[]>('/users');
+      return rows.filter((p: any) => p.id !== user?.id).map((p: any) => ({
+        id: p.id,
+        full_name: p.full_name || p.name,
+      }));
+    },
+    enabled: !!user,
+  });
 
-  useEffect(() => {
-    if (selectedConvoId) loadMessages(selectedConvoId);
-  }, [selectedConvoId, loadMessages]);
+  // Send message mutation
+  const sendMutation = useMutation({
+    mutationFn: (text: string) => api.post('/internal-messages', { conversation_id: selectedConvoId, text }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['internal-messages', selectedConvoId] }),
+  });
+
+  // Create conversation mutation
+  const createMutation = useMutation({
+    mutationFn: (data: { title: string; participant_ids: string[] }) => api.post('/internal-channels', data),
+    onSuccess: (newConvo: any) => {
+      queryClient.invalidateQueries({ queryKey: ['internal-channels'] });
+      setSelectedConvoId(newConvo.id);
+    },
+  });
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Realtime subscription for messages
+  // Socket.io: connect once using a short-lived token from the API
   useEffect(() => {
-    if (!selectedConvoId) return;
-    const channel = supabase
-      .channel(`internal-messages-${selectedConvoId}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "internal_messages", filter: `conversation_id=eq.${selectedConvoId}` },
-        async (payload) => {
-          const m = payload.new as any;
-          const { data: profile } = await supabase.from("profiles").select("full_name").eq("id", m.sender_id).maybeSingle();
-          setMessages((prev) => {
-            if (prev.some((x) => x.id === m.id)) return prev;
-            return [...prev, {
-              id: m.id,
-              conversation_id: m.conversation_id,
-              sender_id: m.sender_id,
-              sender_name: profile?.full_name || "Usuário",
-              text: m.text,
-              created_at: m.created_at,
-            }];
-          });
-        })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [selectedConvoId]);
+    if (!user) return;
+    let socket: Socket;
+    api.get<{ token: string }>('/auth/socket-token').then(({ token }) => {
+      socket = io(SOCKET_URL, {
+        auth: { token },
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+      });
+      socketRef.current = socket;
+    }).catch(() => {});
+    return () => {
+      if (socket) socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [user]);
+
+  // Socket.io: subscribe to messages in selected conversation
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket || !selectedConvoId) return;
+
+    const event = `chat:${selectedConvoId}`;
+    const handler = (msg: Message) => {
+      queryClient.setQueryData<Message[]>(['internal-messages', selectedConvoId], (prev = []) => {
+        if (prev.some(m => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
+      queryClient.invalidateQueries({ queryKey: ['internal-channels'] });
+    };
+    socket.on(event, handler);
+    return () => { socket.off(event, handler); };
+  }, [selectedConvoId, queryClient]);
 
   const handleSelectConvo = (id: string) => {
     setSelectedConvoId(id);
-    setMessages([]);
   };
 
   const handleSendMessage = async () => {
     if (!messageInput.trim() || !selectedConvoId || !user) return;
-    setSending(true);
     const text = messageInput.trim();
     setMessageInput("");
-    const { error } = await supabase.from("internal_messages").insert({
-      conversation_id: selectedConvoId,
-      sender_id: user.id,
-      text,
-    });
-    if (error) {
+    try {
+      await sendMutation.mutateAsync(text);
+    } catch {
       toast.error("Erro ao enviar mensagem");
       setMessageInput(text);
-    } else {
-      await supabase
-        .from("internal_conversations")
-        .update({ updated_at: new Date().toISOString() })
-        .eq("id", selectedConvoId);
     }
-    setSending(false);
   };
 
   const handleCreateConversation = async () => {
     if (!newTitle.trim()) { toast.error("Informe um título"); return; }
     if (!user) return;
-    setCreating(true);
-
-    const { data: convo, error } = await supabase
-      .from("internal_conversations")
-      .insert({ title: newTitle.trim(), created_by: user.id })
-      .select("id")
-      .single();
-
-    if (error || !convo) { toast.error("Erro ao criar conversa"); setCreating(false); return; }
-
-    // Add creator + selected participants
-    const participants = [user.id, ...selectedUsers].map((uid) => ({
-      conversation_id: convo.id,
-      user_id: uid,
-    }));
-    await supabase.from("internal_conversation_participants").insert(participants);
-
-    toast.success("Conversa criada!");
-    setDialogOpen(false);
-    setNewTitle("");
-    setSelectedUsers([]);
-    setCreating(false);
-    await loadConversations();
-    setSelectedConvoId(convo.id);
+    try {
+      await createMutation.mutateAsync({ title: newTitle.trim(), participant_ids: selectedUsers });
+      toast.success("Conversa criada!");
+      setDialogOpen(false);
+      setNewTitle("");
+      setSelectedUsers([]);
+    } catch { toast.error("Erro ao criar conversa"); }
   };
 
   const toggleUser = (uid: string) => {
@@ -265,7 +255,7 @@ const InternalChat = () => {
                   onChange={(e) => setMessageInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSendMessage()}
                   className="flex-1" />
-                <Button size="icon" onClick={handleSendMessage} disabled={sending}>
+                <Button size="icon" onClick={handleSendMessage} disabled={sendMutation.isPending}>
                   <Send className="h-4 w-4" />
                 </Button>
               </div>
@@ -314,8 +304,8 @@ const InternalChat = () => {
             )}
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-              <Button onClick={handleCreateConversation} disabled={creating}>
-                {creating ? "Criando..." : "Criar"}
+              <Button onClick={handleCreateConversation} disabled={createMutation.isPending}>
+                {createMutation.isPending ? "Criando..." : "Criar"}
               </Button>
             </div>
           </div>

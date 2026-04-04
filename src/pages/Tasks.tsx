@@ -1,4 +1,6 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import api from "@/lib/api";
 import {
   Search, Plus, X, ClipboardList, CheckCircle2, Clock, AlertCircle,
   AlertTriangle, TrendingUp, LayoutGrid, List, CalendarDays,
@@ -14,7 +16,6 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FloatingInput, FloatingTextarea, FloatingSelectWrapper } from "@/components/ui/floating-input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -40,8 +41,8 @@ interface Task {
 
 const Tasks = () => {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const PAGE_SIZE = 20;
-  const [tasks, setTasks] = useState<Task[]>([]);
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list" | "calendar" | "kanban">("grid");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -70,9 +71,6 @@ const Tasks = () => {
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [calView, setCalView] = useState<"month" | "week" | "day" | "agenda">("month");
 
-  // Users for assignee
-  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
-
   const notifiedRef = useRef<Set<string>>(new Set());
 
   // Request browser notification permission on mount
@@ -81,6 +79,66 @@ const Tasks = () => {
       Notification.requestPermission();
     }
   }, []);
+
+  // TanStack Query: tasks
+  const { data: tasksData = [] } = useQuery<Task[]>({
+    queryKey: ['tasks'],
+    queryFn: async () => {
+      const rows = await api.get<any[]>('/tasks');
+      return rows.map((t: any) => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        priority: t.priority,
+        status: t.status,
+        due_date: t.due_date,
+        assigned_to: t.assigned_to,
+        assigned_name: t.assigned_profile?.full_name || null,
+        creator_name: t.creator_profile?.full_name || null,
+        created_at: t.created_at,
+        reminder_minutes: t.reminder_minutes ?? null,
+      }));
+    },
+    enabled: !!user,
+  });
+  const tasks = tasksData;
+
+  // TanStack Query: users for assignee selector
+  const { data: usersData = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ['users-list'],
+    queryFn: async () => {
+      const rows = await api.get<any[]>('/users');
+      return rows.map(u => ({ id: u.id, name: u.full_name || u.name || 'Sem nome' }));
+    },
+    enabled: !!user,
+  });
+  const users = usersData;
+
+  // Task mutations
+  const saveMutation = useMutation({
+    mutationFn: (payload: { id?: string; data: Partial<Task> & { user_id?: string } }) =>
+      payload.id
+        ? api.patch(`/tasks/${payload.id}`, payload.data)
+        : api.post('/tasks', { ...payload.data, status: 'pending' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+  });
+
+  const toggleStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      api.patch(`/tasks/${id}`, { status }),
+    onMutate: async ({ id, status }) => {
+      await queryClient.cancelQueries({ queryKey: ['tasks'] });
+      const prev = queryClient.getQueryData<Task[]>(['tasks']);
+      queryClient.setQueryData<Task[]>(['tasks'], old => old?.map(t => t.id === id ? { ...t, status: status as Task['status'] } : t));
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => queryClient.setQueryData(['tasks'], ctx?.prev),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/tasks/${id}`),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+  });
 
   // Check for task reminders every 60 seconds
   useEffect(() => {
@@ -105,38 +163,6 @@ const Tasks = () => {
     }, 60000);
     return () => clearInterval(interval);
   }, [tasks]);
-
-  const fetchTasks = useCallback(async () => {
-    if (!user) return;
-    const { data, error } = await supabase
-      .from("tasks")
-      .select("*, assigned_profile:profiles!tasks_assigned_to_fkey(full_name), creator_profile:profiles!tasks_user_id_fkey(full_name)")
-      .order("created_at", { ascending: false });
-    if (!error && data) {
-      setTasks(data.map((t: any) => ({
-        id: t.id,
-        title: t.title,
-        description: t.description,
-        priority: t.priority,
-        status: t.status,
-        due_date: t.due_date,
-        assigned_to: t.assigned_to,
-        assigned_name: t.assigned_profile?.full_name || null,
-        creator_name: t.creator_profile?.full_name || null,
-        created_at: t.created_at,
-        reminder_minutes: t.reminder_minutes ?? null,
-      })));
-    }
-  }, [user]);
-
-  useEffect(() => {
-    const fetchUsers = async () => {
-      const { data } = await supabase.from("profiles").select("id, full_name");
-      if (data) setUsers(data.map(u => ({ id: u.id, name: u.full_name || "Sem nome" })));
-    };
-    fetchUsers();
-    fetchTasks();
-  }, [fetchTasks]);
 
   const currentUserName = useMemo(() => {
     return users.find(u => u.id === user?.id)?.name || "Usuário";
@@ -211,7 +237,6 @@ const Tasks = () => {
   const handleSave = async () => {
     if (!formTitle.trim()) { toast.error("Título é obrigatório"); return; }
     if (!user) return;
-
     const payload = {
       title: formTitle,
       description: formDesc || null,
@@ -219,28 +244,23 @@ const Tasks = () => {
       due_date: formDueDate || null,
       assigned_to: formAssignee || null,
       reminder_minutes: formReminder ? parseInt(formReminder) : null,
-      updated_at: new Date().toISOString(),
     };
-
-    if (editingTask) {
-      const { error } = await supabase.from("tasks").update(payload).eq("id", editingTask.id);
-      if (error) { toast.error("Erro ao atualizar tarefa"); return; }
-      toast.success("Tarefa atualizada!");
-    } else {
-      const { error } = await supabase.from("tasks").insert({ ...payload, user_id: user.id, status: "pending" });
-      if (error) { toast.error("Erro ao criar tarefa"); return; }
-      toast.success("Tarefa criada!");
-    }
-    setDialogOpen(false);
-    fetchTasks();
+    try {
+      if (editingTask) {
+        await saveMutation.mutateAsync({ id: editingTask.id, data: payload });
+        toast.success("Tarefa atualizada!");
+      } else {
+        await saveMutation.mutateAsync({ data: { ...payload, user_id: user.id } });
+        toast.success("Tarefa criada!");
+      }
+      setDialogOpen(false);
+    } catch { toast.error("Erro ao salvar tarefa"); }
   };
 
-  const toggleStatus = async (id: string) => {
+  const toggleStatus = (id: string) => {
     const task = tasks.find(t => t.id === id);
     if (!task) return;
-    const newStatus = task.status === "done" ? "pending" : "done";
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, status: newStatus } : t));
-    await supabase.from("tasks").update({ status: newStatus }).eq("id", id);
+    toggleStatusMutation.mutate({ id, status: task.status === "done" ? "pending" : "done" });
   };
 
   const confirmDelete = (t: Task) => {
@@ -250,11 +270,11 @@ const Tasks = () => {
 
   const handleDelete = async () => {
     if (!taskToDelete) return;
-    const { error } = await supabase.from("tasks").delete().eq("id", taskToDelete.id);
-    if (error) { toast.error("Erro ao excluir tarefa"); return; }
-    setTasks(prev => prev.filter(t => t.id !== taskToDelete.id));
-    toast.success("Tarefa excluída");
-    setDeleteOpen(false);
+    try {
+      await deleteMutation.mutateAsync(taskToDelete.id);
+      toast.success("Tarefa excluída");
+      setDeleteOpen(false);
+    } catch { toast.error("Erro ao excluir tarefa"); }
   };
 
   const priorityLabel = (p: string) => p === "high" ? "Alta" : p === "medium" ? "Média" : "Baixa";
@@ -519,8 +539,7 @@ const Tasks = () => {
             }
 
             if (newStatus !== null) {
-              setTasks(prev => prev.map(t => t.id === draggableId ? { ...t, status: newStatus! } : t));
-              await supabase.from("tasks").update({ status: newStatus }).eq("id", draggableId);
+              toggleStatusMutation.mutate({ id: draggableId, status: newStatus });
             }
           };
 

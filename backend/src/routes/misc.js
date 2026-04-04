@@ -1,11 +1,17 @@
-import { query } from '../database.js';
+import { query, withTransaction } from '../database.js';
 
 export default async function miscRoutes(fastify) {
   const auth = { preHandler: fastify.authenticate };
 
   // ── Tags ──────────────────────────────────────────────────────────────────
-  fastify.get('/tags', auth, async () => {
-    const { rows } = await query('SELECT * FROM tags ORDER BY name');
+  fastify.get('/tags', auth, async (req) => {
+    const { page = 1, limit = 200, search } = req.query;
+    const offset = (page - 1) * limit;
+    if (search) {
+      const { rows } = await query('SELECT * FROM tags WHERE name ILIKE $1 ORDER BY name LIMIT $2 OFFSET $3', [`%${search}%`, limit, offset]);
+      return rows;
+    }
+    const { rows } = await query('SELECT * FROM tags ORDER BY name LIMIT $1 OFFSET $2', [limit, offset]);
     return rows;
   });
   fastify.post('/tags', auth, async (req, reply) => {
@@ -13,14 +19,21 @@ export default async function miscRoutes(fastify) {
     const { rows } = await query('INSERT INTO tags (name, color) VALUES ($1,$2) ON CONFLICT (name) DO UPDATE SET color=$2 RETURNING *', [name, color]);
     return reply.status(201).send(rows[0]);
   });
+  fastify.patch('/tags/:id', auth, async (req) => {
+    const { name, color } = req.body;
+    const { rows } = await query('UPDATE tags SET name=COALESCE($1,name), color=COALESCE($2,color) WHERE id=$3 RETURNING *', [name, color, req.params.id]);
+    return rows[0];
+  });
   fastify.delete('/tags/:id', auth, async (req) => {
     await query('DELETE FROM tags WHERE id = $1', [req.params.id]);
     return { ok: true };
   });
 
   // ── Categories ────────────────────────────────────────────────────────────
-  fastify.get('/categories', auth, async () => {
-    const { rows } = await query('SELECT * FROM categories ORDER BY name');
+  fastify.get('/categories', auth, async (req) => {
+    const { page = 1, limit = 200 } = req.query;
+    const offset = (page - 1) * limit;
+    const { rows } = await query('SELECT * FROM categories ORDER BY name LIMIT $1 OFFSET $2', [limit, offset]);
     return rows;
   });
   fastify.post('/categories', auth, async (req, reply) => {
@@ -40,12 +53,16 @@ export default async function miscRoutes(fastify) {
 
   // ── Quick Replies ─────────────────────────────────────────────────────────
   fastify.get('/quick-replies', auth, async (req) => {
-    const { user_id } = req.query;
-    if (user_id) {
-      const { rows } = await query('SELECT *, COALESCE(shortcut, title) as shortcut, COALESCE(message, content) as message FROM quick_replies WHERE user_id=$1 ORDER BY created_at DESC', [user_id]);
-      return rows;
-    }
-    const { rows } = await query('SELECT *, COALESCE(shortcut, title) as shortcut, COALESCE(message, content) as message FROM quick_replies ORDER BY created_at DESC');
+    const { user_id, search, page = 1, limit = 100 } = req.query;
+    const offset = (page - 1) * limit;
+    const conditions = [];
+    const params = [];
+    let p = 1;
+    if (user_id) { conditions.push(`user_id=$${p}`); params.push(user_id); p++; }
+    if (search) { conditions.push(`(title ILIKE $${p} OR content ILIKE $${p} OR shortcut ILIKE $${p})`); params.push(`%${search}%`); p++; }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(limit, offset);
+    const { rows } = await query(`SELECT *, COALESCE(shortcut, title) as shortcut, COALESCE(message, content) as message FROM quick_replies ${where} ORDER BY created_at DESC LIMIT $${p} OFFSET $${p + 1}`, params);
     return rows;
   });
   fastify.post('/quick-replies', auth, async (req, reply) => {
@@ -134,7 +151,7 @@ export default async function miscRoutes(fastify) {
 
   // ── Connections (Evolution API instances) ─────────────────────────────────
   fastify.get('/connections', auth, async () => {
-    const { rows } = await query('SELECT * FROM evolution_connections ORDER BY created_at DESC');
+    const { rows } = await query('SELECT * FROM evolution_connections ORDER BY created_at DESC LIMIT 200');
     return rows;
   });
   fastify.post('/connections', auth, async (req, reply) => {
@@ -189,11 +206,14 @@ export default async function miscRoutes(fastify) {
   fastify.post('/kanban-columns', auth, async (req, reply) => {
     const { board_id, name, color, position, is_default, is_finalized } = req.body;
     if (Array.isArray(req.body)) {
-      const inserted = [];
-      for (const col of req.body) {
-        const { rows } = await query('INSERT INTO kanban_columns (board_id, name, color, position, is_default, is_finalized) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [col.board_id, col.name, col.color || '#3B82F6', col.position || 0, col.is_default ?? false, col.is_finalized ?? false]);
-        inserted.push(rows[0]);
-      }
+      const inserted = await withTransaction(async (client) => {
+        const results = [];
+        for (const col of req.body) {
+          const { rows } = await client.query('INSERT INTO kanban_columns (board_id, name, color, position, is_default, is_finalized) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [col.board_id, col.name, col.color || '#3B82F6', col.position || 0, col.is_default ?? false, col.is_finalized ?? false]);
+          results.push(rows[0]);
+        }
+        return results;
+      });
       return reply.status(201).send(inserted);
     }
     const { rows } = await query('INSERT INTO kanban_columns (board_id, name, color, position, is_default, is_finalized) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [board_id, name, color || '#3B82F6', position || 0, is_default ?? false, is_finalized ?? false]);
@@ -209,9 +229,11 @@ export default async function miscRoutes(fastify) {
   });
 
   fastify.get('/kanban-cards', auth, async (req) => {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const { column_id, board_id } = req.query;
     if (column_id) {
-      const ids = Array.isArray(column_id) ? column_id : column_id.split(',');
+      const ids = (Array.isArray(column_id) ? column_id : column_id.split(',')).filter(id => UUID_RE.test(id));
+      if (!ids.length) return [];
       const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
       const { rows } = await query(`SELECT kc.*, c.name as contact_name, c.phone as contact_phone FROM kanban_cards kc LEFT JOIN contacts c ON c.id = kc.contact_id WHERE kc.column_id IN (${placeholders}) ORDER BY kc.position ASC, kc.created_at ASC`, ids);
       return rows;
@@ -254,8 +276,14 @@ export default async function miscRoutes(fastify) {
   });
 
   // ── Campaigns ────────────────────────────────────────────────────────────
-  fastify.get('/campaigns', auth, async () => {
-    const { rows } = await query('SELECT * FROM campaigns ORDER BY created_at DESC');
+  fastify.get('/campaigns', auth, async (req) => {
+    const { page = 1, limit = 50, status } = req.query;
+    const offset = (page - 1) * limit;
+    if (status) {
+      const { rows } = await query('SELECT * FROM campaigns WHERE status=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3', [status, limit, offset]);
+      return rows;
+    }
+    const { rows } = await query('SELECT * FROM campaigns ORDER BY created_at DESC LIMIT $1 OFFSET $2', [limit, offset]);
     return rows;
   });
   fastify.post('/campaigns', auth, async (req, reply) => {
@@ -284,8 +312,20 @@ export default async function miscRoutes(fastify) {
   });
 
   // ── Opportunities ─────────────────────────────────────────────────────────
-  fastify.get('/opportunities', auth, async () => {
-    const { rows } = await query('SELECT o.*, c.name as contact_name FROM opportunities o LEFT JOIN contacts c ON c.id = o.contact_id ORDER BY o.created_at DESC');
+  fastify.get('/opportunities', auth, async (req) => {
+    const { page = 1, limit = 50, stage, assigned_to } = req.query;
+    const offset = (page - 1) * limit;
+    const conditions = [];
+    const params = [];
+    let p = 1;
+    if (stage) { conditions.push(`o.stage=$${p}`); params.push(stage); p++; }
+    if (assigned_to) { conditions.push(`o.assigned_to=$${p}`); params.push(assigned_to); p++; }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(limit, offset);
+    const { rows } = await query(
+      `SELECT o.*, c.name as contact_name FROM opportunities o LEFT JOIN contacts c ON c.id = o.contact_id ${where} ORDER BY o.created_at DESC LIMIT $${p} OFFSET $${p + 1}`,
+      params
+    );
     return rows;
   });
   fastify.post('/opportunities', auth, async (req, reply) => {
@@ -314,8 +354,10 @@ export default async function miscRoutes(fastify) {
   });
 
   // ── Chatbot Rules ─────────────────────────────────────────────────────────
-  fastify.get('/chatbot-rules', auth, async () => {
-    const { rows } = await query('SELECT * FROM chatbot_rules ORDER BY created_at DESC');
+  fastify.get('/chatbot-rules', auth, async (req) => {
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    const offset = parseInt(req.query.offset) || 0;
+    const { rows } = await query('SELECT * FROM chatbot_rules ORDER BY created_at DESC LIMIT $1 OFFSET $2', [limit, offset]);
     return rows;
   });
   fastify.post('/chatbot-rules', auth, async (req, reply) => {
@@ -351,7 +393,9 @@ export default async function miscRoutes(fastify) {
 
   // ── Schedules ─────────────────────────────────────────────────────────────
   fastify.get('/schedules', auth, async (req) => {
-    const { rows } = await query('SELECT * FROM schedules ORDER BY COALESCE(send_at, scheduled_at) ASC');
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    const offset = parseInt(req.query.offset) || 0;
+    const { rows } = await query('SELECT * FROM schedules ORDER BY COALESCE(send_at, scheduled_at) ASC LIMIT $1 OFFSET $2', [limit, offset]);
     return rows;
   });
   fastify.post('/schedules', auth, async (req, reply) => {
@@ -369,7 +413,14 @@ export default async function miscRoutes(fastify) {
   });
   fastify.patch('/schedules/:id', auth, async (req) => {
     const f = req.body;
-    const { rows } = await query('UPDATE schedules SET status=COALESCE($1,status) WHERE id=$2 RETURNING *', [f.status, req.params.id]);
+    const allowed = ['status', 'contact_name', 'contact_phone', 'connection_name', 'queue', 'message', 'send_at', 'open_ticket', 'create_note', 'repeat_interval', 'repeat_daily', 'repeat_count'];
+    const updates = []; const params = []; let p = 1;
+    for (const k of allowed) {
+      if (f[k] !== undefined) { updates.push(`${k}=$${p}`); params.push(f[k]); p++; }
+    }
+    if (!updates.length) return {};
+    params.push(req.params.id);
+    const { rows } = await query(`UPDATE schedules SET ${updates.join(',')} WHERE id=$${p} RETURNING *`, params);
     return rows[0];
   });
   fastify.delete('/schedules/:id', auth, async (req) => {

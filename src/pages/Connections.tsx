@@ -19,7 +19,6 @@ import {
   getInstanceStatus,
   setupWebhook,
 } from "@/lib/evolution-api";
-import { getZApiQRCode, getZApiStatus } from "@/lib/zapi";
 import { api } from "@/lib/api";
 
 interface MetaConnection {
@@ -40,16 +39,6 @@ interface Instance {
   profilePicUrl?: string;
 }
 
-interface ZApiConnection {
-  id: string;
-  label: string;
-  instanceId: string;
-  instanceToken: string;
-  clientToken: string;
-  status?: string;
-  connected?: boolean;
-}
-
 const Connections = () => {
   // Evolution API state
   const [instances, setInstances] = useState<Instance[]>([]);
@@ -58,16 +47,6 @@ const Connections = () => {
   const [newOpen, setNewOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
-
-  // Z-API state
-  const [zapiConnections, setZapiConnections] = useState<ZApiConnection[]>([]);
-  const [zapiLoading, setZapiLoading] = useState(false);
-  const [zapiNewOpen, setZapiNewOpen] = useState(false);
-  const [zapiLabel, setZapiLabel] = useState("");
-  const [zapiInstanceId, setZapiInstanceId] = useState("");
-  const [zapiInstanceToken, setZapiInstanceToken] = useState("");
-  const [zapiClientToken, setZapiClientToken] = useState("");
-  const [zapiCreating, setZapiCreating] = useState(false);
 
   // Meta WhatsApp Business API state
   const [metaConnections, setMetaConnections] = useState<MetaConnection[]>([]);
@@ -95,8 +74,6 @@ const Connections = () => {
   const [qrData, setQrData] = useState<string | null>(null);
   const [qrInstance, setQrInstance] = useState("");
   const [qrLoading, setQrLoading] = useState(false);
-  const [qrProvider, setQrProvider] = useState<"evolution" | "zapi">("evolution");
-  const [qrZapiConn, setQrZapiConn] = useState<ZApiConnection | null>(null);
 
   // Evolution API - fetch ONLY from DB, enrich with live status
   const fetchInstances = useCallback(async () => {
@@ -181,7 +158,6 @@ const Connections = () => {
 
   useEffect(() => {
     fetchInstances();
-    fetchZapiFromDb();
     fetchMetaConnections();
   }, [fetchInstances, fetchMetaConnections]);
 
@@ -193,29 +169,6 @@ const Connections = () => {
     return () => clearInterval(interval);
   }, [fetchInstances]);
 
-  const fetchZapiFromDb = useCallback(async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data, error } = await supabase
-        .from("zapi_connections" as any)
-        .select("*")
-        .eq("user_id", user.id);
-      if (error) throw error;
-      const mapped: ZApiConnection[] = (data || []).map((r: any) => ({
-        id: r.id,
-        label: r.label,
-        instanceId: r.instance_id,
-        instanceToken: r.instance_token,
-        clientToken: r.client_token,
-        status: r.status || "disconnected",
-        connected: r.connected || false,
-      }));
-      setZapiConnections(mapped);
-    } catch (err) {
-      console.warn("Failed to load Z-API connections:", err);
-    }
-  }, []);
 
   const handleCreateEvolution = async () => {
     if (!newName.trim()) {
@@ -391,127 +344,15 @@ const Connections = () => {
     }
   };
 
-  // Z-API
-  const fetchZapiStatuses = useCallback(async () => {
-    if (zapiConnections.length === 0) return;
-    setZapiLoading(true);
-    const updated = await Promise.all(
-      zapiConnections.map(async (conn) => {
-        try {
-          const result = await getZApiStatus({
-            instanceId: conn.instanceId,
-            instanceToken: conn.instanceToken,
-            clientToken: conn.clientToken,
-          });
-          const newStatus = result?.connected ? "connected" : result?.status || "disconnected";
-          const isConnected = result?.connected === true;
-          // Update status in DB
-          await supabase.from("zapi_connections" as any).update({
-            status: newStatus,
-            connected: isConnected,
-            updated_at: new Date().toISOString(),
-          } as any).eq("id", conn.id);
-          return { ...conn, status: newStatus, connected: isConnected };
-        } catch {
-          return { ...conn, status: "disconnected", connected: false };
-        }
-      })
-    );
-    setZapiConnections(updated);
-    setZapiLoading(false);
-  }, [zapiConnections.length]);
-
-  useEffect(() => {
-    if (zapiConnections.length > 0) fetchZapiStatuses();
-  }, []);
-
-  const handleCreateZapi = async () => {
-    if (!zapiLabel.trim() || !zapiInstanceId.trim() || !zapiInstanceToken.trim() || !zapiClientToken.trim()) {
-      toast.error("Preencha todos os campos");
-      return;
-    }
-    setZapiCreating(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { toast.error("Faça login primeiro"); setZapiCreating(false); return; }
-      const { data, error } = await supabase.from("zapi_connections" as any).insert({
-        user_id: user.id,
-        label: zapiLabel.trim(),
-        instance_id: zapiInstanceId.trim(),
-        instance_token: zapiInstanceToken.trim(),
-        client_token: zapiClientToken.trim(),
-      } as any).select().single();
-      if (error) throw error;
-      const newConn: ZApiConnection = {
-        id: (data as any).id,
-        label: (data as any).label,
-        instanceId: (data as any).instance_id,
-        instanceToken: (data as any).instance_token,
-        clientToken: (data as any).client_token,
-        status: "disconnected",
-        connected: false,
-      };
-      setZapiConnections((prev) => [...prev, newConn]);
-      setZapiNewOpen(false);
-      setZapiLabel("");
-      setZapiInstanceId("");
-      setZapiInstanceToken("");
-      setZapiClientToken("");
-      toast.success("Conexão Z-API adicionada!");
-      handleShowZapiQR(newConn);
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao salvar conexão");
-    }
-    setZapiCreating(false);
-  };
-
-  const handleShowZapiQR = async (conn: ZApiConnection) => {
-    setQrProvider("zapi");
-    setQrInstance(conn.label);
-    setQrZapiConn(conn);
-    setQrOpen(true);
-    setQrLoading(true);
-    setQrData(null);
-    try {
-      const result = await getZApiQRCode({
-        instanceId: conn.instanceId,
-        instanceToken: conn.instanceToken,
-        clientToken: conn.clientToken,
-      });
-      setQrData(result?.value || result?.qrcode || result?.base64 || null);
-    } catch {
-      toast.error("Erro ao gerar QR Code da Z-API");
-    }
-    setQrLoading(false);
-  };
-
-  const handleRemoveZapi = async (id: string) => {
-    try {
-      await supabase.from("zapi_connections" as any).delete().eq("id", id);
-      setZapiConnections((prev) => prev.filter((c) => c.id !== id));
-      toast.success("Conexão removida");
-    } catch {
-      toast.error("Erro ao remover conexão");
-    }
-  };
-
   const refreshQR = () => {
-    if (qrProvider === "evolution") {
-      handleShowEvolutionQR(qrInstance);
-    } else if (qrZapiConn) {
-      handleShowZapiQR(qrZapiConn);
-    }
+    handleShowEvolutionQR(qrInstance);
   };
 
   const connectedCount = instances.filter((i) => i.status === "open" || i.status === "connected").length;
   const disconnectedCount = instances.filter((i) => i.status !== "open" && i.status !== "connected").length;
-  const zapiConnectedCount = zapiConnections.filter((c) => c.connected).length;
 
   const filtered = instances.filter((i) =>
     i.instanceName?.toLowerCase().includes(search.toLowerCase())
-  );
-  const zapiFiltered = zapiConnections.filter((c) =>
-    c.label.toLowerCase().includes(search.toLowerCase())
   );
 
   const getStatusBadge = (status?: string, connected?: boolean) => {
@@ -550,8 +391,8 @@ const Connections = () => {
       <div className="flex items-center justify-between mx-6 py-4 border-b border-border">
         <h1 className="text-xl font-bold text-blue-600">Conexões</h1>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={() => { fetchInstances(); fetchZapiStatuses(); }} disabled={loading || zapiLoading}>
-            <RefreshCw className={cn("h-4 w-4", (loading || zapiLoading) && "animate-spin")} />
+          <Button variant="outline" size="icon" onClick={() => { fetchInstances(); fetchMetaConnections(); }} disabled={loading}>
+            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           </Button>
         </div>
       </div>
@@ -565,7 +406,7 @@ const Connections = () => {
               <Smartphone className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-foreground">{instances.length + zapiConnections.length}</p>
+              <p className="text-2xl font-bold text-foreground">{instances.length}</p>
               <p className="text-xs text-muted-foreground">Total de conexões</p>
             </div>
           </Card>
@@ -574,7 +415,7 @@ const Connections = () => {
               <Wifi className="h-5 w-5 text-emerald-500" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-foreground">{connectedCount + zapiConnectedCount}</p>
+              <p className="text-2xl font-bold text-foreground">{connectedCount}</p>
               <p className="text-xs text-muted-foreground">Conectadas</p>
             </div>
           </Card>
@@ -583,7 +424,7 @@ const Connections = () => {
               <WifiOff className="h-5 w-5 text-red-500" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-foreground">{disconnectedCount + (zapiConnections.length - zapiConnectedCount)}</p>
+              <p className="text-2xl font-bold text-foreground">{disconnectedCount}</p>
               <p className="text-xs text-muted-foreground">Desconectadas</p>
             </div>
           </Card>
@@ -605,9 +446,6 @@ const Connections = () => {
           <TabsList className="mb-4">
             <TabsTrigger value="evolution" className="gap-2">
               <Globe className="h-4 w-4" /> Evolution API
-            </TabsTrigger>
-            <TabsTrigger value="zapi" className="gap-2">
-              <Key className="h-4 w-4" /> Z-API
             </TabsTrigger>
             <TabsTrigger value="meta" className="gap-2">
               <MessageSquare className="h-4 w-4" /> WhatsApp Oficial
@@ -696,61 +534,6 @@ const Connections = () => {
               <p className="text-xs text-muted-foreground text-right mt-1">
                 Atualizado às {lastChecked.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
               </p>
-            )}
-          </TabsContent>
-
-          {/* Z-API Tab */}
-          <TabsContent value="zapi" className="space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">
-                Informe o Instance ID, Token e Client-Token da Z-API para conectar
-              </p>
-              <Button variant="action" className="gap-2 px-5" onClick={() => setZapiNewOpen(true)}>
-                <Plus className="h-4 w-4" /> Nova Conexão Z-API
-              </Button>
-            </div>
-
-            {zapiFiltered.length === 0 ? (
-              <div className="text-center py-16 text-muted-foreground">
-                <Smartphone className="h-12 w-12 mx-auto mb-3 opacity-40" />
-                <p>Nenhuma conexão Z-API encontrada</p>
-              </div>
-            ) : (
-              <div className="grid gap-3">
-                {zapiFiltered.map((conn) => (
-                  <Card key={conn.id} className="p-4 relative">
-                    <div className="flex items-center gap-4">
-                      <div className={cn(
-                        "h-12 w-12 rounded-xl flex items-center justify-center shrink-0",
-                        conn.connected ? "bg-emerald-500/20" : "bg-muted"
-                      )}>
-                        <Key className={cn("h-6 w-6", conn.connected ? "text-emerald-500" : "text-muted-foreground")} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          {getStatusDot(conn.status, conn.connected)}
-                          <p className="font-semibold text-foreground truncate">{conn.label}</p>
-                          {getStatusBadge(conn.status, conn.connected)}
-                          <Badge variant="outline" className="text-xs">Z-API</Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground">
-                          ID: {conn.instanceId}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        {!conn.connected && (
-                          <Button variant="outline" size="sm" className="gap-1.5 border-amber-500 text-amber-600 hover:bg-amber-50 hover:text-amber-700" onClick={() => handleShowZapiQR(conn)}>
-                            <QrCode className="h-4 w-4" /> Reconectar
-                          </Button>
-                        )}
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleRemoveZapi(conn.id)} title="Excluir">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-              </div>
             )}
           </TabsContent>
 
@@ -952,52 +735,6 @@ const Connections = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Z-API - New Connection Dialog */}
-      <Dialog open={zapiNewOpen} onOpenChange={setZapiNewOpen}>
-        <DialogContent className="sm:max-w-md p-0 overflow-hidden gap-0 [&>button.absolute]:hidden">
-          <div className="bg-blue-600 px-6 py-5 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full bg-white/20 flex items-center justify-center">
-              <Key className="h-5 w-5 text-white" />
-            </div>
-            <div className="flex-1">
-              <h2 className="text-lg font-bold text-white">Nova Conexão — Z-API</h2>
-              <p className="text-sm text-white/70">Informe suas credenciais da Z-API</p>
-            </div>
-            <button onClick={() => setZapiNewOpen(false)} className="text-white/70 hover:text-white">
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-          <div className="px-6 py-5 space-y-4 max-h-[60vh] overflow-y-auto">
-            <div>
-              <label className="text-sm font-medium text-foreground">Nome da conexão</label>
-              <Input placeholder="Ex: WhatsApp Vendas" value={zapiLabel} onChange={(e) => setZapiLabel(e.target.value)} />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-foreground">Instance ID</label>
-              <Input placeholder="Cole o Instance ID da Z-API" value={zapiInstanceId} onChange={(e) => setZapiInstanceId(e.target.value)} />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-foreground">Instance Token</label>
-              <Input placeholder="Cole o Token da instância" value={zapiInstanceToken} onChange={(e) => setZapiInstanceToken(e.target.value)} />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-foreground">Client Token</label>
-              <Input placeholder="Cole o Client-Token" value={zapiClientToken} onChange={(e) => setZapiClientToken(e.target.value)} />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Encontre essas credenciais no painel da Z-API em <strong>Instâncias → Detalhes</strong>
-            </p>
-          </div>
-          <div className="flex justify-end gap-3 px-6 py-4 border-t border-border">
-            <Button variant="outline" onClick={() => setZapiNewOpen(false)}>Cancelar</Button>
-            <Button onClick={handleCreateZapi} disabled={zapiCreating} className="bg-blue-600 hover:bg-blue-700 text-white gap-2">
-              {zapiCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              Salvar e Conectar
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
       {/* Edit Instance Dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="sm:max-w-md p-0 overflow-hidden gap-0 [&>button.absolute]:hidden">
@@ -1038,7 +775,7 @@ const Connections = () => {
             <div className="flex-1">
               <h2 className="text-lg font-bold text-white">Conectar WhatsApp</h2>
               <p className="text-sm text-white/70">
-                {qrProvider === "evolution" ? "Evolution API" : "Z-API"} — {qrInstance}
+                Evolution API — {qrInstance}
               </p>
             </div>
             <button onClick={() => setQrOpen(false)} className="text-white/70 hover:text-white">

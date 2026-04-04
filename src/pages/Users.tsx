@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import api from "@/lib/api";
 import {
   Search, Users as UsersIcon,
   Pencil, Trash2, LayoutGrid, List, Mail, Settings2, ShieldCheck, AlertTriangle, RefreshCw,
@@ -36,7 +38,6 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useUserRole } from "@/hooks/useUserRole";
 import { toast } from "sonner";
@@ -112,11 +113,9 @@ const getInitials = (name: string | null) => {
 const UsersPage = () => {
   const { user, session } = useAuth();
   const { isAdmin } = useUserRole();
-  const [users, setUsers] = useState<UserProfile[]>([]);
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editUserId, setEditUserId] = useState<string | null>(null);
@@ -135,7 +134,44 @@ const UsersPage = () => {
   const [transferTargetId, setTransferTargetId] = useState("");
   const [transferring, setTransferring] = useState(false);
 
-  const [agentSchedules, setAgentSchedules] = useState<Record<string, AgentSchedule>>({});
+  // TanStack Query: load users
+  const { data: usersData = [], isLoading: loading, error: loadErrorObj, refetch: refetchUsers } = useQuery<UserProfile[]>({
+    queryKey: ['users'],
+    queryFn: async () => {
+      const rows = await api.get<any[]>('/users');
+      return rows.map((prof: any) => {
+        const rawPerms = prof.permissions || {};
+        const granular: AgentPermissions =
+          (rawPerms && "pages" in rawPerms && "actions" in rawPerms)
+            ? rawPerms as unknown as AgentPermissions
+            : DEFAULT_PERMISSIONS;
+        return {
+          id: prof.id,
+          full_name: prof.full_name || prof.name,
+          avatar_url: prof.avatar_url,
+          email: prof.email,
+          role: prof.role || "user",
+          status: prof.status || "offline",
+          permissions: typeof Object.values(rawPerms)[0] === "boolean" ? rawPerms : Object.fromEntries(MODULES.map(m => [m.key, true])),
+          granularPermissions: granular,
+        };
+      });
+    },
+    enabled: !!session,
+  });
+  const users = usersData;
+  const loadError = loadErrorObj ? (loadErrorObj as Error).message : null;
+
+  // TanStack Query: agent schedules
+  const { data: agentSchedulesData = {} } = useQuery<Record<string, AgentSchedule>>({
+    queryKey: ['agent-schedules'],
+    queryFn: async () => {
+      const rows = await api.get<AgentSchedule[]>('/agent-schedules');
+      return Object.fromEntries(rows.map(s => [s.agent_id, s]));
+    },
+    enabled: !!session,
+  });
+  const agentSchedules = agentSchedulesData;
 
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [permissionsUser, setPermissionsUser] = useState<UserProfile | null>(null);
@@ -177,116 +213,15 @@ const UsersPage = () => {
   const handleSavePermissions = async () => {
     if (!permissionsUser) return;
     setSavingPerms(true);
-    const { error } = await supabase
-      .from("profiles")
-      .update({ permissions: editingPerms } as any)
-      .eq("id", permissionsUser.id);
-    setSavingPerms(false);
-    if (error) {
-      toast.error("Erro ao salvar permissões");
-    } else {
-      toast.success(`Permissões de ${permissionsUser.full_name || "usuário"} atualizadas!`);
-      setPermissionsOpen(false);
-      setUsers(prev => prev.map(u =>
-        u.id === permissionsUser.id
-          ? { ...u, granularPermissions: editingPerms }
-          : u
-      ));
-    }
-  };
-
-  useEffect(() => { loadData(); }, [session]);
-
-  // Realtime: atualiza status quando perfil muda
-  useEffect(() => {
-    const channel = supabase
-      .channel("users-profiles-realtime")
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "profiles" },
-        (payload) => {
-          const updated = payload.new as any;
-          setUsers(prev => prev.map(u =>
-            u.id === updated.id
-              ? { ...u, full_name: updated.full_name ?? u.full_name, status: updated.status ?? u.status, avatar_url: updated.avatar_url ?? u.avatar_url }
-              : u
-          ));
-        }
-      )
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, []);
-
-  const loadData = async () => {
-    if (!session) return;
-    setLoading(true);
-    setLoadError(null);
-
     try {
-      const [p, r, emailRes] = await Promise.all([
-        supabase.from("profiles").select("id, full_name, avatar_url, status, email, permissions"),
-        supabase.from("user_roles").select("user_id, role"),
-        supabase.functions.invoke("manage-users", {
-          method: "GET",
-          headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` },
-        }),
-      ]);
-
-      if (p.error) throw new Error(p.error.message);
-
-      const profiles = (p.data || []) as any[];
-      const userRoles = (r.data || []) as { user_id: string; role: string }[];
-      const emailMap = new Map<string, string>();
-
-      if (emailRes.data?.users) {
-        for (const u of emailRes.data.users) {
-          emailMap.set(u.id, u.email);
-        }
-      }
-
-      // Load agent schedules
-      const schedRes = await supabase.from("agent_schedules" as any).select("*");
-      if (schedRes.data) {
-        const map: Record<string, AgentSchedule> = {};
-        for (const s of schedRes.data as AgentSchedule[]) {
-          map[s.agent_id] = s;
-        }
-        setAgentSchedules(map);
-      }
-
-      setUsers(profiles.map((prof) => {
-        const rawPerms = prof.permissions || {};
-        // Legacy flat permissions (boolean per module key)
-        const legacyPerms: Record<string, boolean> =
-          (rawPerms && Object.keys(rawPerms).length > 0 && typeof Object.values(rawPerms)[0] === "boolean")
-            ? rawPerms as Record<string, boolean>
-            : Object.fromEntries(MODULES.map(m => [m.key, true]));
-
-        // Granular permissions (pages/actions structure)
-        const granular: AgentPermissions =
-          (rawPerms && "pages" in rawPerms && "actions" in rawPerms)
-            ? rawPerms as unknown as AgentPermissions
-            : DEFAULT_PERMISSIONS;
-
-        return {
-          id: prof.id,
-          full_name: prof.full_name,
-          avatar_url: prof.avatar_url,
-          email: emailMap.get(prof.id) || prof.email || null,
-          role: userRoles.find(ur => ur.user_id === prof.id)?.role || "user",
-          status: prof.status || "offline",
-          permissions: legacyPerms,
-          granularPermissions: granular,
-        };
-      }));
-    } catch (err: any) {
-      console.error("Error loading users:", err);
-      setLoadError(err.message || "Erro ao carregar usuários. Tente novamente.");
-    } finally {
-      setLoading(false);
-    }
+      await api.patch(`/users/${permissionsUser.id}`, { permissions: editingPerms });
+      toast.success(`Permissões de ${permissionsUser.full_name || "usuário"} atualizadas!`);
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      setPermissionsOpen(false);
+    } catch { toast.error("Erro ao salvar permissões"); }
+    setSavingPerms(false);
   };
+
 
   const filtered = users.filter(u =>
     (u.full_name || "").toLowerCase().includes(search.toLowerCase()) ||
@@ -303,12 +238,8 @@ const UsersPage = () => {
     if (!transferUser || !transferTargetId || !session) return;
     setTransferring(true);
     try {
-      const { error } = await supabase
-        .from("conversations")
-        .update({ assigned_to: transferTargetId } as any)
-        .eq("assigned_to", transferUser.id)
-        .in("status", ["open", "attending"]);
-      if (error) throw error;
+      // Transfer via conversations endpoint (bulk update)
+      await api.post('/conversations/bulk-assign', { from_user: transferUser.id, to_user: transferTargetId });
       toast.success(`Tickets de ${transferUser.full_name || "usuário"} transferidos com sucesso!`);
       setTransferOpen(false);
       setTransferUser(null);
@@ -324,12 +255,7 @@ const UsersPage = () => {
     if (!closeTicketsUser || !session) return;
     setClosingTickets(true);
     try {
-      const { error } = await supabase
-        .from("conversations")
-        .update({ status: "closed" } as any)
-        .eq("assigned_to", closeTicketsUser.id)
-        .in("status", ["open", "attending"]);
-      if (error) throw error;
+      await api.post('/conversations/bulk-close', { user_id: closeTicketsUser.id });
       toast.success(`Tickets de ${closeTicketsUser.full_name || "usuário"} encerrados com sucesso!`);
       setCloseTicketsOpen(false);
       setCloseTicketsUser(null);
@@ -344,16 +270,11 @@ const UsersPage = () => {
     if (!deleteUser || !session) return;
     setDeleting(true);
     try {
-      const { error } = await supabase.functions.invoke("manage-users", {
-        method: "POST",
-        body: { action: "delete", userId: deleteUser.id },
-        headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` },
-      });
-      if (error) throw error;
+      await api.delete(`/users/${deleteUser.id}`);
       toast.success("Usuário excluído com sucesso!");
+      queryClient.invalidateQueries({ queryKey: ['users'] });
       setDeleteOpen(false);
       setDeleteUser(null);
-      loadData();
     } catch (err: any) {
       toast.error(err.message || "Erro ao excluir usuário");
     } finally {
@@ -364,14 +285,9 @@ const UsersPage = () => {
   const handleRoleChange = async (targetUserId: string, newRole: string) => {
     if (!session) return;
     try {
-      const { error } = await supabase.functions.invoke("manage-users", {
-        method: "POST",
-        body: { action: "set-role", userId: targetUserId, role: newRole },
-        headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` },
-      });
-      if (error) throw error;
+      await api.patch(`/users/${targetUserId}`, { role: newRole });
       toast.success("Role atualizada com sucesso!");
-      setUsers(prev => prev.map(u => u.id === targetUserId ? { ...u, role: newRole } : u));
+      queryClient.invalidateQueries({ queryKey: ['users'] });
     } catch (err: any) {
       toast.error(err.message || "Erro ao alterar role");
     }
@@ -610,7 +526,7 @@ const UsersPage = () => {
             <AlertTriangle className="h-12 w-12 text-amber-500 opacity-60" />
             <p className="font-medium text-foreground">Erro ao carregar usuários</p>
             <p className="text-sm text-center max-w-md">{loadError}</p>
-            <Button variant="outline" size="sm" className="gap-2 mt-2" onClick={loadData}>
+            <Button variant="outline" size="sm" className="gap-2 mt-2" onClick={() => refetchUsers()}>
               <RefreshCw className="h-4 w-4" /> Tentar novamente
             </Button>
           </div>
@@ -636,7 +552,7 @@ const UsersPage = () => {
         onOpenChange={setFormOpen}
         editUserId={editUserId}
         editUserEmail={editUserEmail}
-        onSaved={loadData}
+        onSaved={() => refetchUsers()}
       />
 
       {/* Permissions Dialog */}

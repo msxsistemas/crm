@@ -43,9 +43,7 @@ const PortalLogin = ({ portal, title, subtitle, showRegisterLink = false }: Port
     e.preventDefault();
     setLoading(true);
     try {
-      const data = await api.post<{ token: string; refreshToken: string }>('/auth/login', { email, password });
-      localStorage.setItem('auth_token', data.token);
-      localStorage.setItem('refresh_token', data.refreshToken);
+      await api.post('/auth/login', { email, password });
       await refreshUser();
       toast.success("Login realizado com sucesso!");
     } catch (err: unknown) {

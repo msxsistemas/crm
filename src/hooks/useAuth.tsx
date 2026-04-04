@@ -34,14 +34,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   const loadUser = async () => {
-    const token = localStorage.getItem('auth_token');
-    if (!token) { setLoading(false); return; }
     try {
       const data = await api.get<UserProfile>('/auth/me');
       setUser(data);
     } catch {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('refresh_token');
       setUser(null);
     } finally {
       setLoading(false);
@@ -51,8 +47,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => { loadUser(); }, []);
 
   const signOut = async () => {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('refresh_token');
+    await api.post('/auth/logout').catch(() => {});
     setUser(null);
     window.location.href = '/login';
   };

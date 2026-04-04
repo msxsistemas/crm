@@ -1,12 +1,15 @@
-import { query } from '../database.js';
+import { query, pool, withTransaction } from '../database.js';
+import { cached, invalidate } from '../redis.js';
+import { deliverWebhook } from '../jobs/webhookDelivery.js';
+import { notifyConversationAssigned } from '../notifications/email.js';
 
 export default async function conversationRoutes(fastify) {
   const auth = { preHandler: fastify.authenticate };
 
-  // List conversations
+  // List conversations — cursor-based pagination for performance
+  // Use ?cursor=<last_message_at>_<id> to get next page (opaque cursor)
   fastify.get('/conversations', auth, async (req) => {
-    const { status, assigned_to, search, page = 1, limit = 50, connection_name } = req.query;
-    const offset = (page - 1) * limit;
+    const { status, assigned_to, search, limit = 50, connection_name, cursor, page } = req.query;
     const conditions = ['c.is_merged = false'];
     const params = [];
     let p = 1;
@@ -19,8 +22,30 @@ export default async function conversationRoutes(fastify) {
       params.push(`%${search}%`); p++;
     }
 
+    // Cursor: encode as "<last_message_at>|<id>" for keyset pagination
+    // Falls back to OFFSET for legacy callers that pass ?page=
+    let cursorClause = '';
+    if (cursor) {
+      const [cursorTs, cursorId] = Buffer.from(cursor, 'base64url').toString().split('|');
+      if (cursorTs && cursorId) {
+        cursorClause = `AND (c.last_message_at < $${p} OR (c.last_message_at = $${p} AND c.id < $${p+1}))`;
+        params.push(cursorTs, cursorId); p += 2;
+      }
+    }
+
     const where = conditions.join(' AND ');
-    const { rows } = await query(`
+    const lim = Math.min(parseInt(limit) || 50, 200);
+    params.push(lim);
+
+    // Legacy OFFSET fallback for ?page= callers
+    let offsetClause = '';
+    if (!cursor && page && parseInt(page) > 1) {
+      const offset = (parseInt(page) - 1) * lim;
+      offsetClause = `OFFSET $${p + 1}`;
+      params.push(offset);
+    }
+
+    const sql = `
       SELECT c.*,
         c.connection_name as instance_name,
         ct.name as contact_name, ct.phone as contact_phone, ct.tags as contact_tags,
@@ -29,17 +54,28 @@ export default async function conversationRoutes(fastify) {
       FROM conversations c
       LEFT JOIN contacts ct ON ct.id = c.contact_id
       LEFT JOIN profiles p ON p.id = c.assigned_to
-      WHERE ${where}
-      ORDER BY c.last_message_at DESC NULLS LAST, c.created_at DESC
-      LIMIT $${p} OFFSET $${p+1}
-    `, [...params, limit, offset]);
+      WHERE ${where} ${cursorClause}
+      ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC
+      LIMIT $${p} ${offsetClause}
+    `;
 
-    const { rows: countRows } = await query(`
-      SELECT COUNT(*) FROM conversations c
-      LEFT JOIN contacts ct ON ct.id = c.contact_id
-      WHERE ${where}
-    `, params);
+    // Only cache non-search, no-cursor first-page queries
+    const cacheKey = !search && !cursor && (!page || page == 1)
+      ? `conv:list:${status||'all'}:${assigned_to||'all'}:${connection_name||'all'}:${lim}`
+      : null;
 
+    const rows = cacheKey
+      ? await cached(cacheKey, 20, () => query(sql, params).then(r => r.rows))
+      : (await query(sql, params)).rows;
+
+    // If caller requested cursor pagination, return { data, nextCursor }
+    // Otherwise return plain array for backward compat with existing frontend
+    if (cursor !== undefined) {
+      const nextCursor = rows.length === lim && rows.at(-1)
+        ? Buffer.from(`${rows.at(-1).last_message_at}|${rows.at(-1).id}`).toString('base64url')
+        : null;
+      return { data: rows, nextCursor };
+    }
     return rows;
   });
 
@@ -124,6 +160,7 @@ export default async function conversationRoutes(fastify) {
     // Safety: refuse to update ALL conversations if no meaningful filter provided
     if (conditions.length === 1) return reply.status(400).send({ error: 'Filtro obrigatório' });
     await query(`UPDATE conversations SET ${updates.join(',')} WHERE ${conditions.join(' AND ')}`, params);
+    invalidate('conv:list:*').catch(() => {});
     return { ok: true };
   });
 
@@ -146,8 +183,20 @@ export default async function conversationRoutes(fastify) {
     const { rows } = await query(`UPDATE conversations SET ${updates.join(',')} WHERE id = $${p} RETURNING *`, params);
     if (!rows[0]) return reply.status(404).send({ error: 'Conversa não encontrada' });
 
-    // Emit realtime update
+    // Emit realtime update + invalidate cache
     fastify.io?.emit('conversation:updated', rows[0]);
+    invalidate('conv:list:*').catch(() => {});
+    deliverWebhook.dispatchEvent('conversation.updated', rows[0]).catch(() => {});
+
+    // Email notification when assigned_to changes
+    if (req.body.assigned_to && rows[0].contact_name) {
+      notifyConversationAssigned({
+        agentId: req.body.assigned_to,
+        contactName: rows[0].contact_name,
+        conversationId: req.params.id,
+      }).catch(() => {});
+    }
+
     return rows[0];
   });
 
@@ -174,11 +223,34 @@ export default async function conversationRoutes(fastify) {
 
   fastify.post('/conversations/:id/notes', auth, async (req, reply) => {
     const { content, is_internal = true } = req.body;
-    const { rows: profile } = await query('SELECT name FROM profiles WHERE id = $1', [req.user.id]);
-    const { rows } = await query(
-      'INSERT INTO conversation_notes (conversation_id, content, author_id, author_name, is_internal) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [req.params.id, content, req.user.id, profile[0]?.name, is_internal]
+    const note = await withTransaction(async (client) => {
+      const { rows: profile } = await client.query('SELECT name FROM profiles WHERE id = $1', [req.user.id]);
+      const { rows } = await client.query(
+        'INSERT INTO conversation_notes (conversation_id, content, author_id, author_name, is_internal) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+        [req.params.id, content, req.user.id, profile[0]?.name, is_internal]
+      );
+      return rows[0];
+    });
+    return reply.status(201).send(note);
+  });
+
+  // Bulk assign conversations from one agent to another
+  fastify.post('/conversations/bulk-assign', auth, async (req) => {
+    const { from_user, to_user } = req.body;
+    const { rowCount } = await query(
+      "UPDATE conversations SET assigned_to = $1 WHERE assigned_to = $2 AND status IN ('open', 'attending')",
+      [to_user, from_user]
     );
-    return reply.status(201).send(rows[0]);
+    return { updated: rowCount };
+  });
+
+  // Bulk close conversations for an agent
+  fastify.post('/conversations/bulk-close', auth, async (req) => {
+    const { user_id } = req.body;
+    const { rowCount } = await query(
+      "UPDATE conversations SET status = 'closed' WHERE assigned_to = $1 AND status IN ('open', 'attending')",
+      [user_id]
+    );
+    return { updated: rowCount };
   });
 }

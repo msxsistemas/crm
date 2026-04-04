@@ -15,7 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { supabase } from "@/integrations/supabase/client";
+import api from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -39,15 +39,10 @@ const TwoFactorSection = ({ userId }: { userId: string | null }) => {
 
   useEffect(() => {
     if (!userId) return;
-    supabase
-      .from("profiles")
-      .select("two_factor_enabled")
-      .eq("id", userId)
-      .maybeSingle()
-      .then(({ data }) => {
-        setEnabled((data as any)?.two_factor_enabled ?? false);
-        setLoading(false);
-      });
+    api.get<any>('/auth/me').then(data => {
+      setEnabled(data?.two_factor_enabled ?? false);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, [userId]);
 
   const handleToggle = async (val: boolean) => {
@@ -62,17 +57,14 @@ const TwoFactorSection = ({ userId }: { userId: string | null }) => {
   const saveEnabled = async (val: boolean) => {
     if (!userId) return;
     setSaving(true);
-    const { error } = await supabase
-      .from("profiles")
-      .update({ two_factor_enabled: val } as any)
-      .eq("id", userId);
-    setSaving(false);
-    if (error) {
-      toast.error("Erro ao salvar configuração de 2FA");
-    } else {
+    try {
+      await api.patch('/auth/me', { two_factor_enabled: val });
       setEnabled(val);
       toast.success(val ? "2FA ativado com sucesso!" : "2FA desativado");
+    } catch {
+      toast.error("Erro ao salvar configuração de 2FA");
     }
+    setSaving(false);
   };
 
   const confirmEnable = async () => {
@@ -237,10 +229,10 @@ const GeralTab = () => {
 
   useEffect(() => {
     if (user) {
-      supabase.from("profiles").select("full_name, avatar_url").eq("id", user.id).maybeSingle().then(({ data }) => {
-        if (data?.full_name) setFullName(data.full_name);
+      api.get<any>('/auth/me').then(data => {
+        if (data?.name || data?.full_name) setFullName(data.name || data.full_name);
         if (data?.avatar_url) setAvatarUrl(data.avatar_url);
-      });
+      }).catch(() => {});
     }
   }, [user]);
 
@@ -251,22 +243,10 @@ const GeralTab = () => {
 
     setUploadingAvatar(true);
     try {
-      const ext = file.name.split(".").pop();
-      const path = `${user.id}/avatar.${ext}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("avatars")
-        .upload(path, file, { upsert: true });
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(path);
-      const urlWithCache = `${publicUrl}?t=${Date.now()}`;
-
-      const { error: updateError } = await supabase.from("profiles").update({ avatar_url: urlWithCache }).eq("id", user.id);
-      if (updateError) throw updateError;
-
-      setAvatarUrl(urlWithCache);
+      const formData = new FormData();
+      formData.append("file", file);
+      const data = await api.upload<{ avatar_url: string }>('/auth/me/avatar', formData);
+      setAvatarUrl(data.avatar_url);
       toast.success("Foto atualizada!");
     } catch (err: any) {
       toast.error(err.message || "Erro ao enviar foto");
@@ -280,8 +260,7 @@ const GeralTab = () => {
     if (!user) return;
     setSaving(true);
     try {
-      const { error } = await supabase.from("profiles").update({ full_name: fullName }).eq("id", user.id);
-      if (error) throw error;
+      await api.patch('/auth/me', { name: fullName });
       toast.success("Perfil atualizado!");
     } catch {
       toast.error("Erro ao salvar perfil");
@@ -294,20 +273,12 @@ const GeralTab = () => {
     if (newPwd !== confirmPwd) { toast.error("Senhas não conferem"); return; }
     if (!currentPwd) { toast.error("Informe a senha atual"); return; }
 
-    // Verificar senha atual
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: user?.email || "",
-      password: currentPwd,
-    });
-    if (signInError) { toast.error("Senha atual incorreta"); return; }
-
     try {
-      const { error } = await supabase.auth.updateUser({ password: newPwd });
-      if (error) throw error;
+      await api.post('/auth/change-password', { currentPassword: currentPwd, newPassword: newPwd });
       toast.success("Senha alterada!");
       setCurrentPwd(""); setNewPwd(""); setConfirmPwd("");
     } catch (err: any) {
-      toast.error(err.message || "Erro ao alterar senha");
+      toast.error(err?.data?.error || err.message || "Erro ao alterar senha");
     }
   };
 
@@ -448,11 +419,12 @@ const TagsTab = () => {
   const [loading, setLoading] = useState(true);
 
   const fetchTags = useCallback(async () => {
-    if (!user) return;
-    const { data } = await supabase.from("tags").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
-    if (data) setTags(data);
+    try {
+      const data = await api.get<any[]>('/tags');
+      setTags(data || []);
+    } catch {}
     setLoading(false);
-  }, [user]);
+  }, []);
 
   useEffect(() => { fetchTags(); }, [fetchTags]);
 
@@ -460,25 +432,26 @@ const TagsTab = () => {
   const openEdit = (tag: { id: string; name: string; color: string }) => { setEditingTag(tag); setTagName(tag.name); setTagColor(tag.color); setDialogOpen(true); };
 
   const handleSave = async () => {
-    if (!user || !tagName.trim()) return;
-    if (editingTag) {
-      const { error } = await supabase.from("tags").update({ name: tagName.trim(), color: tagColor }).eq("id", editingTag.id);
-      if (error) { toast.error("Erro ao atualizar tag"); return; }
-      toast.success("Tag atualizada!");
-    } else {
-      const { error } = await supabase.from("tags").insert({ name: tagName.trim(), color: tagColor, user_id: user.id });
-      if (error) { toast.error("Erro ao criar tag"); return; }
-      toast.success("Tag criada!");
-    }
-    setDialogOpen(false);
-    fetchTags();
+    if (!tagName.trim()) return;
+    try {
+      if (editingTag) {
+        await api.patch(`/tags/${editingTag.id}`, { name: tagName.trim(), color: tagColor });
+        toast.success("Tag atualizada!");
+      } else {
+        await api.post('/tags', { name: tagName.trim(), color: tagColor });
+        toast.success("Tag criada!");
+      }
+      setDialogOpen(false);
+      fetchTags();
+    } catch { toast.error(editingTag ? "Erro ao atualizar tag" : "Erro ao criar tag"); }
   };
 
   const handleDeleteTag = async (id: string) => {
-    const { error } = await supabase.from("tags").delete().eq("id", id);
-    if (error) { toast.error("Erro ao excluir"); return; }
-    toast.success("Tag excluída!");
-    fetchTags();
+    try {
+      await api.delete(`/tags/${id}`);
+      toast.success("Tag excluída!");
+      fetchTags();
+    } catch { toast.error("Erro ao excluir"); }
   };
 
   const filtered = tags.filter(t => t.name.toLowerCase().includes(search.toLowerCase()));
@@ -568,11 +541,12 @@ const CategoriasTab = () => {
   const [loading, setLoading] = useState(true);
 
   const fetchCats = useCallback(async () => {
-    if (!user) return;
-    const { data } = await supabase.from("categories").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
-    if (data) setCategories(data);
+    try {
+      const data = await api.get<any[]>('/categories');
+      setCategories(data || []);
+    } catch {}
     setLoading(false);
-  }, [user]);
+  }, []);
 
   useEffect(() => { fetchCats(); }, [fetchCats]);
 
@@ -582,25 +556,26 @@ const CategoriasTab = () => {
   };
 
   const handleSave = async () => {
-    if (!user || !catName.trim()) return;
-    if (editingCat) {
-      const { error } = await supabase.from("categories").update({ name: catName.trim(), description: catDesc || null, color: catColor }).eq("id", editingCat.id);
-      if (error) { toast.error("Erro ao atualizar categoria"); return; }
-      toast.success("Categoria atualizada!");
-    } else {
-      const { error } = await supabase.from("categories").insert({ name: catName.trim(), description: catDesc || null, color: catColor, user_id: user.id });
-      if (error) { toast.error("Erro ao criar categoria"); return; }
-      toast.success("Categoria criada!");
-    }
-    setDialogOpen(false);
-    fetchCats();
+    if (!catName.trim()) return;
+    try {
+      if (editingCat) {
+        await api.patch(`/categories/${editingCat.id}`, { name: catName.trim(), color: catColor });
+        toast.success("Categoria atualizada!");
+      } else {
+        await api.post('/categories', { name: catName.trim(), color: catColor });
+        toast.success("Categoria criada!");
+      }
+      setDialogOpen(false);
+      fetchCats();
+    } catch { toast.error(editingCat ? "Erro ao atualizar categoria" : "Erro ao criar categoria"); }
   };
 
   const handleDeleteCat = async (id: string) => {
-    const { error } = await supabase.from("categories").delete().eq("id", id);
-    if (error) { toast.error("Erro ao excluir"); return; }
-    toast.success("Categoria excluída!");
-    fetchCats();
+    try {
+      await api.delete(`/categories/${id}`);
+      toast.success("Categoria excluída!");
+      fetchCats();
+    } catch { toast.error("Erro ao excluir"); }
   };
 
   return (
@@ -687,23 +662,25 @@ const RespostasRapidasTab = () => {
   const [saving, setSaving] = useState(false);
 
   const loadReplies = useCallback(async () => {
-    if (!user) return;
-    const { data } = await supabase.from("quick_replies").select("id, shortcut, message").eq("user_id", user.id).order("created_at", { ascending: false });
-    setReplies(data || []);
-  }, [user]);
+    try {
+      const data = await api.get<any[]>('/quick-replies');
+      setReplies(data || []);
+    } catch {}
+  }, []);
 
   useEffect(() => { loadReplies(); }, [loadReplies]);
 
   const handleSave = async () => {
-    if (!shortcut.trim() || !message.trim() || !user) { toast.error("Preencha atalho e mensagem"); return; }
+    if (!shortcut.trim() || !message.trim()) { toast.error("Preencha atalho e mensagem"); return; }
     setSaving(true);
-    const { error } = await supabase.from("quick_replies").insert({ user_id: user.id, shortcut: shortcut.trim().replace(/\//g, ""), message: message.trim() });
+    try {
+      await api.post('/quick-replies', { shortcut: shortcut.trim().replace(/\//g, ""), message: message.trim(), title: title.trim() });
+      toast.success("Resposta criada!");
+      setNewOpen(false);
+      setShortcut(""); setTitle(""); setMessage("");
+      loadReplies();
+    } catch { toast.error("Erro ao salvar resposta"); }
     setSaving(false);
-    if (error) { toast.error("Erro ao salvar resposta"); return; }
-    toast.success("Resposta criada!");
-    setNewOpen(false);
-    setShortcut(""); setTitle(""); setMessage("");
-    loadReplies();
   };
 
   const filtered = replies.filter(r => r.shortcut.toLowerCase().includes(search.toLowerCase()) || r.message.toLowerCase().includes(search.toLowerCase()));
@@ -791,27 +768,58 @@ const RespostasRapidasTab = () => {
 };
 
 // ─── Horários Tab ───
+const DEFAULT_DAYS = [
+  { name: "Segunda-feira", active: true, start: "08:00", end: "18:00" },
+  { name: "Terça-feira", active: true, start: "08:00", end: "18:00" },
+  { name: "Quarta-feira", active: true, start: "08:00", end: "18:00" },
+  { name: "Quinta-feira", active: true, start: "08:00", end: "18:00" },
+  { name: "Sexta-feira", active: true, start: "08:00", end: "18:00" },
+  { name: "Sábado", active: false, start: "", end: "" },
+  { name: "Domingo", active: false, start: "", end: "" },
+];
+
 const HorariosTab = () => {
   const [enabled, setEnabled] = useState(true);
   const [offMessage, setOffMessage] = useState("No momento estamos fora do horário de atendimento. Retornaremos em breve!");
-  const [csatEnabled, setCsatEnabled] = useState(() => localStorage.getItem("auto_csat_enabled") === "true");
+  const [csatEnabled, setCsatEnabled] = useState(false);
+  const [schedule, setSchedule] = useState(DEFAULT_DAYS);
+  const [saving, setSaving] = useState(false);
 
-  const handleCsatToggle = (val: boolean) => {
+  useEffect(() => {
+    api.get<any>('/settings').then(data => {
+      if (data.office_hours_enabled !== undefined) setEnabled(data.office_hours_enabled);
+      if (data.office_hours_off_message) setOffMessage(data.office_hours_off_message);
+      if (data.office_hours_schedule?.length) setSchedule(data.office_hours_schedule);
+      if (data.auto_csat_enabled !== undefined) setCsatEnabled(data.auto_csat_enabled);
+    }).catch(() => {});
+  }, []);
+
+  const handleCsatToggle = async (val: boolean) => {
     setCsatEnabled(val);
-    localStorage.setItem("auto_csat_enabled", String(val));
-    toast.success(val ? "Pesquisa de satisfação automática ativada" : "Pesquisa de satisfação automática desativada");
+    try {
+      await api.patch('/settings', { auto_csat_enabled: val });
+      toast.success(val ? "Pesquisa de satisfação automática ativada" : "Pesquisa de satisfação automática desativada");
+    } catch {
+      toast.error("Erro ao salvar configuração");
+    }
   };
 
-  const days = [
-    { name: "Segunda-feira", active: true, start: "08:00", end: "18:00" },
-    { name: "Terça-feira", active: true, start: "08:00", end: "18:00" },
-    { name: "Quarta-feira", active: true, start: "08:00", end: "18:00" },
-    { name: "Quinta-feira", active: true, start: "08:00", end: "18:00" },
-    { name: "Sexta-feira", active: true, start: "08:00", end: "18:00" },
-    { name: "Sábado", active: false, start: "", end: "" },
-    { name: "Domingo", active: false, start: "", end: "" },
-  ];
-  const [schedule, setSchedule] = useState(days);
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.patch('/settings', {
+        office_hours_enabled: enabled,
+        office_hours_off_message: offMessage,
+        office_hours_schedule: schedule,
+        auto_csat_enabled: csatEnabled,
+      });
+      toast.success("Configurações salvas!");
+    } catch {
+      toast.error("Erro ao salvar configurações");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const toggleDay = (idx: number) => {
     setSchedule(prev => prev.map((d, i) => i === idx ? { ...d, active: !d.active } : d));
@@ -899,8 +907,8 @@ const HorariosTab = () => {
           </div>
 
           <div className="flex justify-end">
-            <Button className="gap-2" onClick={() => toast.success("Configurações salvas!")}>
-              <Save className="h-4 w-4" /> Salvar Configurações
+            <Button className="gap-2" onClick={handleSave} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Salvar Configurações
             </Button>
           </div>
         </>
@@ -913,6 +921,26 @@ const HorariosTab = () => {
 const DistribuicaoTab = () => {
   const [enabled, setEnabled] = useState(true);
   const [mode, setMode] = useState("round_robin");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get<any>('/auto-distribution-config').then(data => {
+      if (data.is_active !== undefined) setEnabled(data.is_active);
+      if (data.mode) setMode(data.mode);
+    }).catch(() => {});
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.patch('/auto-distribution-config', { is_active: enabled, mode });
+      toast.success("Configurações salvas!");
+    } catch {
+      toast.error("Erro ao salvar configurações");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const modes = [
     { id: "round_robin", label: "Round Robin", description: "Distribui de forma rotativa entre os atendentes disponíveis", icon: Shuffle },
@@ -976,8 +1004,8 @@ const DistribuicaoTab = () => {
           </div>
 
           <div className="flex justify-end">
-            <Button className="gap-2" onClick={() => toast.success("Configurações salvas!")}>
-              <Save className="h-4 w-4" /> Salvar Configurações
+            <Button className="gap-2" onClick={handleSave} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Salvar Configurações
             </Button>
           </div>
         </>
@@ -1025,11 +1053,12 @@ const WebhooksTab = () => {
   const [formActive, setFormActive] = useState(true);
 
   const fetchWebhooks = useCallback(async () => {
-    if (!user) return;
-    const { data } = await supabase.from("webhooks").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
-    if (data) setWebhooks(data as Webhook[]);
+    try {
+      const data = await api.get<Webhook[]>('/webhooks');
+      setWebhooks(data || []);
+    } catch {}
     setLoading(false);
-  }, [user]);
+  }, []);
 
   useEffect(() => { fetchWebhooks(); }, [fetchWebhooks]);
 
@@ -1046,7 +1075,7 @@ const WebhooksTab = () => {
   };
 
   const handleSave = async () => {
-    if (!user || !formName.trim() || !formUrl.trim()) { toast.error("Preencha nome e URL"); return; }
+    if (!formName.trim() || !formUrl.trim()) { toast.error("Preencha nome e URL"); return; }
     if (!formUrl.startsWith("https://")) { toast.error("A URL deve começar com https://"); return; }
     if (formEvents.length === 0) { toast.error("Selecione pelo menos um evento"); return; }
     setSaving(true);
@@ -1056,33 +1085,34 @@ const WebhooksTab = () => {
       events: formEvents,
       active: formActive,
       secret: formSecret.trim() || null,
-      user_id: user.id,
     };
-    if (editingWebhook) {
-      const { error } = await supabase.from("webhooks").update(payload).eq("id", editingWebhook.id);
-      if (error) { toast.error("Erro ao atualizar webhook"); setSaving(false); return; }
-      toast.success("Webhook atualizado!");
-    } else {
-      const { error } = await supabase.from("webhooks").insert(payload);
-      if (error) { toast.error("Erro ao criar webhook"); setSaving(false); return; }
-      toast.success("Webhook criado!");
-    }
+    try {
+      if (editingWebhook) {
+        await api.patch(`/webhooks/${editingWebhook.id}`, payload);
+        toast.success("Webhook atualizado!");
+      } else {
+        await api.post('/webhooks', payload);
+        toast.success("Webhook criado!");
+      }
+      setDialogOpen(false);
+      fetchWebhooks();
+    } catch { toast.error(editingWebhook ? "Erro ao atualizar webhook" : "Erro ao criar webhook"); }
     setSaving(false);
-    setDialogOpen(false);
-    fetchWebhooks();
   };
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase.from("webhooks").delete().eq("id", id);
-    if (error) { toast.error("Erro ao excluir webhook"); return; }
-    toast.success("Webhook excluído!");
-    fetchWebhooks();
+    try {
+      await api.delete(`/webhooks/${id}`);
+      toast.success("Webhook excluído!");
+      fetchWebhooks();
+    } catch { toast.error("Erro ao excluir webhook"); }
   };
 
   const handleToggleActive = async (wh: Webhook) => {
-    const { error } = await supabase.from("webhooks").update({ active: !wh.active }).eq("id", wh.id);
-    if (error) { toast.error("Erro ao atualizar"); return; }
-    setWebhooks(prev => prev.map(w => w.id === wh.id ? { ...w, active: !w.active } : w));
+    try {
+      await api.patch(`/webhooks/${wh.id}`, { active: !wh.active });
+      setWebhooks(prev => prev.map(w => w.id === wh.id ? { ...w, active: !w.active } : w));
+    } catch { toast.error("Erro ao atualizar"); }
   };
 
   const handleTest = async (wh: Webhook) => {
@@ -1296,12 +1326,6 @@ const EXPIRATION_OPTIONS = [
   { value: "365", label: "1 ano" },
 ];
 
-function generateToken(): string {
-  const part1 = crypto.randomUUID().replace(/-/g, "");
-  const part2 = crypto.randomUUID().replace(/-/g, "");
-  return `msx_${part1}${part2}`;
-}
-
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
@@ -1329,15 +1353,12 @@ const ApiTokensTab = () => {
   const [formExpiration, setFormExpiration] = useState("never");
 
   const fetchTokens = useCallback(async () => {
-    if (!user) return;
-    const { data } = await supabase
-      .from("api_tokens")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
-    if (data) setTokens(data as ApiToken[]);
+    try {
+      const data = await api.get<ApiToken[]>('/api-tokens');
+      setTokens(data || []);
+    } catch {}
     setLoading(false);
-  }, [user]);
+  }, []);
 
   useEffect(() => { fetchTokens(); }, [fetchTokens]);
 
@@ -1355,36 +1376,35 @@ const ApiTokensTab = () => {
   };
 
   const handleCreate = async () => {
-    if (!user || !formName.trim()) { toast.error("Informe um nome para o token"); return; }
+    if (!formName.trim()) { toast.error("Informe um nome para o token"); return; }
     if (formScopes.length === 0) { toast.error("Selecione pelo menos um escopo"); return; }
     setSaving(true);
-    const token = generateToken();
-    let expiresAt: string | null = null;
-    if (formExpiration !== "never") {
-      const d = new Date();
-      d.setDate(d.getDate() + parseInt(formExpiration));
-      expiresAt = d.toISOString();
-    }
-    const { error } = await supabase.from("api_tokens").insert({
-      user_id: user.id,
-      name: formName.trim(),
-      token,
-      scopes: formScopes,
-      expires_at: expiresAt,
-    });
+    try {
+      let expiresAt: string | null = null;
+      if (formExpiration !== "never") {
+        const d = new Date();
+        d.setDate(d.getDate() + parseInt(formExpiration));
+        expiresAt = d.toISOString();
+      }
+      const created = await api.post<any>('/api-tokens', {
+        name: formName.trim(),
+        scopes: formScopes,
+        expires_at: expiresAt,
+      });
+      setDialogOpen(false);
+      setCreatedToken(created.token);
+      fetchTokens();
+    } catch { toast.error("Erro ao criar token"); }
     setSaving(false);
-    if (error) { toast.error("Erro ao criar token"); return; }
-    setDialogOpen(false);
-    setCreatedToken(token);
-    fetchTokens();
   };
 
   const handleRevoke = async (id: string) => {
-    const { error } = await supabase.from("api_tokens").update({ is_active: false }).eq("id", id);
-    if (error) { toast.error("Erro ao revogar token"); return; }
-    toast.success("Token revogado!");
-    setRevokeConfirmId(null);
-    fetchTokens();
+    try {
+      await api.patch(`/api-tokens/${id}`, { is_active: false });
+      toast.success("Token revogado!");
+      setRevokeConfirmId(null);
+      fetchTokens();
+    } catch { toast.error("Erro ao revogar token"); }
   };
 
   const copyToken = async (token: string) => {
@@ -1623,9 +1643,10 @@ const ApiTokensTab = () => {
 interface ScoringRule {
   id: string;
   name: string;
-  condition_type: string;
+  condition_field: string;
+  condition_operator?: string;
   condition_value: string | null;
-  points: number;
+  score_delta: number;
   is_active: boolean;
   created_at: string;
 }
@@ -1658,8 +1679,10 @@ const LeadScoringTab = () => {
 
   const fetchRules = useCallback(async () => {
     setLoadingRules(true);
-    const { data } = await supabase.from('lead_scoring_rules').select('*').order('created_at');
-    setRules((data as ScoringRule[]) || []);
+    try {
+      const data = await api.get<ScoringRule[]>('/lead-scoring-rules');
+      setRules(data || []);
+    } catch {}
     setLoadingRules(false);
   }, []);
 
@@ -1678,9 +1701,9 @@ const LeadScoringTab = () => {
   const openEdit = (rule: ScoringRule) => {
     setEditingRule(rule);
     setFormName(rule.name);
-    setFormCondType(rule.condition_type);
+    setFormCondType(rule.condition_field);
     setFormCondValue(rule.condition_value || '');
-    setFormPoints(rule.points);
+    setFormPoints(rule.score_delta);
     setFormActive(rule.is_active);
     setDialogOpen(true);
   };
@@ -1690,36 +1713,39 @@ const LeadScoringTab = () => {
     setSaving(true);
     const payload = {
       name: formName.trim(),
-      condition_type: formCondType,
+      condition_field: formCondType,
       condition_value: formCondValue.trim() || null,
-      points: formPoints,
+      score_delta: formPoints,
       is_active: formActive,
     };
-    if (editingRule) {
-      const { error } = await supabase.from('lead_scoring_rules').update(payload).eq('id', editingRule.id);
-      if (error) { toast.error('Erro ao salvar regra'); setSaving(false); return; }
-      toast.success('Regra atualizada!');
-    } else {
-      const { error } = await supabase.from('lead_scoring_rules').insert(payload);
-      if (error) { toast.error('Erro ao criar regra'); setSaving(false); return; }
-      toast.success('Regra criada!');
-    }
+    try {
+      if (editingRule) {
+        await api.patch(`/lead-scoring-rules/${editingRule.id}`, payload);
+        toast.success('Regra atualizada!');
+      } else {
+        await api.post('/lead-scoring-rules', payload);
+        toast.success('Regra criada!');
+      }
+      setDialogOpen(false);
+      fetchRules();
+    } catch { toast.error(editingRule ? 'Erro ao salvar regra' : 'Erro ao criar regra'); }
     setSaving(false);
-    setDialogOpen(false);
-    fetchRules();
   };
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase.from('lead_scoring_rules').delete().eq('id', id);
-    if (error) { toast.error('Erro ao excluir regra'); return; }
-    toast.success('Regra excluída!');
-    setDeleteConfirmId(null);
-    fetchRules();
+    try {
+      await api.delete(`/lead-scoring-rules/${id}`);
+      toast.success('Regra excluída!');
+      setDeleteConfirmId(null);
+      fetchRules();
+    } catch { toast.error('Erro ao excluir regra'); }
   };
 
   const handleToggleActive = async (rule: ScoringRule) => {
-    await supabase.from('lead_scoring_rules').update({ is_active: !rule.is_active }).eq('id', rule.id);
-    fetchRules();
+    try {
+      await api.patch(`/lead-scoring-rules/${rule.id}`, { is_active: !rule.is_active });
+      fetchRules();
+    } catch {}
   };
 
   return (
@@ -1767,11 +1793,11 @@ const LeadScoringTab = () => {
                 {rules.map(rule => (
                   <tr key={rule.id} className="border-b border-border/50 hover:bg-muted/20">
                     <td className="py-2.5 px-3 font-medium text-foreground">{rule.name}</td>
-                    <td className="py-2.5 px-3 text-muted-foreground">{CONDITION_TYPE_LABELS[rule.condition_type] || rule.condition_type}</td>
+                    <td className="py-2.5 px-3 text-muted-foreground">{CONDITION_TYPE_LABELS[rule.condition_field] || rule.condition_field}</td>
                     <td className="py-2.5 px-3 text-muted-foreground">{rule.condition_value || '—'}</td>
                     <td className="py-2.5 px-3">
-                      <span className={`font-bold ${rule.points >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {rule.points >= 0 ? '+' : ''}{rule.points}
+                      <span className={`font-bold ${rule.score_delta >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {rule.score_delta >= 0 ? '+' : ''}{rule.score_delta}
                       </span>
                     </td>
                     <td className="py-2.5 px-3">
@@ -1890,11 +1916,10 @@ const EtiquetasTab = () => {
   const [search, setSearch] = useState("");
 
   const fetchLabels = useCallback(async () => {
-    const { data } = await supabase
-      .from("conversation_labels" as any)
-      .select("*")
-      .order("created_at", { ascending: true });
-    if (data) setLabels(data as ConversationLabel[]);
+    try {
+      const data = await api.get<ConversationLabel[]>('/conversation-labels');
+      setLabels(data || []);
+    } catch {}
     setLoading(false);
   }, []);
 
@@ -1916,27 +1941,25 @@ const EtiquetasTab = () => {
 
   const handleSave = async () => {
     if (!labelName.trim()) return;
-    if (editingLabel) {
-      const { error } = await (supabase.from("conversation_labels" as any) as any)
-        .update({ name: labelName.trim(), color: labelColor })
-        .eq("id", editingLabel.id);
-      if (error) { toast.error("Erro ao atualizar etiqueta"); return; }
-      toast.success("Etiqueta atualizada!");
-    } else {
-      const { error } = await (supabase.from("conversation_labels" as any) as any)
-        .insert({ name: labelName.trim(), color: labelColor });
-      if (error) { toast.error("Erro ao criar etiqueta"); return; }
-      toast.success("Etiqueta criada!");
-    }
-    setDialogOpen(false);
-    fetchLabels();
+    try {
+      if (editingLabel) {
+        await api.patch(`/conversation-labels/${editingLabel.id}`, { name: labelName.trim(), color: labelColor });
+        toast.success("Etiqueta atualizada!");
+      } else {
+        await api.post('/conversation-labels', { name: labelName.trim(), color: labelColor });
+        toast.success("Etiqueta criada!");
+      }
+      setDialogOpen(false);
+      fetchLabels();
+    } catch { toast.error(editingLabel ? "Erro ao atualizar etiqueta" : "Erro ao criar etiqueta"); }
   };
 
   const handleDelete = async (id: string) => {
-    const { error } = await (supabase.from("conversation_labels" as any) as any).delete().eq("id", id);
-    if (error) { toast.error("Erro ao excluir etiqueta"); return; }
-    toast.success("Etiqueta excluída!");
-    fetchLabels();
+    try {
+      await api.delete(`/conversation-labels/${id}`);
+      toast.success("Etiqueta excluída!");
+      fetchLabels();
+    } catch { toast.error("Erro ao excluir etiqueta"); }
   };
 
   const filtered = labels.filter(l => l.name.toLowerCase().includes(search.toLowerCase()));
@@ -2041,9 +2064,9 @@ const BirthdayAutoTab = () => {
     } catch { /* ignore */ }
 
     // Load connections
-    supabase.from("evolution_connections").select("id, instance_name").then(({ data }) => {
-      setConnections((data || []) as { id: string; instance_name: string }[]);
-    });
+    api.get<any[]>('/evolution-connections').then(data => {
+      setConnections((data || []).map((c: any) => ({ id: c.id, instance_name: c.instance_name })));
+    }).catch(() => {});
   }, []);
 
   const handleSave = () => {
