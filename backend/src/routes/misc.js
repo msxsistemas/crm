@@ -280,13 +280,30 @@ export default async function miscRoutes(fastify) {
     return rows;
   });
   fastify.post('/chatbot-rules', auth, async (req, reply) => {
-    const { name, trigger, message, flow_data, connection_name, is_active } = req.body;
-    const { rows } = await query('INSERT INTO chatbot_rules (name, trigger, message, flow_data, connection_name, is_active) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [name, trigger, message, flow_data ? JSON.stringify(flow_data) : null, connection_name, is_active ?? true]);
+    const { name, trigger, trigger_type, trigger_value, message, response_text, flow_data, connection_name, is_active, priority } = req.body;
+    const { rows } = await query(
+      'INSERT INTO chatbot_rules (name, trigger, trigger_type, trigger_value, message, response_text, flow_data, connection_name, is_active, priority) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
+      [name, trigger || trigger_value || '', trigger_type || 'keyword', trigger_value || trigger || '', message || response_text || '', response_text || message || '', flow_data ? JSON.stringify(flow_data) : null, connection_name, is_active ?? true, priority ?? 0]
+    );
     return reply.status(201).send(rows[0]);
   });
   fastify.patch('/chatbot-rules/:id', auth, async (req) => {
     const f = req.body;
-    const { rows } = await query('UPDATE chatbot_rules SET name=COALESCE($1,name), trigger=COALESCE($2,trigger), message=COALESCE($3,message), flow_data=COALESCE($4,flow_data), is_active=COALESCE($5,is_active), updated_at=NOW() WHERE id=$6 RETURNING *', [f.name, f.trigger, f.message, f.flow_data ? JSON.stringify(f.flow_data) : null, f.is_active, req.params.id]);
+    const { rows } = await query(
+      `UPDATE chatbot_rules SET
+        name=COALESCE($1,name),
+        trigger=COALESCE($2,trigger),
+        trigger_type=COALESCE($3,trigger_type),
+        trigger_value=COALESCE($4,trigger_value),
+        message=COALESCE($5,message),
+        response_text=COALESCE($6,response_text),
+        flow_data=COALESCE($7,flow_data),
+        is_active=COALESCE($8,is_active),
+        priority=COALESCE($9,priority),
+        updated_at=NOW()
+      WHERE id=$10 RETURNING *`,
+      [f.name, f.trigger || f.trigger_value, f.trigger_type, f.trigger_value || f.trigger, f.message || f.response_text, f.response_text || f.message, f.flow_data ? JSON.stringify(f.flow_data) : null, f.is_active, f.priority, req.params.id]
+    );
     return rows[0];
   });
   fastify.delete('/chatbot-rules/:id', auth, async (req) => {

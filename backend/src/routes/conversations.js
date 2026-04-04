@@ -74,7 +74,7 @@ export default async function conversationRoutes(fastify) {
   // Update conversation
   // Bulk/filtered PATCH (from .in("id", ids) or .eq(field).in(field) calls)
   fastify.patch('/conversations', auth, async (req, reply) => {
-    const ALLOWED_UPDATE = ['status','assigned_to','category_id','starred','unread_count','last_message_at'];
+    const ALLOWED_UPDATE = ['status','assigned_to','category_id','starred','unread_count','last_message_at','contact_id'];
     const updates = [];
     const params = [];
     let p = 1;
@@ -86,7 +86,7 @@ export default async function conversationRoutes(fastify) {
 
     const conditions = ['1=1'];
     // Filter by IDs list (from .in("id", ids))
-    const { ids, assigned_to, status } = req.query;
+    const { ids, assigned_to, status, contact_id } = req.query;
     if (ids) {
       const idList = String(ids).split(',').filter(Boolean);
       if (!idList.length) return { ok: true };
@@ -99,6 +99,12 @@ export default async function conversationRoutes(fastify) {
     if (assigned_to) {
       conditions.push(`assigned_to = $${p}`);
       params.push(assigned_to);
+      p++;
+    }
+    // Filter by contact_id (from deduplication: .eq("contact_id", secId))
+    if (contact_id) {
+      conditions.push(`contact_id = $${p}`);
+      params.push(contact_id);
       p++;
     }
     // Filter by status (single or comma-separated from .in("status", [...]))
@@ -115,6 +121,8 @@ export default async function conversationRoutes(fastify) {
         p += statuses.length;
       }
     }
+    // Safety: refuse to update ALL conversations if no meaningful filter provided
+    if (conditions.length === 1) return reply.status(400).send({ error: 'Filtro obrigatório' });
     await query(`UPDATE conversations SET ${updates.join(',')} WHERE ${conditions.join(' AND ')}`, params);
     return { ok: true };
   });
