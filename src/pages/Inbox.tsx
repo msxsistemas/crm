@@ -30,6 +30,22 @@ import ContactDetailsSidebar from "@/components/inbox/ContactDetailsSidebar";
 import TagSelector from "@/components/shared/TagSelector";
 import type { TemplateButton } from "@/pages/HSMTemplates";
 import type { FlowTemplate, FlowTemplateStep } from "@/pages/FlowTemplates";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { createInstance, getQRCode, getInstanceStatus, sendMessage, setupWebhook } from "@/lib/evolution-api";
+import { toast } from "sonner";
+import { useAuth } from "@/hooks/useAuth";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { useMessageQueue } from "@/hooks/useMessageQueue";
+import { loadDistributionConfig, distributeConversation } from "@/lib/autoDistribution";
+import type { DistributionConfig } from "@/lib/autoDistribution";
 
 const tailwindColorMap: Record<string, string> = {
   "bg-white": "#ffffff", "bg-red-500": "#ef4444", "bg-orange-500": "#f97316",
@@ -48,22 +64,6 @@ const resolveTagColor = (color: string): string => {
   if (color.startsWith("#")) return color;
   return "#8B5CF6";
 };
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
-import { createInstance, getQRCode, getInstanceStatus, sendMessage, setupWebhook } from "@/lib/evolution-api";
-import { toast } from "sonner";
-import { useAuth } from "@/hooks/useAuth";
-import { useOnlineStatus } from "@/hooks/useOnlineStatus";
-import { useMessageQueue } from "@/hooks/useMessageQueue";
-import { loadDistributionConfig, distributeConversation } from "@/lib/autoDistribution";
-import type { DistributionConfig } from "@/lib/autoDistribution";
 
 interface ConversationLabel {
   id: string;
