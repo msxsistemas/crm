@@ -667,10 +667,14 @@ export default async function misc2Routes(fastify) {
     return rows;
   });
   fastify.post('/evolution-connections', auth, async (req, reply) => {
-    const { instance_name, status, owner_jid, profile_pic_url } = req.body;
+    const { instance_name, name, status, owner_jid, profile_pic_url, user_id } = req.body;
+    const uid = user_id || req.user.id;
     const { rows } = await query(
-      'INSERT INTO evolution_connections (user_id, instance_name, status, owner_jid, profile_pic_url) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id, instance_name) DO UPDATE SET status=EXCLUDED.status, updated_at=NOW() RETURNING *',
-      [req.user.id, instance_name, status || 'disconnected', owner_jid, profile_pic_url]
+      `INSERT INTO evolution_connections (user_id, instance_name, name, status, owner_jid, profile_pic_url)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (user_id, instance_name) DO UPDATE SET status=EXCLUDED.status, owner_jid=EXCLUDED.owner_jid, profile_pic_url=EXCLUDED.profile_pic_url, updated_at=NOW()
+       RETURNING *`,
+      [uid, instance_name, name || instance_name || '', status || 'disconnected', owner_jid || '', profile_pic_url || '']
     );
     return reply.status(201).send(rows[0]);
   });
