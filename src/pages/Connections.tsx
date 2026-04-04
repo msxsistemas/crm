@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Smartphone, Plus, QrCode, RefreshCw, Trash2, CheckCircle, XCircle,
-  Loader2, Wifi, WifiOff, Search, Key, Globe, Pencil, Signal, X
+  Loader2, Wifi, WifiOff, Search, Key, Globe, Pencil, Signal, X, MessageSquare
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,18 @@ import {
   setupWebhook,
 } from "@/lib/evolution-api";
 import { getZApiQRCode, getZApiStatus } from "@/lib/zapi";
+import { api } from "@/lib/api";
+
+interface MetaConnection {
+  id: string;
+  label: string;
+  phone_number_id: string;
+  waba_id?: string;
+  display_name?: string;
+  verified_name?: string;
+  status: string;
+  created_at: string;
+}
 
 interface Instance {
   instanceName: string;
@@ -56,6 +68,16 @@ const Connections = () => {
   const [zapiInstanceToken, setZapiInstanceToken] = useState("");
   const [zapiClientToken, setZapiClientToken] = useState("");
   const [zapiCreating, setZapiCreating] = useState(false);
+
+  // Meta WhatsApp Business API state
+  const [metaConnections, setMetaConnections] = useState<MetaConnection[]>([]);
+  const [metaLoading, setMetaLoading] = useState(false);
+  const [metaNewOpen, setMetaNewOpen] = useState(false);
+  const [metaLabel, setMetaLabel] = useState("");
+  const [metaPhoneNumberId, setMetaPhoneNumberId] = useState("");
+  const [metaAccessToken, setMetaAccessToken] = useState("");
+  const [metaWabaId, setMetaWabaId] = useState("");
+  const [metaCreating, setMetaCreating] = useState(false);
 
   // Status check state
   const [checkingInstance, setCheckingInstance] = useState<string | null>(null);
@@ -147,10 +169,21 @@ const Connections = () => {
     setLastChecked(new Date());
   }, []);
 
+  const fetchMetaConnections = useCallback(async () => {
+    setMetaLoading(true);
+    try {
+      const data = await api.get('/meta-connections');
+      setMetaConnections(data as MetaConnection[]);
+    } catch { /* silent */ } finally {
+      setMetaLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchInstances();
     fetchZapiFromDb();
-  }, [fetchInstances]);
+    fetchMetaConnections();
+  }, [fetchInstances, fetchMetaConnections]);
 
   // Auto-refresh every 30 seconds
   useEffect(() => {
@@ -576,6 +609,9 @@ const Connections = () => {
             <TabsTrigger value="zapi" className="gap-2">
               <Key className="h-4 w-4" /> Z-API
             </TabsTrigger>
+            <TabsTrigger value="meta" className="gap-2">
+              <MessageSquare className="h-4 w-4" /> WhatsApp Oficial
+            </TabsTrigger>
           </TabsList>
 
           {/* Evolution API Tab */}
@@ -717,8 +753,165 @@ const Connections = () => {
               </div>
             )}
           </TabsContent>
+
+          {/* WhatsApp Oficial (Meta) Tab */}
+          <TabsContent value="meta" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">API Oficial do WhatsApp Business (Meta)</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Cada número paga seus próprios custos de conversação direto à Meta.</p>
+              </div>
+              <Button size="sm" className="gap-2" onClick={() => setMetaNewOpen(true)}>
+                <Plus className="h-4 w-4" /> Adicionar número
+              </Button>
+            </div>
+
+            {metaLoading ? (
+              <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+            ) : metaConnections.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
+                <MessageSquare className="h-12 w-12 opacity-20" />
+                <p className="text-sm font-medium">Nenhuma conexão configurada</p>
+                <p className="text-xs text-center max-w-xs">Configure um número da API Oficial do WhatsApp Business para começar.</p>
+                <Button size="sm" variant="outline" className="gap-2 mt-2" onClick={() => setMetaNewOpen(true)}>
+                  <Plus className="h-4 w-4" /> Adicionar número
+                </Button>
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {metaConnections.map((conn) => (
+                  <Card key={conn.id} className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="h-9 w-9 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
+                          <MessageSquare className="h-5 w-5 text-green-600" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-medium text-sm truncate">{conn.label}</p>
+                          <p className="text-xs text-muted-foreground truncate">{conn.display_name || conn.phone_number_id}</p>
+                        </div>
+                      </div>
+                      <Badge className="bg-green-500/20 text-green-600 border-green-500/30 shrink-0 text-[10px]">Ativo</Badge>
+                    </div>
+                    {conn.verified_name && (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <CheckCircle className="h-3 w-3 text-green-500" /> {conn.verified_name}
+                      </p>
+                    )}
+                    <div className="text-xs text-muted-foreground font-mono truncate">ID: {conn.phone_number_id}</div>
+                    <div className="flex gap-2 pt-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 gap-1.5 text-xs h-8 text-red-600 hover:bg-red-50"
+                        onClick={async () => {
+                          await api.delete(`/meta-connections/${conn.id}`);
+                          setMetaConnections(prev => prev.filter(c => c.id !== conn.id));
+                          toast.success('Conexão removida');
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Remover
+                      </Button>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+
+            {/* Webhook info */}
+            <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2 mt-2">
+              <p className="text-xs font-semibold text-foreground">Como configurar</p>
+              <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal list-inside">
+                <li>Acesse <strong>developers.facebook.com</strong> e crie um app do tipo "Business"</li>
+                <li>Adicione o produto "WhatsApp" ao app e registre seu número</li>
+                <li>Gere um token de acesso permanente na seção "WhatsApp &gt; Configuração da API"</li>
+                <li>Configure o webhook da Meta com a URL abaixo e o token de verificação</li>
+                <li>Cole o Phone Number ID e o Access Token aqui</li>
+              </ol>
+              <div className="space-y-1.5 pt-1">
+                <div>
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">URL do Webhook</p>
+                  <code className="text-xs bg-muted px-2 py-1 rounded font-mono select-all block">
+                    https://api.msxzap.pro/webhook/meta
+                  </code>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Token de Verificação</p>
+                  <code className="text-xs bg-muted px-2 py-1 rounded font-mono select-all block">
+                    msxcrm_meta_webhook_2026
+                  </code>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
         </Tabs>
       </div>
+
+      {/* Meta - New Connection Dialog */}
+      <Dialog open={metaNewOpen} onOpenChange={setMetaNewOpen}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden gap-0 [&>button.absolute]:hidden">
+          <div className="bg-green-600 px-6 py-5 flex items-center gap-3">
+            <div className="h-10 w-10 rounded-full bg-white/20 flex items-center justify-center">
+              <MessageSquare className="h-5 w-5 text-white" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-lg font-bold text-white">WhatsApp Oficial — Meta</h2>
+              <p className="text-sm text-white/70">Configure sua conta do WhatsApp Business API</p>
+            </div>
+            <button onClick={() => setMetaNewOpen(false)} className="text-white/70 hover:text-white">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="px-6 py-5 space-y-4">
+            <div>
+              <label className="text-sm font-medium text-foreground">Nome / Rótulo *</label>
+              <Input placeholder="Ex: Vendas, Suporte, Principal" value={metaLabel} onChange={(e) => setMetaLabel(e.target.value)} className="mt-1.5" />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">Phone Number ID *</label>
+              <Input placeholder="Ex: 123456789012345" value={metaPhoneNumberId} onChange={(e) => setMetaPhoneNumberId(e.target.value)} className="mt-1.5 font-mono" />
+              <p className="text-xs text-muted-foreground mt-1">Encontrado em WhatsApp &gt; Configuração da API no Meta for Developers</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">Access Token *</label>
+              <Input placeholder="Token permanente da Meta" value={metaAccessToken} onChange={(e) => setMetaAccessToken(e.target.value)} className="mt-1.5 font-mono" type="password" />
+              <p className="text-xs text-muted-foreground mt-1">Use um token de acesso permanente (System User token)</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">WABA ID (opcional)</label>
+              <Input placeholder="ID da conta do WhatsApp Business" value={metaWabaId} onChange={(e) => setMetaWabaId(e.target.value)} className="mt-1.5 font-mono" />
+            </div>
+          </div>
+          <div className="px-6 pb-6 flex gap-3">
+            <Button variant="outline" className="flex-1" onClick={() => setMetaNewOpen(false)}>Cancelar</Button>
+            <Button
+              className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+              disabled={metaCreating || !metaLabel || !metaPhoneNumberId || !metaAccessToken}
+              onClick={async () => {
+                setMetaCreating(true);
+                try {
+                  const conn = await api.post('/meta-connections', {
+                    label: metaLabel,
+                    phone_number_id: metaPhoneNumberId,
+                    access_token: metaAccessToken,
+                    waba_id: metaWabaId || undefined,
+                  });
+                  setMetaConnections(prev => [...prev, conn as MetaConnection]);
+                  setMetaNewOpen(false);
+                  setMetaLabel(''); setMetaPhoneNumberId(''); setMetaAccessToken(''); setMetaWabaId('');
+                  toast.success('Conexão adicionada com sucesso!');
+                } catch (e: any) {
+                  toast.error(e.message || 'Erro ao adicionar conexão');
+                } finally {
+                  setMetaCreating(false);
+                }
+              }}
+            >
+              {metaCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Conectar'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Evolution - New Instance Dialog */}
       <Dialog open={newOpen} onOpenChange={setNewOpen}>

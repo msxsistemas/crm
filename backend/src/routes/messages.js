@@ -1,5 +1,5 @@
 import { query } from '../database.js';
-import fetch from 'node:http';
+import { sendMetaMessage } from './meta-whatsapp.js';
 
 export default async function messageRoutes(fastify) {
   const auth = { preHandler: fastify.authenticate };
@@ -49,12 +49,14 @@ export default async function messageRoutes(fastify) {
     const { content, type = 'text', media_url, quoted_message_id } = req.body;
     const convId = req.params.id;
 
-    // Get conversation + contact + connection settings
+    // Get conversation + contact + connection settings + meta connection
     const { rows: convRows } = await query(`
-      SELECT c.*, ct.phone, s.evolution_url, s.evolution_key
+      SELECT c.*, ct.phone, s.evolution_url, s.evolution_key,
+             mc.phone_number_id as meta_phone_number_id, mc.access_token as meta_access_token
       FROM conversations c
       JOIN contacts ct ON ct.id = c.contact_id
       LEFT JOIN settings s ON s.id = 1
+      LEFT JOIN meta_connections mc ON mc.phone_number_id = c.connection_name
       WHERE c.id = $1
     `, [convId]);
     const conv = convRows[0];
@@ -70,8 +72,21 @@ export default async function messageRoutes(fastify) {
     // Update conversation last_message_at
     await query('UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1', [convId]);
 
-    // Send via Evolution API
-    if (conv.evolution_url && conv.connection_name) {
+    // Send via Meta API (official) or Evolution API
+    if (conv.meta_phone_number_id && conv.meta_access_token) {
+      try {
+        await sendMetaMessage({
+          phoneNumberId: conv.meta_phone_number_id,
+          accessToken: conv.meta_access_token,
+          to: conv.phone,
+          content,
+          type,
+          mediaUrl: media_url,
+        });
+      } catch (e) {
+        console.error('Meta API error:', e.message);
+      }
+    } else if (conv.evolution_url && conv.connection_name) {
       try {
         await sendEvolutionMessage({
           evolutionUrl: conv.evolution_url,

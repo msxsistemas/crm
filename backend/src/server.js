@@ -16,6 +16,7 @@ import messageRoutes from './routes/messages.js';
 import userRoutes from './routes/users.js';
 import miscRoutes from './routes/misc.js';
 import misc2Routes from './routes/misc2.js';
+import metaWhatsAppRoutes from './routes/meta-whatsapp.js';
 
 const fastify = Fastify({ logger: { level: 'warn' }, trustProxy: true });
 
@@ -56,6 +57,7 @@ await fastify.register(messageRoutes);
 await fastify.register(userRoutes);
 await fastify.register(miscRoutes);
 await fastify.register(misc2Routes);
+await fastify.register(metaWhatsAppRoutes);
 
 // 404 handler
 fastify.setNotFoundHandler((req, reply) => {
