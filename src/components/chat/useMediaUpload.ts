@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 import { sendMedia } from "@/lib/evolution-api";
 import { toast } from "sonner";
 

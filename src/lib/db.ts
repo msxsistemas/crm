@@ -1,6 +1,6 @@
 /**
- * Supabase compatibility shim — redireciona chamadas para a nova API REST.
- * Mantém a mesma interface do supabase-js para compatibilidade com páginas existentes.
+ * DB client — abstração sobre a API REST do backend.
+ * Mantém interface compatível com supabase-js para páginas existentes.
  */
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'https://api.msxzap.pro';
@@ -54,7 +54,7 @@ async function apiFetch(method: string, path: string, body?: unknown): Promise<u
   return text ? JSON.parse(text) : null;
 }
 
-// Maps Supabase table names → API endpoints
+// Maps table names → API endpoints
 const TABLE_MAP: Record<string, string> = {
   profiles: '/users',
   settings: '/settings',
@@ -157,7 +157,6 @@ class QueryBuilder {
   select(cols?: string, opts?: { count?: string; head?: boolean }) {
     this._selectCols = cols;
     if (opts?.head) this._countOnly = true;
-    // Only switch to GET if no write method was set — allows insert().select() pattern
     if (this._method !== 'POST' && this._method !== 'PATCH' && this._method !== 'DELETE') {
       this._method = 'GET';
     }
@@ -188,7 +187,6 @@ class QueryBuilder {
   filter(col: string, op: string, val: unknown) { this._filters.push({ col, val, op }); return this; }
   textSearch(col: string, query: string) { this._filters.push({ col, val: query, op: 'search' }); return this; }
   or(filter: string) {
-    // Parse "col.ilike.%term%" patterns and extract as search
     const m = filter.match(/\.ilike\.%([^%,]+)%/);
     if (m) this._filters.push({ col: 'search', val: m[1], op: 'eq' });
     return this;
@@ -205,9 +203,6 @@ class QueryBuilder {
   single() { this._isSingle = true; return this; }
   maybeSingle() { this._isMaybeSingle = true; return this; }
 
-  // After insert, chain .select()
-  // We handle this differently — see _execute
-
   then(resolve?: (val: unknown) => unknown, reject?: (err: unknown) => unknown): Promise<unknown> {
     return this._execute().then(resolve, reject);
   }
@@ -222,7 +217,6 @@ class QueryBuilder {
       const qs: Record<string, string> = {};
 
       if (this._method === 'GET') {
-        // Build query string from filters
         for (const f of this._filters) {
           if (f.col === 'id' && f.op === 'eq') {
             url = `${url}/${f.val}`;
@@ -257,11 +251,9 @@ class QueryBuilder {
         if (idF) {
           url = `${url}/${idF.val}`;
         } else if (inF) {
-          // Bulk update: pass ids as comma-separated query param
           const ids = Array.isArray(inF.val) ? (inF.val as unknown[]).join(',') : String(inF.val);
           url += `?ids=${encodeURIComponent(ids)}`;
         } else if (this._filters.length > 0) {
-          // Non-id filters (e.g., user_id + instance_name): pass as query params
           const qParts = this._filters.map(f => `${encodeURIComponent(f.col)}=${encodeURIComponent(String(f.val))}`);
           url += `?${qParts.join('&')}`;
         }
@@ -274,7 +266,6 @@ class QueryBuilder {
         if (idF) {
           url = `${url}/${idF.val}`;
         } else {
-          // For junction tables with no id, pass filters as query params
           const qParts = this._filters.map(f => `${encodeURIComponent(f.col)}=${encodeURIComponent(String(f.val))}`);
           if (qParts.length) url += `?${qParts.join('&')}`;
         }
@@ -289,7 +280,6 @@ class QueryBuilder {
   }
 
   private _normalizeGetResult(data: unknown) {
-    // Unwrap paginated responses: { data: [...], total: N, ... }
     if (data && typeof data === 'object' && !Array.isArray(data) && Array.isArray((data as any).data)) {
       data = (data as any).data;
     }
@@ -302,12 +292,11 @@ class QueryBuilder {
       return data || null;
     }
     if (Array.isArray(data)) return data;
-    // Some endpoints return objects (like settings, stats)
     return data;
   }
 }
 
-// ── Storage shim ──────────────────────────────────────────────────────────────
+// ── Storage ───────────────────────────────────────────────────────────────────
 class StorageBucketProxy {
   private bucket: string;
   constructor(bucket: string) { this.bucket = bucket; }
@@ -336,18 +325,17 @@ class StorageBucketProxy {
   async list(_folder?: string) { return { data: [], error: null }; }
 }
 
-// ── Realtime shim ─────────────────────────────────────────────────────────────
+// ── Realtime ──────────────────────────────────────────────────────────────────
 class ChannelProxy {
   on(_event: string, _filter: unknown, _callback?: unknown) { return this; }
   subscribe(cb?: (status: string) => void) {
-    // Signal connected so TopBar shows green status
     if (cb) setTimeout(() => cb('SUBSCRIBED'), 100);
     return this;
   }
   unsubscribe() {}
 }
 
-// ── Auth shim ─────────────────────────────────────────────────────────────────
+// ── Auth ──────────────────────────────────────────────────────────────────────
 const authShim = {
   async signInWithPassword({ email, password }: { email: string; password: string }) {
     try {
@@ -437,7 +425,7 @@ const authShim = {
   },
 };
 
-// ── Functions shim ────────────────────────────────────────────────────────────
+// ── Functions ─────────────────────────────────────────────────────────────────
 const FUNCTION_MAP: Record<string, string> = {
   'manage-users': '/manage-users',
   'ai-agent': '/ai-agent',
@@ -447,10 +435,7 @@ const FUNCTION_MAP: Record<string, string> = {
 const functionsShim = {
   async invoke(fnName: string, options?: { body?: unknown; method?: string; headers?: Record<string, string> }) {
     const endpoint = FUNCTION_MAP[fnName];
-    if (!endpoint) {
-      // Unknown function — return stub without crashing
-      return { data: null, error: null };
-    }
+    if (!endpoint) return { data: null, error: null };
     try {
       const method = options?.method || 'POST';
       const data = await apiFetch(method as 'GET' | 'POST', endpoint, options?.body);
@@ -461,22 +446,15 @@ const functionsShim = {
   },
 };
 
-// ── Main supabase shim object ─────────────────────────────────────────────────
+// ── Main export ───────────────────────────────────────────────────────────────
 export const supabase = {
   from: (table: string) => new QueryBuilder(table),
-
   auth: authShim,
-
-  storage: {
-    from: (bucket: string) => new StorageBucketProxy(bucket),
-  },
-
+  storage: { from: (bucket: string) => new StorageBucketProxy(bucket) },
   functions: functionsShim,
-
   channel: (_name: string) => new ChannelProxy(),
   removeChannel: (_ch: unknown) => {},
   removeAllChannels: () => {},
-
   rpc: async (fn: string, args?: unknown) => {
     try {
       const data = await apiFetch('POST', `/rpc/${fn}`, args);

@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://api.msxzap.pro';
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 
 const DEFAULT_NAME = "ZapCRM";
 let cachedName: string | null = null;

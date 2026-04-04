@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatPhoneBR } from "@/lib/phone-mask";
 import { usePlatformName } from "@/hooks/usePlatformName";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Send, Play, Mail, CheckCircle, Eye, AlertTriangle, Plus, Search, RefreshCw, FileText, Clock, XCircle, Download, Info, Loader2, Pause, Users, Tag, BookOpen, Clipboard, Pencil, Trash2, BarChart3 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";

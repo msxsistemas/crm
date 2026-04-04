@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { usePlatformName } from "@/hooks/usePlatformName";
 import { FloatingInput } from "@/components/ui/floating-input";

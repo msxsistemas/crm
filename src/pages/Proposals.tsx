@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/table";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 

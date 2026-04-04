@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { usePlatformName } from "@/hooks/usePlatformName";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 import { Card, CardContent } from "@/components/ui/card";
 import { Users, TrendingUp, Package, CreditCard, Smartphone, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";

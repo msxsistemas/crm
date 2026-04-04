@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { useUserRole } from "@/hooks/useUserRole";
 import { usePlatformName } from "@/hooks/usePlatformName";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 
 // Map from route path patterns to permission keys
 const ROUTE_PERMISSION_MAP: Record<string, string> = {

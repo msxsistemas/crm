@@ -5,7 +5,7 @@ import { FloatingInput, FloatingTextarea, FloatingSelectWrapper } from "@/compon
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Users as UsersIcon, Pencil, X, ShieldCheck } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 import { toast } from "sonner";
 
 const MODULES = [

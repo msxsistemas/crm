@@ -6,7 +6,7 @@ import { useMediaUpload } from "@/components/chat/useMediaUpload";
 import { EmojiPicker, StickerPicker } from "@/components/chat/EmojiStickerPicker";
 import { SignatureButton, QuickMessagesButton } from "@/components/chat/ChatActionButtons";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Plus, Search, Filter, BarChart3, RotateCw, MoreVertical, ChevronDown,

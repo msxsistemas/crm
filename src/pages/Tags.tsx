@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2, Tag, Search, Filter, Users, Settings, RefreshCw, Info, X, MessageSquare, Download, AlertTriangle } from "lucide-react";
 import ColorPicker from "@/components/shared/ColorPicker";

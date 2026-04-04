@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { FloatingInput } from "@/components/ui/floating-input";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import ColorPicker from "@/components/shared/ColorPicker";

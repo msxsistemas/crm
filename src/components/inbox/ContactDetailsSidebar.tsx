@@ -3,7 +3,7 @@ import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clo
 import TagSelector from "@/components/shared/TagSelector";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/db";
 
 interface ContactDetailsSidebarProps {
   contactId: string;
