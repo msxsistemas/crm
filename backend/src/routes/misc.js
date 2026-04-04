@@ -156,7 +156,14 @@ export default async function miscRoutes(fastify) {
   fastify.get('/kanban-columns', auth, async (req) => {
     const { board_id } = req.query;
     if (board_id) {
-      const { rows } = await query('SELECT * FROM kanban_columns WHERE board_id = $1 ORDER BY position ASC', [board_id]);
+      // Support comma-separated board_ids (from .in() filter)
+      const ids = String(board_id).split(',').filter(Boolean);
+      if (ids.length === 1) {
+        const { rows } = await query('SELECT * FROM kanban_columns WHERE board_id = $1 ORDER BY position ASC', [ids[0]]);
+        return rows;
+      }
+      const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+      const { rows } = await query(`SELECT * FROM kanban_columns WHERE board_id IN (${placeholders}) ORDER BY position ASC`, ids);
       return rows;
     }
     const { rows } = await query('SELECT kc.* FROM kanban_columns kc JOIN kanban_boards kb ON kb.id = kc.board_id WHERE kb.user_id = $1 ORDER BY kc.position ASC', [req.user.id]);
@@ -193,7 +200,14 @@ export default async function miscRoutes(fastify) {
       return rows;
     }
     if (board_id) {
-      const { rows } = await query('SELECT kc.*, c.name as contact_name, c.phone as contact_phone FROM kanban_cards kc JOIN kanban_columns col ON col.id = kc.column_id LEFT JOIN contacts c ON c.id = kc.contact_id WHERE col.board_id = $1 ORDER BY kc.position ASC', [board_id]);
+      // Support comma-separated board_ids (from .in() filter)
+      const boardIds = String(board_id).split(',').filter(Boolean);
+      if (boardIds.length === 1) {
+        const { rows } = await query('SELECT kc.*, c.name as contact_name, c.phone as contact_phone FROM kanban_cards kc JOIN kanban_columns col ON col.id = kc.column_id LEFT JOIN contacts c ON c.id = kc.contact_id WHERE col.board_id = $1 ORDER BY kc.position ASC', [boardIds[0]]);
+        return rows;
+      }
+      const ph = boardIds.map((_, i) => `$${i + 1}`).join(',');
+      const { rows } = await query(`SELECT kc.*, c.name as contact_name, c.phone as contact_phone FROM kanban_cards kc JOIN kanban_columns col ON col.id = kc.column_id LEFT JOIN contacts c ON c.id = kc.contact_id WHERE col.board_id IN (${ph}) ORDER BY kc.position ASC`, boardIds);
       return rows;
     }
     return [];

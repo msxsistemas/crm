@@ -682,7 +682,7 @@ export default async function misc2Routes(fastify) {
     // Accepts filters as query params (user_id, instance_name) or from body
     const instance_name = req.query.instance_name || req.body.instance_name;
     const user_id = req.query.user_id || req.body.user_id || req.user.id;
-    const allowed = ['status','owner_jid','profile_pic_url','updated_at'];
+    const allowed = ['status','owner_jid','profile_pic_url'];
     const sets = [];
     const vals = [];
     let p = 3;

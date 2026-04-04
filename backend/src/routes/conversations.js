@@ -72,24 +72,50 @@ export default async function conversationRoutes(fastify) {
   });
 
   // Update conversation
-  // Bulk PATCH (from .in("id", ids) calls)
+  // Bulk/filtered PATCH (from .in("id", ids) or .eq(field).in(field) calls)
   fastify.patch('/conversations', auth, async (req, reply) => {
-    const { ids } = req.query;
-    if (!ids) return reply.status(400).send({ error: 'ids required' });
-    const idList = String(ids).split(',').filter(Boolean);
-    if (!idList.length) return { ok: true };
-    const allowed = ['status','assigned_to','category_id','starred','unread_count','last_message_at','updated_at'];
+    const ALLOWED_UPDATE = ['status','assigned_to','category_id','starred','unread_count','last_message_at'];
     const updates = [];
     const params = [];
     let p = 1;
-    for (const f of allowed) {
+    for (const f of ALLOWED_UPDATE) {
       if (req.body[f] !== undefined) { updates.push(`${f} = $${p}`); params.push(req.body[f]); p++; }
     }
     if (!updates.length) return { ok: true };
     updates.push('updated_at = NOW()');
-    const placeholders = idList.map((_, i) => `$${p + i}`).join(',');
-    params.push(...idList);
-    await query(`UPDATE conversations SET ${updates.join(',')} WHERE id IN (${placeholders})`, params);
+
+    const conditions = ['1=1'];
+    // Filter by IDs list (from .in("id", ids))
+    const { ids, assigned_to, status } = req.query;
+    if (ids) {
+      const idList = String(ids).split(',').filter(Boolean);
+      if (!idList.length) return { ok: true };
+      const placeholders = idList.map((_, i) => `$${p + i}`).join(',');
+      conditions.push(`id IN (${placeholders})`);
+      params.push(...idList);
+      p += idList.length;
+    }
+    // Filter by assigned_to (from .eq("assigned_to", uid))
+    if (assigned_to) {
+      conditions.push(`assigned_to = $${p}`);
+      params.push(assigned_to);
+      p++;
+    }
+    // Filter by status (single or comma-separated from .in("status", [...]))
+    if (status) {
+      const statuses = String(status).split(',').filter(Boolean);
+      if (statuses.length === 1) {
+        conditions.push(`status = $${p}`);
+        params.push(statuses[0]);
+        p++;
+      } else if (statuses.length > 1) {
+        const ph = statuses.map((_, i) => `$${p + i}`).join(',');
+        conditions.push(`status IN (${ph})`);
+        params.push(...statuses);
+        p += statuses.length;
+      }
+    }
+    await query(`UPDATE conversations SET ${updates.join(',')} WHERE ${conditions.join(' AND ')}`, params);
     return { ok: true };
   });
 
