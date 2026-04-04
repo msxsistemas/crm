@@ -3,8 +3,18 @@ import { query } from '../database.js';
 import { generateTokens, verifyRefreshToken } from '../auth.js';
 
 export default async function authRoutes(fastify) {
-  // Login
-  fastify.post('/auth/login', async (req, reply) => {
+  // Login — máximo 10 tentativas por IP a cada 15 minutos
+  fastify.post('/auth/login', {
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({
+          error: 'Muitas tentativas de login. Tente novamente em 15 minutos.',
+        }),
+      },
+    },
+  }, async (req, reply) => {
     const { email, password } = req.body;
     if (!email || !password) return reply.status(400).send({ error: 'Email e senha obrigatórios' });
 

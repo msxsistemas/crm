@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
 import { createServer } from 'http';
 import { setupSocket } from './socket.js';
@@ -27,6 +28,11 @@ await fastify.register(cors, {
   ],
   credentials: true,
   methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+});
+
+// Rate limiting global (generous limit; overridden per-route where needed)
+await fastify.register(rateLimit, {
+  global: false, // opt-in per route
 });
 
 // Multipart (file uploads)

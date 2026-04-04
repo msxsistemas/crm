@@ -22,6 +22,13 @@ import GlobalSearch from "@/components/inbox/GlobalSearch";
 import TransferDialog from "@/components/inbox/TransferDialog";
 import CloseConversationDialog from "@/components/inbox/CloseConversationDialog";
 import ConversationFilesDialog from "@/components/inbox/ConversationFilesDialog";
+import ShortcutsModal from "@/components/inbox/ShortcutsModal";
+import BlockDialog from "@/components/inbox/BlockDialog";
+import PixDialog from "@/components/inbox/PixDialog";
+import ScheduleMessageDialog from "@/components/inbox/ScheduleMessageDialog";
+import SummaryDialog from "@/components/inbox/SummaryDialog";
+import MergeConversationsDialog from "@/components/inbox/MergeConversationsDialog";
+import FlowTemplateDialog from "@/components/inbox/FlowTemplateDialog";
 import MediaMessage from "@/components/chat/MediaMessage";
 import { useMediaUpload } from "@/components/chat/useMediaUpload";
 import { EmojiPicker, StickerPicker } from "@/components/chat/EmojiStickerPicker";
@@ -3900,112 +3907,25 @@ const Inbox = () => {
         </DialogContent>
       </Dialog>
       {/* Pix QR Code Dialog */}
-      <Dialog open={pixDialogOpen} onOpenChange={setPixDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <span className="text-xl">💸</span>
-              Gerar cobrança Pix
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-sm font-medium mb-1.5 block">Valor (R$)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  placeholder="0,00"
-                  value={pixAmount}
-                  onChange={(e) => setPixAmount(e.target.value)}
-                />
-              </div>
-              <div>
-                <Label className="text-sm font-medium mb-1.5 block">Tipo de chave</Label>
-                <Select value={pixKeyType} onValueChange={setPixKeyType}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cpf">CPF</SelectItem>
-                    <SelectItem value="cnpj">CNPJ</SelectItem>
-                    <SelectItem value="email">E-mail</SelectItem>
-                    <SelectItem value="telefone">Telefone</SelectItem>
-                    <SelectItem value="aleatoria">Aleatória</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div>
-              <Label className="text-sm font-medium mb-1.5 block">Chave Pix</Label>
-              <Input
-                placeholder="Informe sua chave Pix"
-                value={pixKey}
-                onChange={(e) => setPixKey(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label className="text-sm font-medium mb-1.5 block">Descrição</Label>
-              <Input
-                placeholder="Identificador da cobrança"
-                value={pixDescription}
-                onChange={(e) => setPixDescription(e.target.value)}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-sm font-medium mb-1.5 block">Nome do recebedor</Label>
-                <Input
-                  placeholder="Seu nome"
-                  value={pixMerchantName}
-                  onChange={(e) => setPixMerchantName(e.target.value)}
-                  maxLength={25}
-                />
-              </div>
-              <div>
-                <Label className="text-sm font-medium mb-1.5 block">Cidade</Label>
-                <Input
-                  placeholder="Sua cidade"
-                  value={pixMerchantCity}
-                  onChange={(e) => setPixMerchantCity(e.target.value)}
-                  maxLength={15}
-                />
-              </div>
-            </div>
-            <Button className="w-full gap-2" onClick={handleGeneratePixPayload}>
-              Gerar QR Code / Código Pix
-            </Button>
-            {pixPayload && (
-              <div className="space-y-3">
-                <div className="rounded-lg bg-muted p-3 space-y-2">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Código Pix — copia e cola</p>
-                  <p className="text-xs font-mono break-all text-foreground select-all leading-relaxed">{pixPayload}</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full gap-2"
-                    onClick={() => { navigator.clipboard.writeText(pixPayload); toast.success("Código copiado!"); }}
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                    Copiar código
-                  </Button>
-                </div>
-                <div className="rounded-lg border border-border p-3 space-y-1">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Prévia da mensagem</p>
-                  <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">
-                    {`💸 *Cobrança Pix*\nValor: R$ ${(parseFloat(pixAmount.replace(",", ".")) || 0).toFixed(2).replace(".", ",")}\nDescrição: ${pixDescription || "—"}\n\n*Chave Pix:* ${pixKey}\n*Tipo:* ${pixKeyType}\n\nCódigo Pix (copia e cola):\n${pixPayload.slice(0, 60)}...`}
-                  </p>
-                </div>
-                <Button className="w-full gap-2 bg-green-600 hover:bg-green-700 text-white" onClick={handleSendPixMessage}>
-                  <Send className="h-4 w-4" />
-                  Enviar no chat
-                </Button>
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <PixDialog
+        open={pixDialogOpen}
+        onOpenChange={setPixDialogOpen}
+        amount={pixAmount}
+        onAmountChange={setPixAmount}
+        pixKey={pixKey}
+        onPixKeyChange={setPixKey}
+        pixKeyType={pixKeyType}
+        onPixKeyTypeChange={setPixKeyType}
+        description={pixDescription}
+        onDescriptionChange={setPixDescription}
+        merchantName={pixMerchantName}
+        onMerchantNameChange={setPixMerchantName}
+        merchantCity={pixMerchantCity}
+        onMerchantCityChange={setPixMerchantCity}
+        payload={pixPayload}
+        onGenerate={handleGeneratePixPayload}
+        onSend={handleSendPixMessage}
+      />
 
       {/* New Conversation Dialog */}
       <Dialog open={showNewConvo} onOpenChange={setShowNewConvo}>
@@ -4060,55 +3980,15 @@ const Inbox = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Schedule Message Dialog */}
-      {scheduleDialogOpen && (() => {
-        const convoForDialog = conversations.find((c) => c.id === selected);
-        return (
-          <Dialog open={scheduleDialogOpen} onOpenChange={setScheduleDialogOpen}>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <Clock className="h-5 w-5" />
-                  Agendar mensagem
-                </DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 py-2">
-                {convoForDialog && (
-                  <div className="rounded-lg bg-muted/50 px-4 py-3 text-sm space-y-1">
-                    <p className="font-medium text-foreground">{convoForDialog.contacts.name || convoForDialog.contacts.phone}</p>
-                    <p className="text-muted-foreground">{convoForDialog.contacts.phone}</p>
-                  </div>
-                )}
-                <div>
-                  <label className="text-sm font-medium text-foreground block mb-1.5">Prévia da mensagem</label>
-                  <div className="rounded-lg bg-muted/50 px-4 py-3 text-sm text-foreground border border-border">
-                    {messageInput.slice(0, 80)}{messageInput.length > 80 ? "..." : ""}
-                  </div>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-foreground block mb-1.5">Data e hora do envio</label>
-                  <input
-                    type="datetime-local"
-                    value={scheduleDateTime}
-                    onChange={e => setScheduleDateTime(e.target.value)}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" className="flex-1" onClick={() => setScheduleDialogOpen(false)}>Cancelar</Button>
-                <Button
-                  className="flex-1 gap-2"
-                  onClick={() => handleScheduleMessage(scheduleDateTime)}
-                  disabled={!scheduleDateTime}
-                >
-                  <Clock className="h-4 w-4" /> Agendar
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-        );
-      })()}
+      <ScheduleMessageDialog
+        open={scheduleDialogOpen}
+        onOpenChange={setScheduleDialogOpen}
+        conversation={conversations.find((c) => c.id === selected) ?? null}
+        messagePreview={messageInput}
+        dateTime={scheduleDateTime}
+        onDateTimeChange={setScheduleDateTime}
+        onConfirm={handleScheduleMessage}
+      />
 
       {/* Global Search */}
       <GlobalSearch
@@ -4121,47 +4001,7 @@ const Inbox = () => {
       />
 
       {/* Keyboard Shortcuts Modal */}
-      <Dialog open={showShortcutsModal} onOpenChange={setShowShortcutsModal}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <span className="text-base font-bold">Atalhos de Teclado</span>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-2">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-muted-foreground uppercase border-b border-border">
-                  <th className="text-left pb-2 font-semibold">Atalho</th>
-                  <th className="text-left pb-2 font-semibold">Ação</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {[
-                  { key: "J", action: "Próxima conversa" },
-                  { key: "K", action: "Conversa anterior" },
-                  { key: "R", action: "Focar campo de resposta" },
-                  { key: "N", action: "Marcar conversa como lida" },
-                  { key: "S", action: "Favoritar/Desfavoritar conversa" },
-                  { key: "Esc", action: "Fechar modal / Desselecionar conversa" },
-                  { key: "Ctrl+K", action: "Busca global" },
-                  { key: "Ctrl+Enter", action: "Enviar mensagem" },
-                  { key: "Ctrl+/", action: "Mostrar esta ajuda" },
-                ].map(({ key, action }) => (
-                  <tr key={key} className="py-2">
-                    <td className="py-2 pr-4">
-                      <kbd className="bg-muted border border-border rounded px-2 py-0.5 text-xs font-mono font-semibold text-foreground">
-                        {key}
-                      </kbd>
-                    </td>
-                    <td className="py-2 text-muted-foreground">{action}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ShortcutsModal open={showShortcutsModal} onOpenChange={setShowShortcutsModal} />
 
       {/* File Manager Upload Input */}
       <input
@@ -4377,72 +4217,16 @@ const Inbox = () => {
       </Dialog>
 
       {/* AI Conversation Summary Dialog */}
-      <Dialog open={summaryOpen} onOpenChange={(open) => { setSummaryOpen(open); if (!open) setSummary(''); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5 text-purple-500" />
-              Resumo da Conversa
-            </DialogTitle>
-          </DialogHeader>
-          <div className="py-3">
-            {summaryLoading ? (
-              <div className="flex items-center justify-center py-10 gap-3 text-muted-foreground">
-                <RotateCw className="h-5 w-5 animate-spin" />
-                <span className="text-sm">Gerando resumo...</span>
-              </div>
-            ) : (
-              <div className="rounded-lg bg-muted/50 border border-border px-4 py-3 text-sm text-foreground leading-relaxed whitespace-pre-wrap">
-                {summary || 'Nenhum resumo disponível.'}
-              </div>
-            )}
-          </div>
-          <DialogFooter className="flex flex-row gap-2 sm:justify-start">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              disabled={summaryLoading || !summary}
-              onClick={() => {
-                navigator.clipboard.writeText(summary);
-                toast.success('Resumo copiado!');
-              }}
-            >
-              <Copy className="h-3.5 w-3.5" />
-              Copiar resumo
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              disabled={summaryLoading || !summary || !selected}
-              onClick={async () => {
-                if (!selected || !summary) return;
-                const authorName = profileName || user?.email || 'Agente';
-                await supabase.from('conversation_notes').insert({
-                  conversation_id: selected,
-                  user_id: user?.id,
-                  content: `[Resumo IA]\n${summary}`,
-                  author_name: authorName,
-                  is_internal: true,
-                } as any);
-                toast.success('Resumo adicionado como nota interna!');
-                setSummaryOpen(false);
-              }}
-            >
-              <FileText className="h-3.5 w-3.5" />
-              Usar como nota interna
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSummaryOpen(false)}
-            >
-              Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <SummaryDialog
+        open={summaryOpen}
+        onOpenChange={setSummaryOpen}
+        summary={summary}
+        loading={summaryLoading}
+        conversationId={selected}
+        userId={user?.id}
+        authorName={profileName || user?.email || 'Agente'}
+        onClose={() => setSummary('')}
+      />
 
       {/* HSM Template Dialog */}
       <Dialog open={hsmDialogOpen} onOpenChange={(o) => !o && setHsmDialogOpen(false)}>
@@ -4699,233 +4483,40 @@ const Inbox = () => {
         />
       )}
 
-      {/* Merge Conversations Dialog */}
-      <Dialog open={mergeDialogOpen} onOpenChange={setMergeDialogOpen}>
-        <DialogContent className="sm:max-w-lg max-h-[80vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <GitMerge className="h-5 w-5 text-primary" />
-              Mesclar com outra conversa
-            </DialogTitle>
-          </DialogHeader>
-          <p className="text-xs text-muted-foreground -mt-2 pb-2">
-            Todas as mensagens da conversa atual serão movidas para a conversa selecionada.
-          </p>
-          <div className="flex flex-col gap-3 flex-1 overflow-hidden">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar conversa..."
-                value={mergeSearch}
-                onChange={(e) => setMergeSearch(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            <div className="flex-1 overflow-y-auto space-y-1.5 scrollbar-thin">
-              {mergeTargetConvos.length === 0 && (
-                <p className="text-center text-muted-foreground text-sm py-8">
-                  Nenhuma outra conversa encontrada para este contato.
-                </p>
-              )}
-              {mergeTargetConvos
-                .filter((c) => {
-                  if (!mergeSearch) return true;
-                  const name = (c.contacts?.name || "").toLowerCase();
-                  const phone = (c.contacts?.phone || "").toLowerCase();
-                  const date = c.created_at ? new Date(c.created_at).toLocaleDateString("pt-BR") : "";
-                  return name.includes(mergeSearch.toLowerCase()) || phone.includes(mergeSearch.toLowerCase()) || date.includes(mergeSearch);
-                })
-                .map((c) => (
-                  <div
-                    key={c.id}
-                    className="border border-border rounded-lg p-3 hover:bg-accent transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          {c.status === "closed" ? (
-                            <Badge className="bg-muted text-muted-foreground text-[10px] px-1.5 py-0 font-normal">Encerrada</Badge>
-                          ) : c.status === "open" ? (
-                            <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 text-[10px] px-1.5 py-0 font-normal">Aguardando</Badge>
-                          ) : (
-                            <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-[10px] px-1.5 py-0 font-normal">Em atendimento</Badge>
-                          )}
-                          {c.created_at && (
-                            <span className="text-[10px] text-muted-foreground">
-                              {new Date(c.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}
-                            </span>
-                          )}
-                        </div>
-                        {c.last_message_body && (
-                          <p className="text-xs text-muted-foreground truncate">{c.last_message_body}</p>
-                        )}
-                      </div>
-                      <Button
-                        size="sm"
-                        className="gap-1.5 h-7 px-3 text-xs shrink-0"
-                        onClick={() => handleMergeConversations(c.id)}
-                        disabled={merging}
-                      >
-                        {merging ? <RotateCw className="h-3 w-3 animate-spin" /> : <GitMerge className="h-3 w-3" />}
-                        Mesclar
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-            </div>
-          </div>
-          <DialogFooter className="pt-2">
-            <Button variant="outline" onClick={() => setMergeDialogOpen(false)}>Cancelar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <MergeConversationsDialog
+        open={mergeDialogOpen}
+        onOpenChange={setMergeDialogOpen}
+        targets={mergeTargetConvos}
+        search={mergeSearch}
+        onSearchChange={setMergeSearch}
+        merging={merging}
+        onMerge={handleMergeConversations}
+      />
 
-      {/* Flow Templates Apply Dialog */}
-      <Dialog open={flowTemplateDialogOpen} onOpenChange={setFlowTemplateDialogOpen}>
-        <DialogContent className="sm:max-w-xl max-h-[85vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <LayoutTemplate className="h-5 w-5 text-primary" />
-              Aplicar Template de Atendimento
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 overflow-y-auto space-y-3 scrollbar-thin">
-            {flowTemplatesLoading ? (
-              <div className="flex items-center justify-center py-12 gap-3 text-muted-foreground">
-                <RotateCw className="h-5 w-5 animate-spin" />
-                <span className="text-sm">Carregando templates...</span>
-              </div>
-            ) : flowTemplates.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                <LayoutTemplate className="h-10 w-10 mb-3 opacity-30" />
-                <p className="text-sm font-medium">Nenhum template cadastrado</p>
-                <p className="text-xs mt-1">Crie templates em <strong>Templates de Atendimento</strong></p>
-              </div>
-            ) : (
-              flowTemplates.map((tpl) => (
-                <div key={tpl.id} className="border border-border rounded-lg p-4 hover:bg-accent/30 transition-colors">
-                  <div className="flex items-start justify-between gap-3 mb-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm text-foreground">{tpl.name}</p>
-                      {tpl.description && (
-                        <p className="text-xs text-muted-foreground mt-0.5">{tpl.description}</p>
-                      )}
-                    </div>
-                    <Button
-                      size="sm"
-                      className="gap-1.5 h-8 px-3 text-xs shrink-0"
-                      onClick={() => handleApplyFlowTemplate(tpl)}
-                      disabled={applyingTemplate === tpl.id}
-                    >
-                      {applyingTemplate === tpl.id ? (
-                        <RotateCw className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <CheckCircle className="h-3.5 w-3.5" />
-                      )}
-                      {applyingTemplate === tpl.id ? "Aplicando..." : "Aplicar"}
-                    </Button>
-                  </div>
-                  {/* Steps preview */}
-                  <div className="flex flex-wrap gap-1.5">
-                    {tpl.steps.slice().sort((a, b) => a.order - b.order).map((step) => {
-                      const stepLabels: Record<FlowTemplateStep["type"], string> = {
-                        send_message:       "Mensagem",
-                        add_tag:            "Tag +",
-                        remove_tag:         "Tag -",
-                        assign_agent:       "Atribuir",
-                        wait:               `Aguardar ${step.config.wait_minutes ?? "?"}min`,
-                        close_conversation: "Encerrar",
-                        send_note:          "Nota",
-                        add_label:          "Etiqueta +",
-                      };
-                      return (
-                        <span
-                          key={step.id}
-                          className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border"
-                        >
-                          {stepLabels[step.type]}
-                        </span>
-                      );
-                    })}
-                  </div>
-                  <p className="text-[10px] text-muted-foreground mt-1.5">
-                    Passos de espera são ignorados na aplicação imediata.
-                  </p>
-                </div>
-              ))
-            )}
-          </div>
-          <DialogFooter className="pt-2 border-t border-border">
-            <Button variant="outline" onClick={() => setFlowTemplateDialogOpen(false)}>Fechar</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <FlowTemplateDialog
+        open={flowTemplateDialogOpen}
+        onOpenChange={setFlowTemplateDialogOpen}
+        templates={flowTemplates}
+        loading={flowTemplatesLoading}
+        applyingId={applyingTemplate}
+        onApply={handleApplyFlowTemplate}
+      />
 
       {/* Block Number Dialog */}
-      <Dialog open={blockDialogOpen} onOpenChange={setBlockDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Ban className="h-5 w-5 text-red-500" /> Bloquear número
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label>Telefone</Label>
-              <input
-                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring font-mono"
-                placeholder="Ex: 5511999999999"
-                value={blockPhone}
-                onChange={e => setBlockPhone(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">Use o formato internacional</p>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Motivo <span className="text-red-500">*</span></Label>
-              <Textarea
-                placeholder="Descreva o motivo do bloqueio..."
-                value={blockReason}
-                onChange={e => setBlockReason(e.target.value)}
-                rows={3}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Expiração</Label>
-              <Select value={blockExpiration} onValueChange={v => setBlockExpiration(v as typeof blockExpiration)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="nunca">Nunca</SelectItem>
-                  <SelectItem value="7">7 dias</SelectItem>
-                  <SelectItem value="30">30 dias</SelectItem>
-                  <SelectItem value="90">90 dias</SelectItem>
-                  <SelectItem value="custom">Data específica</SelectItem>
-                </SelectContent>
-              </Select>
-              {blockExpiration === "custom" && (
-                <input
-                  type="date"
-                  value={blockCustomDate}
-                  onChange={e => setBlockCustomDate(e.target.value)}
-                  min={new Date().toISOString().split("T")[0]}
-                  className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-              )}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setBlockDialogOpen(false)}>Cancelar</Button>
-            <Button
-              className="bg-red-600 hover:bg-red-700 text-white"
-              onClick={handleBlockNumber}
-              disabled={blocking}
-            >
-              {blocking ? "Bloqueando..." : "Bloquear"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <BlockDialog
+        open={blockDialogOpen}
+        onOpenChange={setBlockDialogOpen}
+        phone={blockPhone}
+        onPhoneChange={setBlockPhone}
+        reason={blockReason}
+        onReasonChange={setBlockReason}
+        expiration={blockExpiration}
+        onExpirationChange={setBlockExpiration}
+        customDate={blockCustomDate}
+        onCustomDateChange={setBlockCustomDate}
+        blocking={blocking}
+        onConfirm={handleBlockNumber}
+      />
     </div>
   );
 };

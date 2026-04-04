@@ -1,8 +1,11 @@
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 import { query } from '../database.js';
+import { authorize } from '../middleware/authorize.js';
 
 export default async function userRoutes(fastify) {
   const auth = { preHandler: fastify.authenticate };
+  const adminOnly = { preHandler: [fastify.authenticate, authorize('admin', 'manager')] };
 
   fastify.get('/users', auth, async (req) => {
     const { rows } = await query('SELECT id, name, name as full_name, email, role, avatar_url, permissions, status, signing_enabled, created_at, last_login FROM profiles ORDER BY name');
@@ -21,19 +24,20 @@ export default async function userRoutes(fastify) {
     return rows[0];
   });
 
-  fastify.post('/users', auth, async (req, reply) => {
+  fastify.post('/users', adminOnly, async (req, reply) => {
     const { name, email, password, role = 'agent' } = req.body;
     const existing = await query('SELECT id FROM profiles WHERE email = $1', [email]);
     if (existing.rows[0]) return reply.status(400).send({ error: 'Email já cadastrado' });
-    const hash = await bcrypt.hash(password || '123456', 10);
+    const tempPassword = password || randomBytes(12).toString('base64url');
+    const hash = await bcrypt.hash(tempPassword, 10);
     const { rows } = await query(
-      'INSERT INTO profiles (name, email, password_hash, role) VALUES ($1,$2,$3,$4) RETURNING id, name, email, role, created_at',
-      [name, email.toLowerCase(), hash, role]
+      'INSERT INTO profiles (name, email, password_hash, role, must_change_password) VALUES ($1,$2,$3,$4,$5) RETURNING id, name, email, role, created_at',
+      [name, email.toLowerCase(), hash, role, !password]
     );
-    return reply.status(201).send(rows[0]);
+    return reply.status(201).send({ ...rows[0], ...(password ? {} : { tempPassword }) });
   });
 
-  fastify.patch('/users/:id', auth, async (req, reply) => {
+  fastify.patch('/users/:id', adminOnly, async (req, reply) => {
     const { name, full_name, email, role, permissions, password, status, signing_enabled, avatar_url } = req.body;
     const updates = [];
     const params = [];
@@ -58,7 +62,7 @@ export default async function userRoutes(fastify) {
     return rows[0];
   });
 
-  fastify.delete('/users/:id', auth, async (req, reply) => {
+  fastify.delete('/users/:id', adminOnly, async (req, reply) => {
     if (req.user.id === req.params.id) return reply.status(400).send({ error: 'Não pode excluir a si mesmo' });
     await query('DELETE FROM profiles WHERE id = $1', [req.params.id]);
     return { message: 'Usuário excluído' };
