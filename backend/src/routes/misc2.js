@@ -509,6 +509,158 @@ export default async function misc2Routes(fastify) {
     }
   });
 
+  // ── Event Triggers ───────────────────────────────────────────────────────
+  fastify.get('/event-triggers', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM event_triggers ORDER BY created_at DESC');
+    return rows;
+  });
+  fastify.post('/event-triggers', auth, async (req, reply) => {
+    const { name, event_type, conditions, actions, is_active } = req.body;
+    const { rows } = await query(
+      'INSERT INTO event_triggers (name, event_type, conditions, actions, is_active, user_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [name, event_type, JSON.stringify(conditions || {}), JSON.stringify(actions || []), is_active !== false, req.user.id]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+  fastify.patch('/event-triggers/:id', auth, async (req) => {
+    const { name, event_type, conditions, actions, is_active } = req.body;
+    const { rows } = await query(
+      `UPDATE event_triggers SET name=COALESCE($1,name), event_type=COALESCE($2,event_type), conditions=COALESCE($3,conditions), actions=COALESCE($4,actions), is_active=COALESCE($5,is_active), updated_at=NOW() WHERE id=$6 RETURNING *`,
+      [name, event_type, conditions ? JSON.stringify(conditions) : null, actions ? JSON.stringify(actions) : null, is_active, req.params.id]
+    );
+    return rows[0] || {};
+  });
+  fastify.delete('/event-triggers/:id', auth, async (req) => {
+    await query('DELETE FROM event_triggers WHERE id=$1', [req.params.id]);
+    return { ok: true };
+  });
+
+  // ── Intent Configs ────────────────────────────────────────────────────────
+  fastify.get('/intent-configs', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM intent_configs ORDER BY created_at ASC');
+    return rows;
+  });
+  fastify.post('/intent-configs', auth, async (req, reply) => {
+    const { name, description, patterns, response, is_active, confidence } = req.body;
+    const { rows } = await query(
+      'INSERT INTO intent_configs (name, description, patterns, response, is_active, confidence, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [name, description, patterns || [], response, is_active !== false, confidence || 0.8, req.user.id]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+  fastify.patch('/intent-configs/:id', auth, async (req) => {
+    const { name, description, patterns, response, is_active, confidence } = req.body;
+    const { rows } = await query(
+      `UPDATE intent_configs SET name=COALESCE($1,name), description=COALESCE($2,description), patterns=COALESCE($3,patterns), response=COALESCE($4,response), is_active=COALESCE($5,is_active), confidence=COALESCE($6,confidence), updated_at=NOW() WHERE id=$7 RETURNING *`,
+      [name, description, patterns, response, is_active, confidence, req.params.id]
+    );
+    return rows[0] || {};
+  });
+  fastify.delete('/intent-configs/:id', auth, async (req) => {
+    await query('DELETE FROM intent_configs WHERE id=$1', [req.params.id]);
+    return { ok: true };
+  });
+
+  // ── Lead Scoring Rules ────────────────────────────────────────────────────
+  fastify.get('/lead-scoring-rules', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM lead_scoring_rules ORDER BY created_at DESC');
+    return rows;
+  });
+  fastify.post('/lead-scoring-rules', auth, async (req, reply) => {
+    const { name, condition_field, condition_operator, condition_value, score_delta, is_active } = req.body;
+    const { rows } = await query(
+      'INSERT INTO lead_scoring_rules (name, condition_field, condition_operator, condition_value, score_delta, is_active, user_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [name, condition_field, condition_operator, condition_value, score_delta || 0, is_active !== false, req.user.id]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+  fastify.patch('/lead-scoring-rules/:id', auth, async (req) => {
+    const { name, condition_field, condition_operator, condition_value, score_delta, is_active } = req.body;
+    const { rows } = await query(
+      `UPDATE lead_scoring_rules SET name=COALESCE($1,name), condition_field=COALESCE($2,condition_field), condition_operator=COALESCE($3,condition_operator), condition_value=COALESCE($4,condition_value), score_delta=COALESCE($5,score_delta), is_active=COALESCE($6,is_active), updated_at=NOW() WHERE id=$7 RETURNING *`,
+      [name, condition_field, condition_operator, condition_value, score_delta, is_active, req.params.id]
+    );
+    return rows[0] || {};
+  });
+  fastify.delete('/lead-scoring-rules/:id', auth, async (req) => {
+    await query('DELETE FROM lead_scoring_rules WHERE id=$1', [req.params.id]);
+    return { ok: true };
+  });
+
+  // ── Z-API Connections ────────────────────────────────────────────────────
+  fastify.get('/zapi-connections', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM zapi_connections WHERE user_id=$1 ORDER BY created_at ASC', [req.user.id]);
+    return rows;
+  });
+  fastify.post('/zapi-connections', auth, async (req, reply) => {
+    const { label, instance_id, instance_token, client_token } = req.body;
+    const { rows } = await query(
+      'INSERT INTO zapi_connections (user_id, label, instance_id, instance_token, client_token) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [req.user.id, label, instance_id, instance_token, client_token]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+  fastify.patch('/zapi-connections/:id', auth, async (req) => {
+    const { label, instance_id, instance_token, client_token, status, connected } = req.body;
+    const { rows } = await query(
+      `UPDATE zapi_connections SET label=COALESCE($1,label), instance_id=COALESCE($2,instance_id), instance_token=COALESCE($3,instance_token), client_token=COALESCE($4,client_token), status=COALESCE($5,status), connected=COALESCE($6,connected), updated_at=NOW() WHERE id=$7 AND user_id=$8 RETURNING *`,
+      [label, instance_id, instance_token, client_token, status, connected, req.params.id, req.user.id]
+    );
+    return rows[0] || {};
+  });
+  fastify.delete('/zapi-connections/:id', auth, async (req) => {
+    await query('DELETE FROM zapi_connections WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    return { ok: true };
+  });
+
+  // ── Evolution Connections (DB) ────────────────────────────────────────────
+  fastify.get('/evolution-connections', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM evolution_connections WHERE user_id=$1 ORDER BY created_at ASC', [req.user.id]);
+    return rows;
+  });
+  fastify.post('/evolution-connections', auth, async (req, reply) => {
+    const { instance_name, status, owner_jid, profile_pic_url } = req.body;
+    const { rows } = await query(
+      'INSERT INTO evolution_connections (user_id, instance_name, status, owner_jid, profile_pic_url) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id, instance_name) DO UPDATE SET status=EXCLUDED.status, updated_at=NOW() RETURNING *',
+      [req.user.id, instance_name, status || 'disconnected', owner_jid, profile_pic_url]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+  fastify.patch('/evolution-connections', auth, async (req) => {
+    // Accepts filters as query params (user_id, instance_name) or from body
+    const instance_name = req.query.instance_name || req.body.instance_name;
+    const user_id = req.query.user_id || req.body.user_id || req.user.id;
+    const allowed = ['status','owner_jid','profile_pic_url','updated_at'];
+    const sets = [];
+    const vals = [];
+    let p = 3;
+    for (const k of allowed) {
+      if (req.body[k] !== undefined) { sets.push(`${k}=$${p}`); vals.push(req.body[k]); p++; }
+    }
+    if (!sets.length) return {};
+    sets.push('updated_at=NOW()');
+    const { rows } = await query(
+      `UPDATE evolution_connections SET ${sets.join(',')} WHERE user_id=$1 AND instance_name=$2 RETURNING *`,
+      [user_id, instance_name, ...vals]
+    );
+    return rows[0] || {};
+  });
+  fastify.delete('/evolution-connections', auth, async (req) => {
+    const uid = req.query.user_id || req.user.id;
+    const instance_name = req.query.instance_name;
+    if (instance_name) {
+      // May be comma-separated (from .in() filter)
+      const names = String(instance_name).split(',').map(s => s.trim()).filter(Boolean);
+      if (names.length === 1) {
+        await query('DELETE FROM evolution_connections WHERE user_id=$1 AND instance_name=$2', [uid, names[0]]);
+      } else if (names.length > 1) {
+        const placeholders = names.map((_, i) => `$${i + 2}`).join(',');
+        await query(`DELETE FROM evolution_connections WHERE user_id=$1 AND instance_name IN (${placeholders})`, [uid, ...names]);
+      }
+    }
+    return { ok: true };
+  });
+
   // ── AI Agent proxy ────────────────────────────────────────────────────────
   fastify.post('/ai-agent', auth, async (req, reply) => {
     const { rows: settings } = await query('SELECT openai_key FROM settings WHERE id=1');

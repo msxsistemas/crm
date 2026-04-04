@@ -72,6 +72,27 @@ export default async function conversationRoutes(fastify) {
   });
 
   // Update conversation
+  // Bulk PATCH (from .in("id", ids) calls)
+  fastify.patch('/conversations', auth, async (req, reply) => {
+    const { ids } = req.query;
+    if (!ids) return reply.status(400).send({ error: 'ids required' });
+    const idList = String(ids).split(',').filter(Boolean);
+    if (!idList.length) return { ok: true };
+    const allowed = ['status','assigned_to','category_id','starred','unread_count','last_message_at','updated_at'];
+    const updates = [];
+    const params = [];
+    let p = 1;
+    for (const f of allowed) {
+      if (req.body[f] !== undefined) { updates.push(`${f} = $${p}`); params.push(req.body[f]); p++; }
+    }
+    if (!updates.length) return { ok: true };
+    updates.push('updated_at = NOW()');
+    const placeholders = idList.map((_, i) => `$${p + i}`).join(',');
+    params.push(...idList);
+    await query(`UPDATE conversations SET ${updates.join(',')} WHERE id IN (${placeholders})`, params);
+    return { ok: true };
+  });
+
   fastify.patch('/conversations/:id', auth, async (req, reply) => {
     const allowed = ['status','assigned_to','category_id','starred','sentiment','label_ids','awaiting_csat','is_merged','merged_into','unread_count','connection_name','last_message_at'];
     const updates = [];

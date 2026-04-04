@@ -59,7 +59,8 @@ async function apiFetch(method: string, path: string, body?: unknown): Promise<u
 const TABLE_MAP: Record<string, string> = {
   profiles: '/users',
   settings: '/settings',
-  evolution_connections: '/connections',
+  evolution_connections: '/evolution-connections',
+  zapi_connections: '/zapi-connections',
   tags: '/tags',
   categories: '/categories',
   contacts: '/contacts',
@@ -107,6 +108,9 @@ const TABLE_MAP: Record<string, string> = {
   kanban_cards: '/kanban-cards',
   user_roles: '/__skip__',
   contact_tags: '/contact-tags',
+  event_triggers: '/event-triggers',
+  intent_configs: '/intent-configs',
+  lead_scoring_rules: '/lead-scoring-rules',
 };
 
 type FilterOp = { col: string; val: unknown; op: string };
@@ -225,9 +229,19 @@ class QueryBuilder {
       }
 
       if (this._method === 'PATCH') {
-        // Find id from filters
         const idF = this._filters.find(f => f.col === 'id' && f.op === 'eq');
-        if (idF) url = `${url}/${idF.val}`;
+        const inF = this._filters.find(f => f.col === 'id' && f.op === 'in');
+        if (idF) {
+          url = `${url}/${idF.val}`;
+        } else if (inF) {
+          // Bulk update: pass ids as comma-separated query param
+          const ids = Array.isArray(inF.val) ? (inF.val as unknown[]).join(',') : String(inF.val);
+          url += `?ids=${encodeURIComponent(ids)}`;
+        } else if (this._filters.length > 0) {
+          // Non-id filters (e.g., user_id + instance_name): pass as query params
+          const qParts = this._filters.map(f => `${encodeURIComponent(f.col)}=${encodeURIComponent(String(f.val))}`);
+          url += `?${qParts.join('&')}`;
+        }
         const data = await apiFetch('PATCH', url, this._body);
         return { data, error: null };
       }
