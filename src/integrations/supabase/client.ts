@@ -111,6 +111,8 @@ const TABLE_MAP: Record<string, string> = {
   event_triggers: '/event-triggers',
   intent_configs: '/intent-configs',
   lead_scoring_rules: '/lead-scoring-rules',
+  contact_segments: '/contact-segments',
+  message_templates: '/message-templates',
 };
 
 type FilterOp = { col: string; val: unknown; op: string };

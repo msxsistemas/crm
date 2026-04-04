@@ -509,6 +509,54 @@ export default async function misc2Routes(fastify) {
     }
   });
 
+  // ── Contact Segments ─────────────────────────────────────────────────────
+  fastify.get('/contact-segments', auth, async (req) => {
+    const { contact_id, segment_id } = req.query;
+    let q = 'SELECT * FROM contact_segments WHERE 1=1';
+    const vals = [];
+    let p = 1;
+    if (contact_id) { q += ` AND contact_id=$${p}`; vals.push(contact_id); p++; }
+    if (segment_id) { q += ` AND segment_id=$${p}`; vals.push(segment_id); p++; }
+    const { rows } = await query(q, vals);
+    return rows;
+  });
+  fastify.post('/contact-segments', auth, async (req, reply) => {
+    const { contact_id, segment_id } = req.body;
+    const { rows } = await query(
+      'INSERT INTO contact_segments (contact_id, segment_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING *',
+      [contact_id, segment_id]
+    );
+    return reply.status(201).send(rows[0] || {});
+  });
+  fastify.delete('/contact-segments/:id', auth, async (req) => {
+    await query('DELETE FROM contact_segments WHERE id=$1', [req.params.id]); return { ok: true };
+  });
+
+  // ── Message Templates ─────────────────────────────────────────────────────
+  fastify.get('/message-templates', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM message_templates ORDER BY created_at DESC');
+    return rows;
+  });
+  fastify.post('/message-templates', auth, async (req, reply) => {
+    const { name, content, category, language, status } = req.body;
+    const { rows } = await query(
+      'INSERT INTO message_templates (name, content, category, language, status, user_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [name, content, category, language || 'pt-BR', status || 'approved', req.user.id]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+  fastify.patch('/message-templates/:id', auth, async (req) => {
+    const { name, content, category, language, status } = req.body;
+    const { rows } = await query(
+      `UPDATE message_templates SET name=COALESCE($1,name), content=COALESCE($2,content), category=COALESCE($3,category), language=COALESCE($4,language), status=COALESCE($5,status), updated_at=NOW() WHERE id=$6 RETURNING *`,
+      [name, content, category, language, status, req.params.id]
+    );
+    return rows[0] || {};
+  });
+  fastify.delete('/message-templates/:id', auth, async (req) => {
+    await query('DELETE FROM message_templates WHERE id=$1', [req.params.id]); return { ok: true };
+  });
+
   // ── Event Triggers ───────────────────────────────────────────────────────
   fastify.get('/event-triggers', auth, async (req) => {
     const { rows } = await query('SELECT * FROM event_triggers ORDER BY created_at DESC');
