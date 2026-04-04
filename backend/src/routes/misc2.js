@@ -447,4 +447,71 @@ export default async function misc2Routes(fastify) {
     const { rows } = await query('INSERT INTO campaign_contacts (campaign_id, contact_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING *', [campaign_id, contact_id]);
     return reply.status(201).send(rows[0] || {});
   });
+
+  // ── Queue Agents ──────────────────────────────────────────────────────────
+  fastify.get('/queue-agents', auth, async (req) => {
+    const { queue_id } = req.query;
+    if (!queue_id) return [];
+    const { rows } = await query('SELECT qa.*, p.name as agent_name FROM queue_agents qa LEFT JOIN profiles p ON p.id = qa.agent_id WHERE qa.queue_id=$1', [queue_id]);
+    return rows;
+  });
+  fastify.post('/queue-agents', auth, async (req, reply) => {
+    const { queue_id, agent_id } = req.body;
+    const { rows } = await query('INSERT INTO queue_agents (queue_id, agent_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING *', [queue_id, agent_id]);
+    return reply.status(201).send(rows[0] || {});
+  });
+  fastify.delete('/queue-agents/:id', auth, async (req) => {
+    await query('DELETE FROM queue_agents WHERE id=$1', [req.params.id]); return { ok: true };
+  });
+
+  // ── Contact Group Members ─────────────────────────────────────────────────
+  fastify.get('/contact-group-members', auth, async (req) => {
+    const { group_id } = req.query;
+    if (!group_id) return [];
+    const { rows } = await query('SELECT cgm.*, c.name as contact_name, c.phone FROM contact_group_members cgm LEFT JOIN contacts c ON c.id = cgm.contact_id WHERE cgm.group_id=$1', [group_id]);
+    return rows;
+  });
+  fastify.post('/contact-group-members', auth, async (req, reply) => {
+    const { group_id, contact_id } = req.body;
+    const { rows } = await query('INSERT INTO contact_group_members (group_id, contact_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING *', [group_id, contact_id]);
+    return reply.status(201).send(rows[0] || {});
+  });
+  fastify.delete('/contact-group-members/:id', auth, async (req) => {
+    await query('DELETE FROM contact_group_members WHERE id=$1', [req.params.id]); return { ok: true };
+  });
+
+  // ── Evolution Proxy ───────────────────────────────────────────────────────
+  fastify.post('/evolution-proxy', auth, async (req, reply) => {
+    const { action, instanceName, data: body } = req.body || {};
+    const { rows: settings } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
+    const s = settings[0];
+    if (!s?.evolution_url) return { data: null, error: { message: 'Evolution API não configurada' } };
+    try {
+      const url = `${s.evolution_url}/${action || 'message/sendText'}/${instanceName}`;
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': s.evolution_key }, body: JSON.stringify(body) });
+      const data = await res.json();
+      return { data, error: null };
+    } catch (e) {
+      return reply.status(500).send({ data: null, error: { message: e.message } });
+    }
+  });
+
+  // ── AI Agent proxy ────────────────────────────────────────────────────────
+  fastify.post('/ai-agent', auth, async (req, reply) => {
+    const { rows: settings } = await query('SELECT openai_key FROM settings WHERE id=1');
+    const key = settings[0]?.openai_key;
+    if (!key) return reply.status(400).send({ error: 'OpenAI key não configurada' });
+    const { messages, model = 'gpt-4o-mini' } = req.body;
+    try {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({ model, messages }),
+      });
+      const data = await res.json();
+      return { data, error: null };
+    } catch (e) {
+      return reply.status(500).send({ error: e.message });
+    }
+  });
 }

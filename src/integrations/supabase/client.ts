@@ -384,6 +384,31 @@ const authShim = {
   },
 };
 
+// ── Functions shim ────────────────────────────────────────────────────────────
+const FUNCTION_MAP: Record<string, string> = {
+  'manage-users': '/users',
+  'ai-agent': '/ai-agent',
+  'evolution-api': '/evolution-proxy',
+  'zapi': '/zapi-proxy',
+};
+
+const functionsShim = {
+  async invoke(fnName: string, options?: { body?: unknown; method?: string; headers?: Record<string, string> }) {
+    const endpoint = FUNCTION_MAP[fnName];
+    if (!endpoint) {
+      // Unknown function — return stub without crashing
+      return { data: null, error: null };
+    }
+    try {
+      const method = options?.method || 'POST';
+      const data = await apiFetch(method as 'GET' | 'POST', endpoint, options?.body);
+      return { data, error: null };
+    } catch (err) {
+      return { data: null, error: { message: (err as Error).message } };
+    }
+  },
+};
+
 // ── Main supabase shim object ─────────────────────────────────────────────────
 export const supabase = {
   from: (table: string) => new QueryBuilder(table),
@@ -393,6 +418,8 @@ export const supabase = {
   storage: {
     from: (bucket: string) => new StorageBucketProxy(bucket),
   },
+
+  functions: functionsShim,
 
   channel: (_name: string) => new ChannelProxy(),
   removeChannel: (_ch: unknown) => {},
