@@ -79,20 +79,20 @@ export default async function statsRoutes(fastify) {
       // 1. Realtime counts (no date filter — always current)
       query(`
         SELECT
-          COUNT(*)::int FILTER (WHERE status = 'open') AS open_count,
-          COUNT(*)::int FILTER (WHERE status = 'open' AND unread_count > 0) AS pending_count,
-          COUNT(*)::int FILTER (WHERE status IN ('closed','resolved') AND updated_at >= $1 AND updated_at <= $2) AS closed_count
+          COUNT(*) FILTER (WHERE status = 'open') AS open_count,
+          COUNT(*) FILTER (WHERE status = 'open' AND unread_count > 0) AS pending_count,
+          COUNT(*) FILTER (WHERE status IN ('closed','resolved') AND updated_at >= $1 AND updated_at <= $2) AS closed_count
         FROM conversations
       `, [start, end]),
 
       // 2. KPIs in date range
       query(`
         SELECT
-          COUNT(*)::int AS total_tickets,
-          COUNT(*)::int FILTER (WHERE status IN ('closed','resolved')) AS resolved_tickets,
-          COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (updated_at - created_at))/3600)
-            FILTER (WHERE status IN ('closed','resolved'))::numeric, 2), 0) AS avg_resolution_hours,
-          COUNT(*)::int FILTER (
+          COUNT(*) AS total_tickets,
+          COUNT(*) FILTER (WHERE status IN ('closed','resolved')) AS resolved_tickets,
+          COALESCE(ROUND((AVG(EXTRACT(EPOCH FROM (updated_at - created_at))/3600)
+            FILTER (WHERE status IN ('closed','resolved')))::numeric, 2), 0) AS avg_resolution_hours,
+          COUNT(*) FILTER (
             WHERE status IN ('closed','resolved')
             AND EXTRACT(EPOCH FROM (updated_at - created_at)) < 86400
           ) AS within_sla_count
@@ -123,9 +123,9 @@ export default async function statsRoutes(fastify) {
         SELECT
           to_char(DATE_TRUNC('${truncUnit}', created_at), ${periodFormat}) AS period,
           DATE_TRUNC('${truncUnit}', created_at) AS sort_key,
-          COUNT(*)::int AS created,
-          COUNT(*)::int FILTER (WHERE status IN ('closed','resolved')) AS resolved,
-          COUNT(*)::int FILTER (WHERE status = 'open' AND unread_count > 0) AS pending
+          COUNT(*) AS created,
+          COUNT(*) FILTER (WHERE status IN ('closed','resolved')) AS resolved,
+          COUNT(*) FILTER (WHERE status = 'open' AND unread_count > 0) AS pending
         FROM conversations
         WHERE created_at >= $1 AND created_at <= $2 ${connCond} ${agentCond}
         GROUP BY period, sort_key ORDER BY sort_key
@@ -157,8 +157,8 @@ export default async function statsRoutes(fastify) {
           COALESCE(p.full_name, p.email, 'Agente') AS name,
           COALESCE(p.email, '') AS email,
           COALESCE(p.status, 'offline') AS status,
-          COUNT(c.id)::int AS total,
-          COUNT(c.id)::int FILTER (WHERE c.status IN ('closed','resolved')) AS resolved,
+          COUNT(c.id) AS total,
+          COUNT(c.id) FILTER (WHERE c.status IN ('closed','resolved')) AS resolved,
           COALESCE(ar.avg_resp_mins, 0)::float AS avg_response_minutes
         FROM profiles p
         LEFT JOIN conversations c ON c.assigned_to = p.id
@@ -191,8 +191,8 @@ export default async function statsRoutes(fastify) {
       query(`
         WITH msg_stats AS (
           SELECT c.instance_name,
-            COUNT(*) FILTER (WHERE m.from_me = true)::int AS sent,
-            COUNT(*) FILTER (WHERE m.from_me = false)::int AS received
+            COUNT(*) FILTER (WHERE m.from_me = true) AS sent,
+            COUNT(*) FILTER (WHERE m.from_me = false) AS received
           FROM messages m
           JOIN conversations c ON c.id = m.conversation_id
           WHERE m.created_at >= $1 AND m.created_at <= $2
@@ -200,8 +200,8 @@ export default async function statsRoutes(fastify) {
         ),
         conv_stats AS (
           SELECT instance_name,
-            COUNT(*) FILTER (WHERE created_at >= $1 AND created_at <= $2)::int AS created,
-            COUNT(*) FILTER (WHERE status IN ('closed','resolved') AND updated_at >= $1 AND updated_at <= $2)::int AS resolved
+            COUNT(*) FILTER (WHERE created_at >= $1 AND created_at <= $2) AS created,
+            COUNT(*) FILTER (WHERE status IN ('closed','resolved') AND updated_at >= $1 AND updated_at <= $2) AS resolved
           FROM conversations GROUP BY instance_name
         )
         SELECT
@@ -221,8 +221,8 @@ export default async function statsRoutes(fastify) {
       // 10. Total sent/received messages in period
       query(`
         SELECT
-          COUNT(*)::int FILTER (WHERE from_me = true) AS sent,
-          COUNT(*)::int FILTER (WHERE from_me = false) AS received
+          COUNT(*) FILTER (WHERE from_me = true) AS sent,
+          COUNT(*) FILTER (WHERE from_me = false) AS received
         FROM messages WHERE created_at >= $1 AND created_at <= $2
       `, [start, end]),
 
@@ -313,9 +313,9 @@ export default async function statsRoutes(fastify) {
       const [prevKpisRes, prevAvgRes] = await Promise.all([
         query(`
           SELECT
-            COUNT(*)::int AS total_tickets,
-            COUNT(*)::int FILTER (WHERE status IN ('closed','resolved')) AS resolved_tickets,
-            COUNT(*)::int FILTER (
+            COUNT(*) AS total_tickets,
+            COUNT(*) FILTER (WHERE status IN ('closed','resolved')) AS resolved_tickets,
+            COUNT(*) FILTER (
               WHERE status IN ('closed','resolved')
               AND EXTRACT(EPOCH FROM (updated_at - created_at)) < 86400
             ) AS within_sla_count
