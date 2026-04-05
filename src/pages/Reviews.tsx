@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -75,8 +75,8 @@ const Reviews = () => {
     setLoading(true);
     try {
       const [reviewsRes, contactsRes] = await Promise.all([
-        supabase.from("reviews").select("*").order("created_at", { ascending: false }),
-        supabase.from("contacts").select("id, name, phone").order("name"),
+        db.from("reviews").select("*").order("created_at", { ascending: false }),
+        db.from("contacts").select("id, name, phone").order("name"),
       ]);
 
       const contactMap = new Map<string, Contact>();
@@ -168,7 +168,7 @@ const Reviews = () => {
     if (!selectedContact) { toast.error("Selecione um contato"); return; }
     setSending(true);
     try {
-      const { error } = await supabase.from("reviews").insert({
+      const { error } = await db.from("reviews").insert({
         contact_id: selectedContact.id,
         sent_at: new Date().toISOString(),
       });

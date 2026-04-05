@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Send, Play, Mail, CheckCircle, Eye, AlertTriangle, Plus, Search, RefreshCw, FileText, Clock, XCircle, Download, Info, Loader2, Pause, Users, Tag, BookOpen, Clipboard, Pencil, Trash2, BarChart3 } from "lucide-react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -131,7 +131,7 @@ const Campaigns = () => {
 
   const fetchCampaigns = async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data } = await db
       .from("campaigns")
       .select("*")
       .order("created_at", { ascending: false });
@@ -155,7 +155,7 @@ const Campaigns = () => {
 
   const fetchTemplates = async () => {
     setTemplatesLoading(true);
-    const { data } = await supabase
+    const { data } = await db
       .from("message_templates")
       .select("*")
       .order("created_at", { ascending: false });
@@ -177,7 +177,7 @@ const Campaigns = () => {
     setReportData([]);
     setReportSearch("");
     setReportPage(0);
-    const { data } = await supabase
+    const { data } = await db
       .from("campaign_contacts")
       .select("*, contacts(name)")
       .eq("campaign_id", campaignId)
@@ -278,7 +278,7 @@ const Campaigns = () => {
 
   const handleCreateCampaign = async () => {
     if (!formName.trim() || !formMessage.trim() || !user) return;
-    const { error } = await supabase.from("campaigns").insert({
+    const { error } = await db.from("campaigns").insert({
       user_id: user.id,
       name: formName.trim(),
       description: formDesc.trim() || null,
@@ -301,7 +301,7 @@ const Campaigns = () => {
   // ── Load contacts for selection dialog ──
   const loadContacts = async () => {
     setContactsLoading(true);
-    const { data } = await supabase
+    const { data } = await db
       .from("contacts")
       .select("id, name, phone, tags")
       .limit(200);
@@ -361,9 +361,9 @@ const Campaigns = () => {
     const campaignName = campaigns.find((c) => c.id === campaignId)?.name || campaignId;
     logAudit("send_campaign", "campaign", campaignId, campaignName, { contactCount: contactIds.length });
 
-    await supabase.from("campaigns").update({ status: "running" }).eq("id", campaignId);
+    await db.from("campaigns").update({ status: "running" }).eq("id", campaignId);
 
-    const { data: campData } = await supabase
+    const { data: campData } = await db
       .from("campaigns")
       .select("message_template, send_speed")
       .eq("id", campaignId)
@@ -372,7 +372,7 @@ const Campaigns = () => {
     if (!campData?.message_template) {
       toast.error("Campanha sem mensagem configurada");
       setExecutingCampaign(null);
-      await supabase.from("campaigns").update({ status: "paused" }).eq("id", campaignId);
+      await db.from("campaigns").update({ status: "paused" }).eq("id", campaignId);
       return;
     }
 
@@ -380,7 +380,7 @@ const Campaigns = () => {
     const sendSpeed: number = campData.send_speed || 20;
     const delayMs = Math.max(1000, Math.round(60000 / sendSpeed));
 
-    const { data: connData } = await supabase
+    const { data: connData } = await db
       .from("evolution_connections")
       .select("instance_name")
       .limit(1)
@@ -389,13 +389,13 @@ const Campaigns = () => {
     if (!connData?.instance_name) {
       toast.error("Nenhuma conexão Evolution API disponível");
       setExecutingCampaign(null);
-      await supabase.from("campaigns").update({ status: "paused" }).eq("id", campaignId);
+      await db.from("campaigns").update({ status: "paused" }).eq("id", campaignId);
       return;
     }
 
     const instanceName: string = connData.instance_name;
 
-    const { data: contactsData } = await supabase
+    const { data: contactsData } = await db
       .from("contacts")
       .select("id, name, phone")
       .in("id", contactIds);
@@ -426,7 +426,7 @@ const Campaigns = () => {
         errorMessage = err instanceof Error ? err.message : "Erro desconhecido";
       }
 
-      await supabase.from("campaign_contacts").insert({
+      await db.from("campaign_contacts").insert({
         campaign_id: campaignId,
         contact_id: contact.id,
         contact_phone: contact.phone,
@@ -437,7 +437,7 @@ const Campaigns = () => {
       });
 
       if (sentCount % 5 === 0 || sentCount === toSend.length) {
-        await supabase
+        await db
           .from("campaigns")
           .update({
             total_sent: sentCount,
@@ -456,7 +456,7 @@ const Campaigns = () => {
     }
 
     const finalStatus = abortRef.current ? "paused" : "completed";
-    await supabase
+    await db
       .from("campaigns")
       .update({
         status: finalStatus,
@@ -518,14 +518,14 @@ const Campaigns = () => {
     };
 
     if (editingTemplate) {
-      const { error } = await supabase
+      const { error } = await db
         .from("message_templates")
         .update(payload)
         .eq("id", editingTemplate.id);
       if (error) { toast.error("Erro ao salvar template"); setTplSaving(false); return; }
       toast.success("Template atualizado!");
     } else {
-      const { error } = await supabase.from("message_templates").insert(payload);
+      const { error } = await db.from("message_templates").insert(payload);
       if (error) { toast.error("Erro ao criar template"); setTplSaving(false); return; }
       toast.success("Template criado!");
     }
@@ -536,7 +536,7 @@ const Campaigns = () => {
   };
 
   const handleDeleteTemplate = async (id: string) => {
-    const { error } = await supabase.from("message_templates").delete().eq("id", id);
+    const { error } = await db.from("message_templates").delete().eq("id", id);
     if (error) { toast.error("Erro ao excluir template"); return; }
     toast.success("Template excluído");
     fetchTemplates();

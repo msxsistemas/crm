@@ -14,7 +14,6 @@ import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
-import { createServer } from 'http';
 import { setupSocket } from './socket.js';
 import { authenticate } from './auth.js';
 import { pool } from './database.js';
@@ -35,6 +34,9 @@ import distributionRoutes from './routes/distribution.js';
 import engagementRoutes from './routes/engagement.js';
 import misc3Routes from './routes/misc3.js';
 import taskRoutes from './routes/tasks.js';
+import blacklistRoutes from './routes/blacklist.js';
+import reviewRoutes from './routes/reviews.js';
+import proposalRoutes from './routes/proposals.js';
 import internalChatRoutes from './routes/internal-chat.js';
 import metaWhatsAppRoutes from './routes/meta-whatsapp.js';
 import { startMessageWorker } from './jobs/messageQueue.js';
@@ -143,6 +145,9 @@ await fastify.register(distributionRoutes);
 await fastify.register(engagementRoutes);
 await fastify.register(misc3Routes);
 await fastify.register(taskRoutes);
+await fastify.register(blacklistRoutes);
+await fastify.register(reviewRoutes);
+await fastify.register(proposalRoutes);
 await fastify.register(internalChatRoutes);
 await fastify.register(metaWhatsAppRoutes);
 
@@ -160,9 +165,8 @@ fastify.setErrorHandler((err, req, reply) => {
   reply.status(err.statusCode || 500).send({ error: err.message || 'Erro interno' });
 });
 
-// Create HTTP server + Socket.io
-const httpServer = createServer(fastify.server);
-const io = setupSocket(httpServer);
+// Attach Socket.io directly to Fastify's underlying HTTP server
+const io = setupSocket(fastify.server);
 
 // Make io available in routes
 fastify.decorate('io', io);

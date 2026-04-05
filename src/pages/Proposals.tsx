@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/table";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -119,9 +119,9 @@ const Proposals = () => {
     setLoading(true);
     try {
       const [propRes, contRes, prodRes] = await Promise.all([
-        supabase.from("proposals").select("*").order("created_at", { ascending: false }),
-        supabase.from("contacts").select("id, name, phone"),
-        supabase.from("products").select("id, name, price, description").eq("active", true),
+        db.from("proposals").select("*").order("created_at", { ascending: false }),
+        db.from("contacts").select("id, name, phone"),
+        db.from("products").select("id, name, price, description").eq("active", true),
       ]);
 
       const rawProposals = (propRes.data || []) as Proposal[];
@@ -253,11 +253,11 @@ const Proposals = () => {
       };
 
       if (editingProposal) {
-        const { error } = await supabase.from("proposals").update(payload).eq("id", editingProposal.id);
+        const { error } = await db.from("proposals").update(payload).eq("id", editingProposal.id);
         if (error) throw error;
         toast.success("Proposta atualizada!");
       } else {
-        const { error } = await supabase.from("proposals").insert(payload);
+        const { error } = await db.from("proposals").insert(payload);
         if (error) throw error;
         toast.success("Proposta criada!");
       }
@@ -274,7 +274,7 @@ const Proposals = () => {
 
   const handleDelete = async (id: string) => {
     if (!confirm("Excluir esta proposta?")) return;
-    const { error } = await supabase.from("proposals").delete().eq("id", id);
+    const { error } = await db.from("proposals").delete().eq("id", id);
     if (error) { toast.error("Erro ao excluir"); return; }
     toast.success("Proposta excluída");
     setProposals(prev => prev.filter(p => p.id !== id));

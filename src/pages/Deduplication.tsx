@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -54,7 +54,7 @@ function detectReason(group: ContactRow[]): DuplicateGroup["reason"] {
 }
 
 async function findDuplicates(): Promise<DuplicateGroup[]> {
-  const { data: contacts } = await supabase
+  const { data: contacts } = await db
     .from("contacts")
     .select("id, name, phone, email, custom_fields, lead_score, created_at")
     .order("created_at", { ascending: false });
@@ -62,7 +62,7 @@ async function findDuplicates(): Promise<DuplicateGroup[]> {
   if (!contacts || contacts.length === 0) return [];
 
   // Fetch conversation counts
-  const { data: convoCounts } = await supabase
+  const { data: convoCounts } = await db
     .from("conversations")
     .select("contact_id");
 
@@ -128,15 +128,15 @@ async function findDuplicates(): Promise<DuplicateGroup[]> {
 
 async function mergeContacts(primaryId: string, secondaryIds: string[]) {
   for (const secId of secondaryIds) {
-    await supabase
+    await db
       .from("conversations")
       .update({ contact_id: primaryId } as any)
       .eq("contact_id", secId);
-    await supabase
+    await db
       .from("campaign_contacts" as any)
       .update({ contact_id: primaryId })
       .eq("contact_id", secId);
-    await supabase
+    await db
       .from("opportunities" as any)
       .update({ contact_id: primaryId })
       .eq("contact_id", secId);
@@ -144,21 +144,21 @@ async function mergeContacts(primaryId: string, secondaryIds: string[]) {
 
   // Merge contact_tags (union)
   for (const secId of secondaryIds) {
-    const { data: secTags } = await supabase
+    const { data: secTags } = await db
       .from("contact_tags" as any)
       .select("tag_id")
       .eq("contact_id", secId);
 
     if (secTags && secTags.length > 0) {
       const rows = secTags.map((t: any) => ({ contact_id: primaryId, tag_id: t.tag_id }));
-      await supabase
+      await db
         .from("contact_tags" as any)
         .upsert(rows, { onConflict: "contact_id,tag_id", ignoreDuplicates: true });
     }
   }
 
   // Delete secondary contacts
-  await supabase.from("contacts").delete().in("id", secondaryIds);
+  await db.from("contacts").delete().in("id", secondaryIds);
   toast.success("Contatos mesclados com sucesso!");
 }
 

@@ -5,7 +5,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 
@@ -81,7 +81,7 @@ const KanbanOverview = () => {
     setLoading(true);
     try {
       // Load boards
-      const { data: boardsData, error: boardsErr } = await supabase
+      const { data: boardsData, error: boardsErr } = await db
         .from("kanban_boards" as any)
         .select("*")
         .eq("user_id", user.id)
@@ -99,8 +99,8 @@ const KanbanOverview = () => {
 
       // Load columns and cards in parallel
       const [colsRes, cardsRes] = await Promise.all([
-        supabase.from("kanban_columns" as any).select("*").in("board_id", boardIds).order("position"),
-        supabase.from("kanban_cards" as any).select("*").in("board_id", boardIds),
+        db.from("kanban_columns" as any).select("*").in("board_id", boardIds).order("position"),
+        db.from("kanban_cards" as any).select("*").in("board_id", boardIds),
       ]);
 
       const rawColumns: KanbanColumn[] = (colsRes.data || []) as KanbanColumn[];
@@ -110,7 +110,7 @@ const KanbanOverview = () => {
       const contactIds = [...new Set(rawCards.map(c => c.contact_id).filter(Boolean) as string[])];
       const cMap = new Map<string, string>();
       if (contactIds.length > 0) {
-        const { data: contactsData } = await supabase
+        const { data: contactsData } = await db
           .from("contacts")
           .select("id, name")
           .in("id", contactIds);

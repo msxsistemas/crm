@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import {
   Settings as SettingsIcon, User, Lock, Eye, EyeOff, Save, Tag, Search, Plus,
   Building2, Zap, CheckCircle, Clock, Users2, X, Info, Pencil,
@@ -19,6 +19,18 @@ import api from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { Loader2 as TabLoader } from "lucide-react";
+
+// Heavy tabs are lazy-loaded for better bundle splitting
+const WebhooksTabLazy = lazy(() => import('./settings/WebhooksTab'));
+const ApiTokensTabLazy = lazy(() => import('./settings/ApiTokensTab'));
+const LeadScoringTabLazy = lazy(() => import('./settings/LeadScoringTab'));
+
+const TabFallback = () => (
+  <div className="flex items-center justify-center py-12">
+    <TabLoader className="h-6 w-6 animate-spin text-muted-foreground" />
+  </div>
+);
 
 // ─── Color palette for tags/categories ───
 const colorPalette = [
@@ -2252,9 +2264,9 @@ const Settings = () => {
           <TabsContent value="respostas"><RespostasRapidasTab /></TabsContent>
           <TabsContent value="horarios"><HorariosTab /></TabsContent>
           <TabsContent value="distribuicao"><DistribuicaoTab /></TabsContent>
-          <TabsContent value="webhooks"><WebhooksTab /></TabsContent>
-          <TabsContent value="api"><ApiTokensTab /></TabsContent>
-          <TabsContent value="lead_scoring"><LeadScoringTab /></TabsContent>
+          <TabsContent value="webhooks"><Suspense fallback={<TabFallback />}><WebhooksTabLazy /></Suspense></TabsContent>
+          <TabsContent value="api"><Suspense fallback={<TabFallback />}><ApiTokensTabLazy /></Suspense></TabsContent>
+          <TabsContent value="lead_scoring"><Suspense fallback={<TabFallback />}><LeadScoringTabLazy /></Suspense></TabsContent>
           <TabsContent value="aniversarios"><BirthdayAutoTab /></TabsContent>
           <TabsContent value="pix"><PixConfigTab /></TabsContent>
         </Tabs>

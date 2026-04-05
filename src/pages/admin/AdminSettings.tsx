@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatPhoneBR } from "@/lib/phone-mask";
 import { usePlatformName } from "@/hooks/usePlatformName";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,8 +79,8 @@ const AdminSettings = () => {
   const loadData = async () => {
     setLoading(true);
     const [settingsRes, logsRes] = await Promise.all([
-      supabase.from("system_settings" as any).select("key, value"),
-      supabase.from("user_activity_logs").select("*").order("created_at", { ascending: false }).limit(50),
+      db.from("system_settings" as any).select("key, value"),
+      db.from("user_activity_logs").select("*").order("created_at", { ascending: false }).limit(50),
     ]);
 
     if (settingsRes.data) {
@@ -121,7 +121,7 @@ const AdminSettings = () => {
     // Upsert each setting
     let hasError = false;
     for (const entry of entries) {
-      const { error } = await (supabase as any)
+      const { error } = await (db as any)
         .from("system_settings")
         .upsert(entry, { onConflict: "key" });
       if (error) {

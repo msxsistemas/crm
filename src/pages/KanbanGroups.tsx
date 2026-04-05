@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
@@ -122,7 +122,7 @@ const KanbanGroups = () => {
     setLoading(true);
     try {
       // 1. Load kanban cards with column info via join
-      const { data: cardsData, error: cardsError } = await supabase
+      const { data: cardsData, error: cardsError } = await db
         .from("kanban_cards")
         .select(`
           id,
@@ -168,7 +168,7 @@ const KanbanGroups = () => {
       const contactIds = [...new Set(cards.map(c => c.contact_id).filter(Boolean))] as string[];
       let contactMap: Record<string, ContactRaw> = {};
       if (contactIds.length > 0) {
-        const { data: cData } = await supabase
+        const { data: cData } = await db
           .from("contacts")
           .select("id, name, phone")
           .in("id", contactIds);
@@ -180,7 +180,7 @@ const KanbanGroups = () => {
       // 3. Load conversations
       let convMap: Record<string, ConversationRaw> = {};
       if (contactIds.length > 0) {
-        const { data: convData } = await supabase
+        const { data: convData } = await db
           .from("conversations")
           .select("id, contact_id, status, instance_name, assigned_to, last_message_at")
           .in("contact_id", contactIds)
@@ -199,7 +199,7 @@ const KanbanGroups = () => {
       )] as string[];
       let profileMap: Record<string, string> = {};
       if (assignedIds.length > 0) {
-        const { data: profData } = await supabase
+        const { data: profData } = await db
           .from("profiles")
           .select("id, full_name")
           .in("id", assignedIds);
@@ -213,7 +213,7 @@ const KanbanGroups = () => {
       // 5. Load tags (only when groupBy=tag)
       let contactTagsMap: Record<string, string[]> = {};
       if (groupBy === "tag" && contactIds.length > 0) {
-        const { data: ctData } = await supabase
+        const { data: ctData } = await db
           .from("contact_tags")
           .select("contact_id, tag_id")
           .in("contact_id", contactIds);
@@ -221,7 +221,7 @@ const KanbanGroups = () => {
           const tagIds = [...new Set((ctData as ContactTagRaw[]).map(ct => ct.tag_id))];
           let tagNameMap: Record<string, string> = {};
           if (tagIds.length > 0) {
-            const { data: tData } = await supabase
+            const { data: tData } = await db
               .from("tags")
               .select("id, name, color")
               .in("id", tagIds);

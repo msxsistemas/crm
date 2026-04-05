@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -96,7 +96,7 @@ export default function ContactGroups() {
 
   const fetchGroups = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("contact_groups")
       .select("*")
       .order("created_at", { ascending: false });
@@ -108,7 +108,7 @@ export default function ContactGroups() {
     setActiveGroup(group);
     setMembersLoading(true);
     setMemberSearch("");
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("contact_group_members")
       .select("contact_id, contacts(id, name, phone, avatar_url)")
       .eq("group_id", group.id);
@@ -142,14 +142,14 @@ export default function ContactGroups() {
       icon: "users",
     };
     if (editingGroup) {
-      const { error } = await supabase
+      const { error } = await db
         .from("contact_groups")
         .update(payload)
         .eq("id", editingGroup.id);
       if (error) { toast.error("Erro ao atualizar grupo"); setSaving(false); return; }
       toast.success("Grupo atualizado!");
     } else {
-      const { error } = await supabase.from("contact_groups").insert({ ...payload, contact_count: 0 });
+      const { error } = await db.from("contact_groups").insert({ ...payload, contact_count: 0 });
       if (error) { toast.error("Erro ao criar grupo"); setSaving(false); return; }
       toast.success("Grupo criado!");
     }
@@ -166,7 +166,7 @@ export default function ContactGroups() {
   const handleDelete = async () => {
     if (!groupToDelete) return;
     setDeleting(true);
-    const { error } = await supabase.from("contact_groups").delete().eq("id", groupToDelete.id);
+    const { error } = await db.from("contact_groups").delete().eq("id", groupToDelete.id);
     setDeleting(false);
     if (error) { toast.error("Erro ao excluir grupo"); return; }
     toast.success("Grupo excluído");
@@ -177,7 +177,7 @@ export default function ContactGroups() {
 
   const handleRemoveMember = async (contactId: string) => {
     if (!activeGroup) return;
-    const { error } = await supabase
+    const { error } = await db
       .from("contact_group_members")
       .delete()
       .eq("group_id", activeGroup.id)
@@ -196,7 +196,7 @@ export default function ContactGroups() {
       prev ? { ...prev, contact_count: Math.max(0, prev.contact_count - 1) } : prev
     );
     // Sync count in DB
-    await supabase
+    await db
       .from("contact_groups")
       .update({ contact_count: Math.max(0, activeGroup.contact_count - 1) })
       .eq("id", activeGroup.id);
@@ -207,7 +207,7 @@ export default function ContactGroups() {
     setContactPickerSearch("");
     setAddContactsOpen(true);
     setLoadingContacts(true);
-    const { data } = await supabase
+    const { data } = await db
       .from("contacts")
       .select("id, name, phone, avatar_url")
       .order("name", { ascending: true });
@@ -242,7 +242,7 @@ export default function ContactGroups() {
       group_id: activeGroup.id,
       contact_id,
     }));
-    const { error } = await supabase
+    const { error } = await db
       .from("contact_group_members")
       .upsert(rows, { onConflict: "group_id,contact_id", ignoreDuplicates: true });
     setAddingContacts(false);
@@ -251,7 +251,7 @@ export default function ContactGroups() {
     setAddContactsOpen(false);
     // Update count
     const newCount = activeGroup.contact_count + selectedToAdd.size;
-    await supabase
+    await db
       .from("contact_groups")
       .update({ contact_count: newCount })
       .eq("id", activeGroup.id);

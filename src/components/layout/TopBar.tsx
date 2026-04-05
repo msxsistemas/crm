@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { usePlatformName } from "@/hooks/usePlatformName";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
+import { connectSocket, disconnectSocket, getSocket } from "@/lib/socket";
+import { useSocketEvent } from "@/hooks/useSocketEvent";
+import api from "@/lib/api";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -115,7 +118,7 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
   // Measure real latency with a lightweight ping
   const measureLatency = useCallback(async () => {
     const start = performance.now();
-    const { error } = await supabase.from("profiles").select("id", { count: "exact", head: true }).limit(1);
+    const { error } = await db.from("profiles").select("id", { count: "exact", head: true }).limit(1);
     const elapsed = Math.round(performance.now() - start);
     setLatencyMs(elapsed);
     setApiStatus(error ? 'disconnected' : 'connected');
@@ -142,7 +145,7 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
   const loadNotifications = useCallback(async () => {
     if (!user) return;
     setNotifLoading(true);
-    const { data } = await supabase
+    const { data } = await db
       .from("notifications")
       .select("*")
       .eq("user_id", user.id)
@@ -159,29 +162,19 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
     }
   }, [notifOpen, loadNotifications]);
 
-  // Realtime subscription for new notifications
-  useEffect(() => {
+  // Realtime subscription for new notifications via socket
+  useSocketEvent('notification:new', (data) => {
     if (!user) return;
-
-    const channel = supabase
-      .channel("topbar-notifications")
-      .on(
-        "postgres_changes" as any,
-        { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
-        (payload: { new: AppNotification }) => {
-          const newNotif = payload.new as AppNotification;
-          setNotifications(prev => [newNotif, ...prev]);
-        }
-      )
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
+    const newNotif = data as AppNotification;
+    // Only show notifications for this user (backend should already filter but guard here too)
+    if (!newNotif?.id) return;
+    setNotifications(prev => [newNotif, ...prev]);
   }, [user]);
 
   // Mark a single notification as read
   const markAsRead = useCallback(async (id: string) => {
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-    await supabase
+    await db
       .from("notifications")
       .update({ read: true } as any)
       .eq("id", id);
@@ -191,7 +184,7 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
   const markAllAsRead = useCallback(async () => {
     if (!user) return;
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    await supabase
+    await db
       .from("notifications")
       .update({ read: true } as any)
       .eq("user_id", user.id)
@@ -203,11 +196,11 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
     if (!user) return;
 
     const [profileRes, evoRes, cloudRes, unreadRes, waitingRes] = await Promise.all([
-      supabase.from("profiles").select("full_name, status").eq("id", user.id).maybeSingle(),
-      supabase.from("evolution_connections").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "open"),
-      supabase.from("whatsapp_cloud_connections").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "active"),
-      supabase.from("conversations").select("id", { count: "exact", head: true }).gt("unread_count", 0),
-      supabase.from("conversations").select("id", { count: "exact", head: true }).eq("status", "open"),
+      db.from("profiles").select("full_name, status").eq("id", user.id).maybeSingle(),
+      db.from("evolution_connections").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "open"),
+      db.from("whatsapp_cloud_connections").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "active"),
+      db.from("conversations").select("id", { count: "exact", head: true }).gt("unread_count", 0),
+      db.from("conversations").select("id", { count: "exact", head: true }).eq("status", "open"),
     ]);
 
     if (profileRes.data?.full_name) setFullName(profileRes.data.full_name);
@@ -238,7 +231,7 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
       );
       // Insert DB notification
       if (user) {
-        supabase.from("notifications").insert({
+        db.from("notifications").insert({
           user_id: user.id,
           type: "new_conversation",
           title: "Nova mensagem recebida",
@@ -257,22 +250,42 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
     prevWaitingRef.current = waitingConversations;
   }, [unreadConversations, waitingConversations, sendBrowserNotification, user]);
 
-  // Realtime unread updates + socket status detection
-  useEffect(() => {
-    const channel = supabase
-      .channel("topbar-unread")
-      .on("postgres_changes" as any, { event: "*", schema: "public", table: "conversations" }, () => {
-        fetchData();
-      })
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          setSocketStatus('connected');
-        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-          setSocketStatus('disconnected');
-        }
-      });
-    return () => { supabase.removeChannel(channel); };
+  // Realtime unread updates via socket
+  useSocketEvent('conversation:updated', () => {
+    fetchData();
   }, [fetchData]);
+
+  // Socket connection lifecycle — connect on mount, track status
+  useEffect(() => {
+    let mounted = true;
+
+    api.get<{ token: string }>('/auth/socket-token')
+      .then(({ token }) => {
+        if (mounted) connectSocket(token);
+      })
+      .catch(() => {
+        // If token endpoint fails, try connecting without auth (for backward compat)
+      });
+
+    const socket = getSocket();
+
+    const onConnect = () => setSocketStatus('connected');
+    const onDisconnect = () => setSocketStatus('disconnected');
+
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+
+    // Set initial status
+    if (socket.connected) setSocketStatus('connected');
+
+    return () => {
+      mounted = false;
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      disconnectSocket();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleStatusChange = async (newStatus: UserStatus) => {
     setIsChangingStatus(true);
@@ -282,11 +295,11 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
     try {
       // Persist to DB
       if (user) {
-        await supabase.from("profiles").update({ status: newStatus } as any).eq("id", user.id);
+        await db.from("profiles").update({ status: newStatus } as any).eq("id", user.id);
       }
 
       // Sync presence to WhatsApp (Evolution API)
-      const { data: evoConns } = await supabase
+      const { data: evoConns } = await db
         .from("evolution_connections")
         .select("instance_name")
         .eq("user_id", user?.id ?? "")
@@ -296,7 +309,7 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
         const presence = newStatus === "online" ? "available" : "unavailable";
         await Promise.all(
           evoConns.map((conn) =>
-            supabase.functions.invoke("evolution-api", {
+            db.functions.invoke("evolution-api", {
               body: { action: "set_presence", instanceName: conn.instance_name, data: { presence } },
             })
           )

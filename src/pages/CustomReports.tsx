@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -190,28 +190,28 @@ async function fetchMetricData(
   try {
     switch (metric.id) {
       case "total_conversations": {
-        const { count } = await supabase
+        const { count } = await db
           .from("conversations")
           .select("*", { count: "exact", head: true })
           .gte("created_at", sinceISO);
         return { metricId: metric.id, value: count ?? 0 };
       }
       case "open_conversations": {
-        const { count } = await supabase
+        const { count } = await db
           .from("conversations")
           .select("*", { count: "exact", head: true })
           .eq("status", "open");
         return { metricId: metric.id, value: count ?? 0 };
       }
       case "total_messages": {
-        const { count } = await supabase
+        const { count } = await db
           .from("messages")
           .select("*", { count: "exact", head: true })
           .gte("created_at", sinceISO);
         return { metricId: metric.id, value: count ?? 0 };
       }
       case "inbound_messages": {
-        const { count } = await supabase
+        const { count } = await db
           .from("messages")
           .select("*", { count: "exact", head: true })
           .eq("from_me", false)
@@ -219,14 +219,14 @@ async function fetchMetricData(
         return { metricId: metric.id, value: count ?? 0 };
       }
       case "new_contacts": {
-        const { count } = await supabase
+        const { count } = await db
           .from("contacts")
           .select("*", { count: "exact", head: true })
           .gte("created_at", sinceISO);
         return { metricId: metric.id, value: count ?? 0 };
       }
       case "total_revenue": {
-        const { data } = await supabase
+        const { data } = await db
           .from("opportunities")
           .select("value")
           .eq("stage", "won")
@@ -238,11 +238,11 @@ async function fetchMetricData(
         return { metricId: metric.id, value: sum };
       }
       case "conversion_rate": {
-        const { count: total } = await supabase
+        const { count: total } = await db
           .from("opportunities")
           .select("*", { count: "exact", head: true })
           .gte("created_at", sinceISO);
-        const { count: won } = await supabase
+        const { count: won } = await db
           .from("opportunities")
           .select("*", { count: "exact", head: true })
           .eq("stage", "won")
@@ -257,7 +257,7 @@ async function fetchMetricData(
         return { metricId: metric.id, value: "N/A" };
       }
       case "csat_average": {
-        const { data } = await supabase
+        const { data } = await db
           .from("reviews")
           .select("rating")
           .gte("created_at", sinceISO);
@@ -267,7 +267,7 @@ async function fetchMetricData(
         return { metricId: metric.id, value: Math.round(avg * 10) / 10 };
       }
       case "agent_performance": {
-        const { data } = await supabase
+        const { data } = await db
           .from("conversations")
           .select("assigned_to, profiles(name)")
           .gte("created_at", sinceISO)
@@ -287,7 +287,7 @@ async function fetchMetricData(
         return { metricId: metric.id, value: list as unknown as Array<Record<string, unknown>> };
       }
       case "top_contacts": {
-        const { data } = await supabase
+        const { data } = await db
           .from("messages")
           .select("conversation_id, conversations(contact_id, contacts(name, phone))")
           .eq("from_me", false)
@@ -308,7 +308,7 @@ async function fetchMetricData(
         return { metricId: metric.id, value: list as unknown as Array<Record<string, unknown>> };
       }
       case "conversations_by_day": {
-        const { data } = await supabase
+        const { data } = await db
           .from("conversations")
           .select("created_at")
           .gte("created_at", sinceISO);
@@ -609,7 +609,7 @@ export default function CustomReports() {
 
   const loadSavedReports = useCallback(async () => {
     setLoadingSaved(true);
-    const { data } = await supabase
+    const { data } = await db
       .from("custom_reports")
       .select("*")
       .order("created_at", { ascending: false });
@@ -714,7 +714,7 @@ export default function CustomReports() {
       return;
     }
     setSaving(true);
-    const { error } = await supabase.from("custom_reports").insert({
+    const { error } = await db.from("custom_reports").insert({
       name: reportName,
       layout: reportLayout,
     });
@@ -737,7 +737,7 @@ export default function CustomReports() {
 
   const handleDeleteSaved = async (id: string) => {
     if (!window.confirm("Excluir este relatório?")) return;
-    await supabase.from("custom_reports").delete().eq("id", id);
+    await db.from("custom_reports").delete().eq("id", id);
     setSavedReports((prev) => prev.filter((r) => r.id !== id));
     toast.success("Relatório excluído.");
   };

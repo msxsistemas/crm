@@ -25,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -264,7 +264,7 @@ const WebhookLogs = () => {
       const from = new Date();
       from.setDate(from.getDate() - daysNum);
 
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("webhook_logs" as never)
         .select("*")
         .gte("created_at", from.toISOString())

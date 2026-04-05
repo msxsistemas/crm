@@ -12,7 +12,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import {
   createInstance,
   getQRCode,
@@ -79,11 +79,11 @@ const Connections = () => {
   const fetchInstances = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await db.auth.getUser();
       if (!user) { setLoading(false); return; }
 
       // Load saved instances from DB only
-      const { data: dbInstances } = await supabase
+      const { data: dbInstances } = await db
         .from("evolution_connections" as any)
         .select("*")
         .eq("user_id", user.id);
@@ -108,7 +108,7 @@ const Connections = () => {
             const ownerJid = statusResult?.instance?.owner || "";
             const profilePicUrl = statusResult?.instance?.profilePictureUrl || "";
 
-            await supabase
+            await db
               .from("evolution_connections" as any)
               .update({
                 status,
@@ -131,7 +131,7 @@ const Connections = () => {
         .map((item: any) => item.instanceName as string);
 
       if (missingNames.length > 0) {
-        await supabase
+        await db
           .from("evolution_connections" as any)
           .delete()
           .eq("user_id", user.id)
@@ -177,11 +177,11 @@ const Connections = () => {
     }
     setCreating(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await db.auth.getUser();
       if (!user) { toast.error("Faça login primeiro"); setCreating(false); return; }
       
       // Save to DB first (upsert to avoid duplicate errors)
-      await supabase.from("evolution_connections" as any).upsert({
+      await db.from("evolution_connections" as any).upsert({
         user_id: user.id,
         instance_name: newName.trim(),
       } as any, { onConflict: "user_id,instance_name" });
@@ -214,9 +214,9 @@ const Connections = () => {
 
   const handleRemoveEvolution = async (instanceName: string) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await db.auth.getUser();
       if (!user) return;
-      await supabase.from("evolution_connections" as any).delete().eq("user_id", user.id).eq("instance_name", instanceName);
+      await db.from("evolution_connections" as any).delete().eq("user_id", user.id).eq("instance_name", instanceName);
       setInstances((prev) => prev.filter((i) => i.instanceName !== instanceName));
       toast.success("Instância removida");
     } catch {
@@ -233,9 +233,9 @@ const Connections = () => {
   const handleSaveEdit = async () => {
     if (!editName.trim()) return;
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await db.auth.getUser();
       if (!user) return;
-      await supabase.from("evolution_connections" as any).update({
+      await db.from("evolution_connections" as any).update({
         instance_name: editName.trim(),
         updated_at: new Date().toISOString(),
       } as any).eq("user_id", user.id).eq("instance_name", editOriginalName);
@@ -253,9 +253,9 @@ const Connections = () => {
       const result = await getInstanceStatus(instanceName);
 
       if (result?.notFound || result?.exists === false || result?.instance?.state === "not_found") {
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { user } } = await db.auth.getUser();
         if (user) {
-          await supabase
+          await db
             .from("evolution_connections" as any)
             .delete()
             .eq("user_id", user.id)
@@ -271,7 +271,7 @@ const Connections = () => {
       const ownerJid = result?.instance?.ownerJid || result?.ownerJid || null;
       
       // Update DB status + owner_jid
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await db.auth.getUser();
       if (user) {
         const updateData: any = { 
           status: isConnected ? "connected" : "disconnected", 
@@ -279,7 +279,7 @@ const Connections = () => {
         };
         if (ownerJid) updateData.owner_jid = ownerJid;
         
-        await supabase
+        await db
           .from("evolution_connections" as any)
           .update(updateData)
           .eq("user_id", user.id)
@@ -322,9 +322,9 @@ const Connections = () => {
       const result = await getQRCode(instanceName);
 
       if (result?.notFound || result?.exists === false) {
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { user } } = await db.auth.getUser();
         if (user) {
-          await supabase
+          await db
             .from("evolution_connections" as any)
             .delete()
             .eq("user_id", user.id)

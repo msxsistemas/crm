@@ -5,7 +5,7 @@ import { FloatingInput, FloatingTextarea, FloatingSelectWrapper } from "@/compon
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Users as UsersIcon, Pencil, X, ShieldCheck } from "lucide-react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 
 const MODULES = [
@@ -103,8 +103,8 @@ const UserFormDialog = ({ open, onOpenChange, editUserId, editUserEmail, onSaved
 
   const loadSelectData = async () => {
     const [deptRes, evoRes] = await Promise.all([
-      supabase.from("categories").select("id, name"),
-      supabase.from("evolution_connections").select("id, instance_name"),
+      db.from("categories").select("id, name"),
+      db.from("evolution_connections").select("id, instance_name"),
     ]);
     setDepartments((deptRes.data || []) as Department[]);
     const evoConns = (evoRes.data || []).map((c: any) => ({ id: c.id, label: c.instance_name, type: "Evolution" }));
@@ -113,8 +113,8 @@ const UserFormDialog = ({ open, onOpenChange, editUserId, editUserEmail, onSaved
 
   const loadUser = async (id: string) => {
     const [profileRes, roleRes] = await Promise.all([
-      supabase.from("profiles").select("*").eq("id", id).single(),
-      supabase.from("user_roles").select("role").eq("user_id", id),
+      db.from("profiles").select("*").eq("id", id).single(),
+      db.from("user_roles").select("role").eq("user_id", id),
     ]);
     const p = profileRes.data as any;
     const role = (roleRes.data as any)?.[0]?.role || "user";
@@ -185,14 +185,14 @@ const UserFormDialog = ({ open, onOpenChange, editUserId, editUserEmail, onSaved
       } as any;
 
       if (isEdit && editUserId) {
-        await supabase.from("profiles").update({ ...profileData, permissions }).eq("id", editUserId);
-        await supabase.from("user_roles").delete().eq("user_id", editUserId);
+        await db.from("profiles").update({ ...profileData, permissions }).eq("id", editUserId);
+        await db.from("user_roles").delete().eq("user_id", editUserId);
         if (form.role !== "user") {
-          await supabase.from("user_roles").insert({ user_id: editUserId, role: form.role } as any);
+          await db.from("user_roles").insert({ user_id: editUserId, role: form.role } as any);
         }
         toast.success("Usuário atualizado!");
       } else {
-        const { data, error } = await supabase.auth.signUp({
+        const { data, error } = await db.auth.signUp({
           email: form.email,
           password: form.password,
           options: { data: { full_name: form.full_name } },
@@ -202,9 +202,9 @@ const UserFormDialog = ({ open, onOpenChange, editUserId, editUserEmail, onSaved
         const newUserId = data.user?.id;
         if (newUserId) {
           setTimeout(async () => {
-            await supabase.from("profiles").update({ ...profileData, email: form.email }).eq("id", newUserId);
+            await db.from("profiles").update({ ...profileData, email: form.email }).eq("id", newUserId);
             if (form.role !== "user") {
-              await supabase.from("user_roles").insert({ user_id: newUserId, role: form.role } as any);
+              await db.from("user_roles").insert({ user_id: newUserId, role: form.role } as any);
             }
           }, 1000);
         }

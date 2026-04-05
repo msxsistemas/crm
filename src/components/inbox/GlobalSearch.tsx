@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Search, X, User, MessageSquare, Loader2 } from "lucide-react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { cn } from "@/lib/utils";
 
 interface GlobalSearchProps {
@@ -87,12 +87,12 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({
     setLoading(true);
     try {
       const [{ data: contactData }, { data: msgData }] = await Promise.all([
-        supabase
+        db
           .from("contacts")
           .select("id, name, phone")
           .or(`name.ilike.%${q}%,phone.ilike.%${q}%`)
           .limit(5),
-        supabase
+        db
           .from("messages")
           .select(
             "id, content, created_at, conversation_id, conversations(id, contact_id, contacts(name, phone))"
@@ -192,7 +192,7 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({
       onSelectConversation(item.data.conversation_id);
     } else {
       // Find conversation for this contact
-      const { data } = await supabase
+      const { data } = await db
         .from("conversations")
         .select("id")
         .eq("contact_id", item.data.id)

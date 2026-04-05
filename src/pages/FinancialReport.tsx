@@ -14,7 +14,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { format, startOfMonth, endOfMonth, subMonths, startOfQuarter, endOfQuarter, startOfYear, endOfYear, eachWeekOfInterval, eachMonthOfInterval, endOfWeek, startOfWeek } from "date-fns";
@@ -269,17 +269,17 @@ const FinancialReport = () => {
       const prevTo = subMonths(range.to, 1);
 
       const [oppsRes, prevOppsRes, propsRes] = await Promise.all([
-        supabase
+        db
           .from("opportunities")
           .select("id, title, value, status, created_at, assigned_to, contact_id")
           .gte("created_at", range.from.toISOString())
           .lte("created_at", range.to.toISOString()),
-        supabase
+        db
           .from("opportunities")
           .select("id, value, status, created_at, assigned_to")
           .gte("created_at", prevFrom.toISOString())
           .lte("created_at", prevTo.toISOString()),
-        supabase
+        db
           .from("proposals")
           .select("id, total, status, created_at")
           .gte("created_at", range.from.toISOString())
@@ -292,7 +292,7 @@ const FinancialReport = () => {
       const contactIds = [...new Set(rawOpps.map((o) => o.contact_id).filter(Boolean))];
       let contactMap: Record<string, string> = {};
       if (contactIds.length > 0) {
-        const { data: contacts } = await supabase
+        const { data: contacts } = await db
           .from("contacts")
           .select("id, name")
           .in("id", contactIds);
@@ -305,7 +305,7 @@ const FinancialReport = () => {
       const agentIds = [...new Set(rawOpps.map((o) => o.assigned_to).filter(Boolean))];
       let agentMap: Record<string, string> = {};
       if (agentIds.length > 0) {
-        const { data: profiles } = await supabase
+        const { data: profiles } = await db
           .from("profiles")
           .select("id, full_name")
           .in("id", agentIds);

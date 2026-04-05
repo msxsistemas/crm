@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 
 interface QuickReply {
@@ -72,7 +72,7 @@ const QuickReplies = () => {
 
   const fetchReplies = async () => {
     if (!user) return;
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("quick_replies")
       .select("*")
       .order("created_at", { ascending: true });
@@ -122,7 +122,7 @@ const QuickReplies = () => {
     if (!user) return;
 
     if (editingReply) {
-      const { error } = await supabase
+      const { error } = await db
         .from("quick_replies")
         .update({
           shortcut: shortcut.trim(),
@@ -135,7 +135,7 @@ const QuickReplies = () => {
       if (error) { toast.error("Erro ao atualizar"); return; }
       toast.success("Resposta rápida atualizada!");
     } else {
-      const { error } = await supabase
+      const { error } = await db
         .from("quick_replies")
         .insert({
           user_id: user.id,
@@ -155,7 +155,7 @@ const QuickReplies = () => {
 
   const handleDelete = async () => {
     if (!deleteId) return;
-    const { error } = await supabase.from("quick_replies").delete().eq("id", deleteId);
+    const { error } = await db.from("quick_replies").delete().eq("id", deleteId);
     if (error) { toast.error("Erro ao excluir"); return; }
     toast.success("Resposta rápida removida!");
     setDeleteId(null);

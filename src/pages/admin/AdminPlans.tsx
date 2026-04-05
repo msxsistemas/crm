@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +30,7 @@ const AdminPlans = () => {
 
   const loadPlans = async () => {
     setLoading(true);
-    const { data } = await supabase.from("reseller_plans").select("*").order("price");
+    const { data } = await db.from("reseller_plans").select("*").order("price");
     setPlans((data as any[]) || []);
     setLoading(false);
   };
@@ -38,11 +38,11 @@ const AdminPlans = () => {
   const savePlan = async () => {
     if (!form.name) return toast.error("Nome obrigatório");
     if (editing) {
-      const { error } = await supabase.from("reseller_plans").update({ ...form, updated_at: new Date().toISOString() } as any).eq("id", editing.id);
+      const { error } = await db.from("reseller_plans").update({ ...form, updated_at: new Date().toISOString() } as any).eq("id", editing.id);
       if (error) return toast.error(error.message);
       toast.success("Plano atualizado!");
     } else {
-      const { error } = await supabase.from("reseller_plans").insert(form as any);
+      const { error } = await db.from("reseller_plans").insert(form as any);
       if (error) return toast.error(error.message);
       toast.success("Plano criado!");
     }
@@ -53,7 +53,7 @@ const AdminPlans = () => {
   };
 
   const deletePlan = async (id: string) => {
-    const { error } = await supabase.from("reseller_plans").delete().eq("id", id);
+    const { error } = await db.from("reseller_plans").delete().eq("id", id);
     if (error) return toast.error(error.message);
     toast.success("Plano removido!");
     loadPlans();

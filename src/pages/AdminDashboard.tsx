@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Card, CardContent } from "@/components/ui/card";
 import { Users, TrendingUp, Package, CreditCard, Smartphone, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -14,11 +14,11 @@ const AdminDashboard = () => {
   useEffect(() => {
     const load = async () => {
       const [r, p, t, evo, prof] = await Promise.all([
-        supabase.from("reseller_accounts").select("id, is_active, created_at"),
-        supabase.from("reseller_plans").select("id"),
-        supabase.from("reseller_transactions").select("amount, status, created_at"),
-        supabase.from("evolution_connections").select("id"),
-        supabase.from("profiles").select("id, created_at"),
+        db.from("reseller_accounts").select("id, is_active, created_at"),
+        db.from("reseller_plans").select("id"),
+        db.from("reseller_transactions").select("amount, status, created_at"),
+        db.from("evolution_connections").select("id"),
+        db.from("profiles").select("id, created_at"),
       ]);
 
       const resellers = (r.data as any[]) || [];

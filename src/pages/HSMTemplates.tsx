@@ -19,7 +19,7 @@ import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -414,9 +414,9 @@ function TemplateDialog({
 
     let error;
     if (template) {
-      ({ error } = await supabase.from("hsm_templates").update(payload).eq("id", template.id));
+      ({ error } = await db.from("hsm_templates").update(payload).eq("id", template.id));
     } else {
-      ({ error } = await supabase.from("hsm_templates").insert({ ...payload, status: "pending" }));
+      ({ error } = await db.from("hsm_templates").insert({ ...payload, status: "pending" }));
     }
 
     setSaving(false);
@@ -746,7 +746,7 @@ const HSMTemplates = () => {
 
   const fetchTemplates = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("hsm_templates")
       .select("*")
       .order("created_at", { ascending: false });
@@ -788,7 +788,7 @@ const HSMTemplates = () => {
   };
 
   const handleDuplicate = async (tpl: HSMTemplate) => {
-    const { error } = await supabase.from("hsm_templates").insert({
+    const { error } = await db.from("hsm_templates").insert({
       name: tpl.name + "_copia",
       category: tpl.category,
       language: tpl.language,
@@ -807,7 +807,7 @@ const HSMTemplates = () => {
 
   const handleDelete = async (id: string) => {
     setDeletingId(id);
-    const { error } = await supabase.from("hsm_templates").delete().eq("id", id);
+    const { error } = await db.from("hsm_templates").delete().eq("id", id);
     setDeletingId(null);
     if (error) { toast.error("Erro ao excluir template"); return; }
     toast.success("Template excluído!");

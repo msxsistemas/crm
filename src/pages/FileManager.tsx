@@ -6,7 +6,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { format } from "date-fns";
@@ -81,7 +81,7 @@ const FileManager = () => {
     if (!user) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase.storage
+      const { data, error } = await db.storage
         .from(BUCKET)
         .list(user.id + "/", {
           limit: 200,
@@ -94,7 +94,7 @@ const FileManager = () => {
         .filter((f) => f.name !== ".emptyFolderPlaceholder")
         .map((f) => {
           const path = `${user.id}/${f.name}`;
-          const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path);
+          const { data: urlData } = db.storage.from(BUCKET).getPublicUrl(path);
           return {
             ...f,
             path,
@@ -122,7 +122,7 @@ const FileManager = () => {
 
     for (const file of filesArray) {
       const path = `${user.id}/${Date.now()}_${file.name}`;
-      const { error } = await supabase.storage
+      const { error } = await db.storage
         .from(BUCKET)
         .upload(path, file, { upsert: true });
       if (error) {
@@ -149,7 +149,7 @@ const FileManager = () => {
     if (!deleteConfirm) return;
     setDeleting(true);
     try {
-      const { error } = await supabase.storage.from(BUCKET).remove([deleteConfirm.path]);
+      const { error } = await db.storage.from(BUCKET).remove([deleteConfirm.path]);
       if (error) throw error;
       toast.success("Arquivo excluído");
       setDeleteConfirm(null);

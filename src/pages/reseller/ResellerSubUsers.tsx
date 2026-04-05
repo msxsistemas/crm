@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,13 +18,13 @@ const ResellerSubUsers = () => {
 
   const loadSubUsers = async () => {
     setLoading(true);
-    const { data } = await supabase.from("reseller_sub_users").select("*").eq("reseller_id", user!.id);
+    const { data } = await db.from("reseller_sub_users").select("*").eq("reseller_id", user!.id);
     setSubUsers(data || []);
     setLoading(false);
   };
 
   const toggleUser = async (id: string, is_active: boolean) => {
-    await supabase.from("reseller_sub_users").update({ is_active }).eq("id", id);
+    await db.from("reseller_sub_users").update({ is_active }).eq("id", id);
     toast.success(is_active ? "Usuário ativado" : "Usuário desativado");
     loadSubUsers();
   };

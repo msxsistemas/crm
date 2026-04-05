@@ -14,7 +14,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -126,7 +126,7 @@ const WhatsAppStatusPage = () => {
   // ── Load connections ────────────────────────────────────────────────────────
 
   useEffect(() => {
-    supabase
+    db
       .from("evolution_connections" as never)
       .select("instance_name")
       .then(({ data }) => {
@@ -144,7 +144,7 @@ const WhatsAppStatusPage = () => {
     if (!selectedInstance) return;
     setLoadingStatuses(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("whatsapp_statuses" as never)
         .select("*")
         .eq("instance_name", selectedInstance)
@@ -186,7 +186,7 @@ const WhatsAppStatusPage = () => {
       if (activeTab === "text") {
         if (!textContent.trim()) { toast.error("Digite o texto do status"); return; }
 
-        await supabase.functions.invoke("evolution-api", {
+        await db.functions.invoke("evolution-api", {
           body: {
             action: "send_status",
             instanceName: selectedInstance,
@@ -198,7 +198,7 @@ const WhatsAppStatusPage = () => {
           },
         });
 
-        await supabase.from("whatsapp_statuses" as never).insert({
+        await db.from("whatsapp_statuses" as never).insert({
           instance_name: selectedInstance,
           type: "text",
           content: textContent,
@@ -212,7 +212,7 @@ const WhatsAppStatusPage = () => {
         if (!imageFile) { toast.error("Selecione uma imagem"); return; }
         const base64 = await toBase64(imageFile);
 
-        await supabase.functions.invoke("evolution-api", {
+        await db.functions.invoke("evolution-api", {
           body: {
             action: "send_status",
             instanceName: selectedInstance,
@@ -224,7 +224,7 @@ const WhatsAppStatusPage = () => {
           },
         });
 
-        await supabase.from("whatsapp_statuses" as never).insert({
+        await db.from("whatsapp_statuses" as never).insert({
           instance_name: selectedInstance,
           type: "image",
           content: imageFile.name,
@@ -238,7 +238,7 @@ const WhatsAppStatusPage = () => {
         if (!videoFile) { toast.error("Selecione um vídeo"); return; }
         const base64 = await toBase64(videoFile);
 
-        await supabase.functions.invoke("evolution-api", {
+        await db.functions.invoke("evolution-api", {
           body: {
             action: "send_status",
             instanceName: selectedInstance,
@@ -250,7 +250,7 @@ const WhatsAppStatusPage = () => {
           },
         });
 
-        await supabase.from("whatsapp_statuses" as never).insert({
+        await db.from("whatsapp_statuses" as never).insert({
           instance_name: selectedInstance,
           type: "video",
           content: videoFile.name,

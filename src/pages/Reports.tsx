@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -501,8 +501,8 @@ const Reports = () => {
 
   const loadMeta = useCallback(async () => {
     const [connRes, profileRes] = await Promise.all([
-      supabase.from("connections" as never).select("id, name").limit(100),
-      supabase.from("profiles").select("id, full_name").limit(100),
+      db.from("connections" as never).select("id, name").limit(100),
+      db.from("profiles").select("id, full_name").limit(100),
     ]);
     setConnections(((connRes.data as Connection[]) ?? []).filter((c) => c.name));
     setAgents((profileRes.data as Profile[]) ?? []);
@@ -515,7 +515,7 @@ const Reports = () => {
       const from = getDateFrom(daysNum);
 
       // Build query base
-      let query = supabase
+      let query = db
         .from("conversations" as never)
         .select("id, status, created_at, resolved_at, assigned_to, connection_id, csat_rating")
         .gte("created_at", from)

@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { useUserRole } from "@/hooks/useUserRole";
 import { toast } from "sonner";
@@ -136,7 +136,7 @@ const AgentScheduleEditor = ({ agent, initialSchedule, onSaved }: AgentScheduleE
 
   const handleSave = async () => {
     setSaving(true);
-    const { error } = await supabase
+    const { error } = await db
       .from("agent_schedules" as any)
       .upsert({
         ...schedule,
@@ -263,8 +263,8 @@ const AgentSchedulesPage = () => {
     setLoading(true);
     if (isAdmin) {
       const [profilesRes, schedulesRes] = await Promise.all([
-        supabase.from("profiles").select("id, full_name, email"),
-        supabase.from("agent_schedules" as any).select("*"),
+        db.from("profiles").select("id, full_name, email"),
+        db.from("agent_schedules" as any).select("*"),
       ]);
 
       if (profilesRes.data) {
@@ -279,8 +279,8 @@ const AgentSchedulesPage = () => {
       }
     } else if (user) {
       const [profileRes, scheduleRes] = await Promise.all([
-        supabase.from("profiles").select("id, full_name, email").eq("id", user.id).single(),
-        supabase.from("agent_schedules" as any).select("*").eq("agent_id", user.id).maybeSingle(),
+        db.from("profiles").select("id, full_name, email").eq("id", user.id).single(),
+        db.from("agent_schedules" as any).select("*").eq("agent_id", user.id).maybeSingle(),
       ]);
       if (profileRes.data) {
         setAgents([profileRes.data as AgentProfile]);

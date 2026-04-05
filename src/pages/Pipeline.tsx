@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { FloatingInput, FloatingTextarea, FloatingSelectWrapper } from "@/components/ui/floating-input";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 
@@ -126,9 +126,9 @@ const Pipeline = () => {
   const loadAll = async () => {
     setLoading(true);
     const [oppRes, contRes, profRes] = await Promise.all([
-      supabase.from("opportunities").select("*").order("created_at", { ascending: false }),
-      supabase.from("contacts").select("id, name, phone").order("name"),
-      supabase.from("profiles").select("id, full_name"),
+      db.from("opportunities").select("*").order("created_at", { ascending: false }),
+      db.from("contacts").select("id, name, phone").order("name"),
+      db.from("profiles").select("id, full_name"),
     ]);
     setOpportunities((oppRes.data as Opportunity[]) || []);
     setContacts((contRes.data as Contact[]) || []);
@@ -256,11 +256,11 @@ const Pipeline = () => {
       user_id: user?.id,
     };
     if (editingId) {
-      const { error } = await supabase.from("opportunities").update(payload).eq("id", editingId);
+      const { error } = await db.from("opportunities").update(payload).eq("id", editingId);
       if (error) { toast.error("Erro ao atualizar"); setSaving(false); return; }
       toast.success("Oportunidade atualizada");
     } else {
-      const { error } = await supabase.from("opportunities").insert(payload);
+      const { error } = await db.from("opportunities").insert(payload);
       if (error) { toast.error("Erro ao criar"); setSaving(false); return; }
       toast.success("Oportunidade criada");
     }
@@ -271,7 +271,7 @@ const Pipeline = () => {
 
   const handleDelete = async () => {
     if (!deleteId) return;
-    const { error } = await supabase.from("opportunities").delete().eq("id", deleteId);
+    const { error } = await db.from("opportunities").delete().eq("id", deleteId);
     if (error) { toast.error("Erro ao excluir"); return; }
     toast.success("Oportunidade excluída");
     setDeleteOpen(false);

@@ -15,7 +15,15 @@ export default async function conversationRoutes(fastify) {
     let p = 1;
 
     if (status) { conditions.push(`c.status = $${p}`); params.push(status); p++; }
-    if (assigned_to && assigned_to !== 'null') { conditions.push(`c.assigned_to = $${p}`); params.push(assigned_to); p++; }
+    if (assigned_to && assigned_to !== 'null') {
+      const ids = assigned_to.split(',').map(s => s.trim()).filter(Boolean);
+      if (ids.length === 1) {
+        conditions.push(`c.assigned_to = $${p}`); params.push(ids[0]); p++;
+      } else {
+        const ph = ids.map((_, i) => `$${p + i}`).join(',');
+        conditions.push(`c.assigned_to IN (${ph})`); params.push(...ids); p += ids.length;
+      }
+    }
     if (connection_name && connection_name !== 'null') { conditions.push(`c.connection_name = $${p}`); params.push(connection_name); p++; }
     if (search) {
       conditions.push(`(ct.name ILIKE $${p} OR ct.phone ILIKE $${p})`);
@@ -186,7 +194,7 @@ export default async function conversationRoutes(fastify) {
     // Emit realtime update + invalidate cache
     fastify.io?.emit('conversation:updated', rows[0]);
     invalidate('conv:list:*').catch(() => {});
-    deliverWebhook.dispatchEvent('conversation.updated', rows[0]).catch(() => {});
+    deliverWebhook.dispatchEvent('conversation.updated', rows[0]).catch(err => console.error('webhook dispatch failed:', err.message));
 
     // Email notification when assigned_to changes
     if (req.body.assigned_to && rows[0].contact_name) {
@@ -194,7 +202,7 @@ export default async function conversationRoutes(fastify) {
         agentId: req.body.assigned_to,
         contactName: rows[0].contact_name,
         conversationId: req.params.id,
-      }).catch(() => {});
+      }).catch(err => console.error('notifyConversationAssigned failed:', err.message));
     }
 
     return rows[0];

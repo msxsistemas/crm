@@ -17,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -88,7 +88,7 @@ const Opportunities = () => {
 
   const fetchContacts = useCallback(async () => {
     if (!user) return;
-    const { data } = await supabase
+    const { data } = await db
       .from("contacts")
       .select("id, name")
       .eq("user_id", user.id)
@@ -100,7 +100,7 @@ const Opportunities = () => {
     if (!user) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("opportunities")
         .select("*")
         .eq("user_id", user.id)
@@ -114,7 +114,7 @@ const Opportunities = () => {
       const contactIds = [...new Set(rows.map(r => r.contact_id).filter(Boolean))] as string[];
       let contactMap: Record<string, string> = {};
       if (contactIds.length > 0) {
-        const { data: cData } = await supabase
+        const { data: cData } = await db
           .from("contacts")
           .select("id, name")
           .in("id", contactIds);
@@ -181,7 +181,7 @@ const Opportunities = () => {
       };
 
       if (editingId) {
-        const { error } = await supabase
+        const { error } = await db
           .from("opportunities")
           .update(payload)
           .eq("id", editingId)
@@ -189,7 +189,7 @@ const Opportunities = () => {
         if (error) throw error;
         toast.success("Oportunidade atualizada!");
       } else {
-        const { error } = await supabase
+        const { error } = await db
           .from("opportunities")
           .insert(payload);
         if (error) throw error;
@@ -210,7 +210,7 @@ const Opportunities = () => {
     if (!user) return;
     if (!confirm("Deseja excluir esta oportunidade?")) return;
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from("opportunities")
         .delete()
         .eq("id", id)

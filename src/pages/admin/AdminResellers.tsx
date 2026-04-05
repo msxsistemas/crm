@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,9 +45,9 @@ const AdminResellers = () => {
   const loadData = async () => {
     setLoading(true);
     const [r, p, prof] = await Promise.all([
-      supabase.from("reseller_accounts").select("*").order("created_at", { ascending: false }),
-      supabase.from("reseller_plans").select("id, name, price").order("name"),
-      supabase.from("profiles").select("id, full_name"),
+      db.from("reseller_accounts").select("*").order("created_at", { ascending: false }),
+      db.from("reseller_plans").select("id, name, price").order("name"),
+      db.from("profiles").select("id, full_name"),
     ]);
     setResellers((r.data as any[]) || []);
     setPlans((p.data as any[]) || []);
@@ -56,7 +56,7 @@ const AdminResellers = () => {
   };
 
   const toggleReseller = async (id: string, is_active: boolean) => {
-    await supabase.from("reseller_accounts").update({ is_active, updated_at: new Date().toISOString() }).eq("id", id);
+    await db.from("reseller_accounts").update({ is_active, updated_at: new Date().toISOString() }).eq("id", id);
     toast.success(is_active ? "Revendedor ativado" : "Revendedor desativado");
     loadData();
   };
@@ -73,7 +73,7 @@ const AdminResellers = () => {
       if (!form.user_id) return toast.error("Selecione um usuário");
     }
 
-    const { data, error } = await supabase.functions.invoke("create-reseller", {
+    const { data, error } = await db.functions.invoke("create-reseller", {
       body: {
         mode: createMode,
         user_id: createMode === "existing" ? form.user_id : undefined,
@@ -97,7 +97,7 @@ const AdminResellers = () => {
 
   const updateReseller = async () => {
     if (!editing) return;
-    const { error } = await supabase.from("reseller_accounts").update({
+    const { error } = await db.from("reseller_accounts").update({
       company_name: form.company_name,
       plan_id: form.plan_id || null,
       expires_at: form.expires_at || null,
@@ -112,8 +112,8 @@ const AdminResellers = () => {
 
   const deleteReseller = async (r: ResellerAccount) => {
     if (!confirm("Tem certeza que deseja remover este revendedor?")) return;
-    await supabase.from("reseller_accounts").delete().eq("id", r.id);
-    await supabase.from("user_roles").delete().eq("user_id", r.user_id).eq("role", "reseller" as any);
+    await db.from("reseller_accounts").delete().eq("id", r.id);
+    await db.from("user_roles").delete().eq("user_id", r.user_id).eq("role", "reseller" as any);
     toast.success("Revendedor removido!");
     loadData();
   };

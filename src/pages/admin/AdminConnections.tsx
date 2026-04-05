@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,8 +19,8 @@ const AdminConnections = () => {
   const loadConnections = async () => {
     setLoading(true);
     const [evo, prof] = await Promise.all([
-      supabase.from("evolution_connections").select("*"),
-      supabase.from("profiles").select("id, full_name"),
+      db.from("evolution_connections").select("*"),
+      db.from("profiles").select("id, full_name"),
     ]);
     const all = ((evo.data || []) as any[]).map(c => ({ ...c, provider: "Evolution" }));
     setConnections(all);
@@ -35,7 +35,7 @@ const AdminConnections = () => {
 
   const deleteConnection = async (conn: any) => {
     if (!confirm("Remover esta conexão?")) return;
-    await supabase.from("evolution_connections").delete().eq("id", conn.id);
+    await db.from("evolution_connections").delete().eq("id", conn.id);
     toast.success("Conexão removida!");
     loadConnections();
   };

@@ -1,5 +1,6 @@
 import { Outlet } from "react-router-dom";
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
+import { Loader2 } from "lucide-react";
 import AppSidebar from "./AppSidebar";
 import TopBar from "./TopBar";
 import { useAuth } from "@/hooks/useAuth";
@@ -41,7 +42,13 @@ const AppLayout = () => {
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopBar onStartTour={startTour} />
         <main className="flex-1 overflow-hidden flex flex-col">
-          <Outlet />
+          <Suspense fallback={
+            <div className="flex h-full items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          }>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
       <OnboardingTour

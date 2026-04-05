@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -119,8 +119,8 @@ const Chatbot = () => {
     setBhLoading(true);
     try {
       const [{ data: configData }, { data: scheduleData }] = await Promise.all([
-        supabase.from("business_hours_config").select("enabled, outside_hours_message, timezone").maybeSingle(),
-        supabase.from("business_hours").select("day_of_week, start_time, end_time, active").order("day_of_week"),
+        db.from("business_hours_config").select("enabled, outside_hours_message, timezone").maybeSingle(),
+        db.from("business_hours").select("day_of_week, start_time, end_time, active").order("day_of_week"),
       ]);
 
       if (configData) {
@@ -157,11 +157,11 @@ const Chatbot = () => {
   const saveBusinessHours = async () => {
     setBhSaving(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await db.auth.getUser();
       if (!user) { toast.error("Usuário não autenticado"); return; }
 
       // Upsert config
-      const { error: configError } = await supabase.from("business_hours_config").upsert({
+      const { error: configError } = await db.from("business_hours_config").upsert({
         user_id: user.id,
         enabled: bhConfig.enabled,
         outside_hours_message: bhConfig.outside_hours_message,
@@ -179,7 +179,7 @@ const Chatbot = () => {
         active: row.active,
       }));
 
-      const { error: scheduleError } = await supabase.from("business_hours").upsert(rows, { onConflict: "user_id,day_of_week" });
+      const { error: scheduleError } = await db.from("business_hours").upsert(rows, { onConflict: "user_id,day_of_week" });
       if (scheduleError) throw scheduleError;
 
       toast.success("Horários salvos com sucesso!");
@@ -201,7 +201,7 @@ const Chatbot = () => {
   };
 
   const loadRules = async () => {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("chatbot_rules")
       .select("*")
       .order("priority", { ascending: false });
@@ -299,11 +299,11 @@ const Chatbot = () => {
     };
 
     if (editing) {
-      const { error } = await supabase.from("chatbot_rules").update(payload).eq("id", editing.id);
+      const { error } = await db.from("chatbot_rules").update(payload).eq("id", editing.id);
       if (error) toast.error("Erro: " + error.message);
       else toast.success("Regra atualizada!");
     } else {
-      const { error } = await supabase.from("chatbot_rules").insert(payload);
+      const { error } = await db.from("chatbot_rules").insert(payload);
       if (error) toast.error("Erro: " + error.message);
       else toast.success("Regra criada!");
     }
@@ -318,7 +318,7 @@ const Chatbot = () => {
 
   const handleDelete = async () => {
     if (!ruleToDelete) return;
-    const { error } = await supabase.from("chatbot_rules").delete().eq("id", ruleToDelete.id);
+    const { error } = await db.from("chatbot_rules").delete().eq("id", ruleToDelete.id);
     if (error) toast.error("Erro ao excluir");
     else { toast.success("Regra excluída"); setRules(prev => prev.filter(r => r.id !== ruleToDelete.id)); }
     setDeleteOpen(false);
@@ -326,13 +326,13 @@ const Chatbot = () => {
   };
 
   const toggleActive = async (rule: ChatbotRule) => {
-    const { error } = await supabase.from("chatbot_rules").update({ is_active: !rule.is_active }).eq("id", rule.id);
+    const { error } = await db.from("chatbot_rules").update({ is_active: !rule.is_active }).eq("id", rule.id);
     if (!error) setRules(prev => prev.map(r => r.id === rule.id ? { ...r, is_active: !r.is_active } : r));
   };
 
   const resetStats = async () => {
     if (!window.confirm("Deseja zerar as estatísticas de todas as regras?")) return;
-    const { error } = await supabase.from("chatbot_rules").update({ trigger_count: 0 }).gte("priority", -999999);
+    const { error } = await db.from("chatbot_rules").update({ trigger_count: 0 }).gte("priority", -999999);
     if (error) toast.error("Erro ao zerar estatísticas");
     else {
       toast.success("Estatísticas zeradas!");

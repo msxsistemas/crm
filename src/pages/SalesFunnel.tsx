@@ -6,7 +6,8 @@ import { useMediaUpload } from "@/components/chat/useMediaUpload";
 import { EmojiPicker, StickerPicker } from "@/components/chat/EmojiStickerPicker";
 import { SignatureButton, QuickMessagesButton } from "@/components/chat/ChatActionButtons";
 import { toast } from "sonner";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
+import { getSocket } from "@/lib/socket";
 import { useAuth } from "@/hooks/useAuth";
 import {
   Plus, Search, Filter, BarChart3, RotateCw, MoreVertical, ChevronDown,
@@ -157,7 +158,7 @@ const SalesFunnel = () => {
 
     if (!silent) setLoading(true);
 
-    const { data: boardsData } = await supabase
+    const { data: boardsData } = await db
       .from("kanban_boards")
       .select("*")
       .eq("user_id", user.id)
@@ -165,7 +166,7 @@ const SalesFunnel = () => {
 
     if (!boardsData || boardsData.length === 0) {
       // Create default board
-      const { data: newBoard } = await supabase
+      const { data: newBoard } = await db
         .from("kanban_boards")
         .insert({ user_id: user.id, name: "Vendas", is_default: true })
         .select()
@@ -180,7 +181,7 @@ const SalesFunnel = () => {
           { board_id: newBoard.id, name: "Fechado", color: "#22C55E", position: 4, is_default: false, is_finalized: true },
           { board_id: newBoard.id, name: "Perdido", color: "#EF4444", position: 5, is_default: false, is_finalized: true },
         ];
-        await supabase.from("kanban_columns").insert(defaultCols);
+        await db.from("kanban_columns").insert(defaultCols);
         // Re-fetch after creating defaults
         return fetchData();
       }
@@ -190,7 +191,7 @@ const SalesFunnel = () => {
 
     // Fetch all columns for user's boards
     const boardIds = boardsData.map((b) => b.id);
-    const { data: columnsData } = await supabase
+    const { data: columnsData } = await db
       .from("kanban_columns")
       .select("*")
       .in("board_id", boardIds)
@@ -199,7 +200,7 @@ const SalesFunnel = () => {
     // Fetch all cards
     const columnIds = (columnsData || []).map((c) => c.id);
     const { data: cardsData } = columnIds.length > 0
-      ? await supabase
+      ? await db
           .from("kanban_cards")
           .select("*")
           .in("column_id", columnIds)
@@ -211,7 +212,7 @@ const SalesFunnel = () => {
     let convoMap = new Map<string, { status: string; unreadCount: number; lastMsg: string; lastMsgTime: string; fromMe: boolean }>();
 
     if (contactIds.length > 0) {
-      const { data: convos } = await supabase
+      const { data: convos } = await db
         .from("conversations")
         .select("id, contact_id, status, last_message_at, unread_count")
         .in("contact_id", contactIds)
@@ -245,7 +246,7 @@ const SalesFunnel = () => {
       const selectedConvos = Array.from(convoByContact.values());
 
       // Fetch contact avatars
-      const { data: contacts } = await supabase
+      const { data: contacts } = await db
         .from("contacts")
         .select("id, name, avatar_url")
         .in("id", contactIds);
@@ -259,7 +260,7 @@ const SalesFunnel = () => {
 
       if (selectedConvos.length > 0) {
         const cIds = selectedConvos.map((c) => c.id);
-        const { data: msgs } = await supabase
+        const { data: msgs } = await db
           .from("messages")
           .select("conversation_id, body, from_me, created_at")
           .in("conversation_id", cIds)
@@ -295,7 +296,7 @@ const SalesFunnel = () => {
 
     // Auto-create kanban cards for contacts with conversations but no kanban card
     const allCardContactIds = (cardsData || []).filter(c => c.contact_id).map(c => c.contact_id!);
-    const { data: allConvosForUnassigned } = await supabase
+    const { data: allConvosForUnassigned } = await db
       .from("conversations")
       .select("id, contact_id, status, last_message_at, unread_count")
       .order("last_message_at", { ascending: false, nullsFirst: false });
@@ -315,7 +316,7 @@ const SalesFunnel = () => {
       // Find default column for active board
       const defaultCol = (columnsData || []).find(c => c.is_default) || (columnsData || [])[0];
       if (defaultCol) {
-        const { data: unassignedContactsData } = await supabase
+        const { data: unassignedContactsData } = await db
           .from("contacts")
           .select("id, name, phone")
           .in("id", unassignedConvoContactIds);
@@ -329,9 +330,7 @@ const SalesFunnel = () => {
             position: (cardsData || []).filter(card => card.column_id === defaultCol.id).length + idx,
           }));
 
-          await supabase.from("kanban_cards").insert(cardsToInsert);
-          console.log(`Auto-created ${cardsToInsert.length} kanban cards in default column`);
-          
+          await db.from("kanban_cards").insert(cardsToInsert);
           // Re-fetch to get the newly created cards
           if (!silent) return fetchData();
         }
@@ -393,7 +392,7 @@ const SalesFunnel = () => {
   // Fetch user profile name for assignee display
   useEffect(() => {
     if (!user) return;
-    supabase.from("profiles").select("full_name").eq("id", user.id).single().then(({ data }) => {
+    db.from("profiles").select("full_name").eq("id", user.id).single().then(({ data }) => {
       if (data?.full_name) setUserName(data.full_name);
     });
   }, [user]);
@@ -412,20 +411,10 @@ const SalesFunnel = () => {
       }, 1000);
     };
 
-    const messagesChannel = supabase
-      .channel(`kanban-messages-${user.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, scheduleRefresh)
-      .subscribe();
-
-    const conversationsChannel = supabase
-      .channel(`kanban-conversations-${user.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, scheduleRefresh)
-      .subscribe();
-
-    const cardsChannel = supabase
-      .channel(`kanban-cards-${user.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "kanban_cards" }, scheduleRefresh)
-      .subscribe();
+    const socket = getSocket();
+    socket.on('message:new', scheduleRefresh);
+    socket.on('conversation:updated', scheduleRefresh);
+    socket.on('kanban:updated', scheduleRefresh);
 
     const pollInterval = setInterval(() => {
       if (isActive && !isPersistingDragRef.current) fetchData(true);
@@ -435,9 +424,9 @@ const SalesFunnel = () => {
       isActive = false;
       if (refreshTimeout) clearTimeout(refreshTimeout);
       clearInterval(pollInterval);
-      supabase.removeChannel(messagesChannel);
-      supabase.removeChannel(conversationsChannel);
-      supabase.removeChannel(cardsChannel);
+      socket.off('message:new', scheduleRefresh);
+      socket.off('conversation:updated', scheduleRefresh);
+      socket.off('kanban:updated', scheduleRefresh);
     };
   }, [user, fetchData]);
 
@@ -556,7 +545,7 @@ const SalesFunnel = () => {
         newUnassigned.splice(contactIdx, 1);
         setUnassigned(newUnassigned);
 
-        const { error: insertError } = await supabase.from("kanban_cards").insert({
+        const { error: insertError } = await db.from("kanban_cards").insert({
           column_id: destination.droppableId,
           contact_id: contact.contact_id || null,
           name: contact.name,
@@ -567,7 +556,7 @@ const SalesFunnel = () => {
         if (insertError) throw insertError;
 
         // Normalize destination column positions
-        const { data: destinationCards, error: destinationCardsError } = await supabase
+        const { data: destinationCards, error: destinationCardsError } = await db
           .from("kanban_cards")
           .select("id")
           .eq("column_id", destination.droppableId)
@@ -578,7 +567,7 @@ const SalesFunnel = () => {
 
         if (destinationCards?.length) {
           const normalizeUpdates = destinationCards.map((card, index) =>
-            supabase.from("kanban_cards").update({ position: index }).eq("id", card.id)
+            db.from("kanban_cards").update({ position: index }).eq("id", card.id)
           );
           const normalizeResults = await Promise.all(normalizeUpdates);
           const normalizeError = normalizeResults.find((r) => r.error);
@@ -644,7 +633,7 @@ const SalesFunnel = () => {
         column.contacts
           .filter((c) => c?.id)
           .map((c, index) =>
-            supabase
+            db
               .from("kanban_cards")
               .update({ column_id: column.id, position: index })
               .eq("id", c.id)
@@ -668,7 +657,7 @@ const SalesFunnel = () => {
   const handleAddColumn = async () => {
     if (!newColName.trim() || !board.id) return;
     const position = board.columns.length;
-    const { data, error } = await supabase.from("kanban_columns").insert({
+    const { data, error } = await db.from("kanban_columns").insert({
       board_id: board.id,
       name: newColName.trim(),
       color: newColColor,
@@ -700,7 +689,7 @@ const SalesFunnel = () => {
 
   const handleEditColumn = async () => {
     if (!editCol || !editColName.trim()) return;
-    const { error } = await supabase.from("kanban_columns").update({
+    const { error } = await db.from("kanban_columns").update({
       name: editColName.trim(),
       color: editColColor,
       is_default: editColDefault,
@@ -723,7 +712,7 @@ const SalesFunnel = () => {
     }
     const confirmed = confirm("Tem certeza que deseja remover esta coluna?");
     if (!confirmed) return;
-    const { error } = await supabase.from("kanban_columns").delete().eq("id", colId);
+    const { error } = await db.from("kanban_columns").delete().eq("id", colId);
     if (error) {
       toast.error("Erro ao remover coluna");
       return;
@@ -760,7 +749,7 @@ const SalesFunnel = () => {
     if (!boardName.trim() || !user) return;
     if (editingBoard) {
       // Update
-      const { error } = await supabase.from("kanban_boards").update({
+      const { error } = await db.from("kanban_boards").update({
         name: boardName.trim(),
         description: boardDescription.trim() || null,
         icon: boardIcon,
@@ -771,7 +760,7 @@ const SalesFunnel = () => {
       toast.success("Board atualizado!");
     } else {
       // Create
-      const { data, error } = await supabase.from("kanban_boards").insert({
+      const { data, error } = await db.from("kanban_boards").insert({
         user_id: user.id,
         name: boardName.trim(),
         description: boardDescription.trim() || null,
@@ -781,7 +770,7 @@ const SalesFunnel = () => {
       } as any).select().single();
       if (error) { toast.error("Erro ao criar board"); return; }
       // Add a default column
-      await supabase.from("kanban_columns").insert({
+      await db.from("kanban_columns").insert({
         board_id: data.id,
         name: "Novo Lead",
         color: "#3B82F6",
@@ -805,8 +794,8 @@ const SalesFunnel = () => {
     const confirmed = confirm("Tem certeza que deseja excluir este board?");
     if (!confirmed) return;
     // Delete columns first
-    await supabase.from("kanban_columns").delete().eq("board_id", editingBoard.id);
-    const { error } = await supabase.from("kanban_boards").delete().eq("id", editingBoard.id);
+    await db.from("kanban_columns").delete().eq("board_id", editingBoard.id);
+    const { error } = await db.from("kanban_boards").delete().eq("id", editingBoard.id);
     if (error) { toast.error("Erro ao excluir board"); return; }
     toast.success("Board excluído!");
     setShowBoardDialog(false);
@@ -1512,7 +1501,7 @@ const ChatModal = ({ contact, onClose, getInitials }: ChatModalProps) => {
   // Fetch profile name and signing preference
   useEffect(() => {
     if (!user) return;
-    supabase.from("profiles").select("full_name, signing_enabled").eq("id", user.id).single().then(({ data }) => {
+    db.from("profiles").select("full_name, signing_enabled").eq("id", user.id).single().then(({ data }) => {
       setProfileName(data?.full_name || user.user_metadata?.full_name || null);
       if (data?.signing_enabled !== undefined && data?.signing_enabled !== null) {
         setSigning(data.signing_enabled);
@@ -1524,7 +1513,7 @@ const ChatModal = ({ contact, onClose, getInitials }: ChatModalProps) => {
     if (contact.contact_id) return contact.contact_id;
     if (!contact.phone) return null;
 
-    const { data: existingContacts, error: findContactError } = await supabase
+    const { data: existingContacts, error: findContactError } = await db
       .from("contacts")
       .select("id")
       .eq("phone", contact.phone)
@@ -1536,7 +1525,7 @@ const ChatModal = ({ contact, onClose, getInitials }: ChatModalProps) => {
     if (existingId) return existingId;
     if (!createIfMissing) return null;
 
-    const { data: newContact, error: createContactError } = await supabase
+    const { data: newContact, error: createContactError } = await db
       .from("contacts")
       .insert({ phone: contact.phone, name: contact.name || null })
       .select("id")
@@ -1558,7 +1547,7 @@ const ChatModal = ({ contact, onClose, getInitials }: ChatModalProps) => {
         setConversationId(null);
 
         const [{ data: inst, error: instanceError }, foundContactId] = await Promise.all([
-          supabase
+          db
             .from("evolution_connections")
             .select("instance_name, status")
             .eq("user_id", user.id)
@@ -1576,7 +1565,7 @@ const ChatModal = ({ contact, onClose, getInitials }: ChatModalProps) => {
 
         if (!foundContactId) return;
 
-        const { data: convos, error: convoError } = await supabase
+        const { data: convos, error: convoError } = await db
           .from("conversations")
           .select("id, instance_name")
           .eq("contact_id", foundContactId)
@@ -1593,7 +1582,7 @@ const ChatModal = ({ contact, onClose, getInitials }: ChatModalProps) => {
           setInstanceName(convos[0].instance_name);
         }
 
-        const { data: msgs, error: messagesError } = await supabase
+        const { data: msgs, error: messagesError } = await db
           .from("messages")
           .select("id, body, from_me, status, created_at, media_url, media_type")
           .eq("conversation_id", cId)
@@ -1619,7 +1608,7 @@ const ChatModal = ({ contact, onClose, getInitials }: ChatModalProps) => {
   // Realtime subscription
   useEffect(() => {
     if (!conversationId) return;
-    const channel = supabase
+    const channel = db
       .channel(`kanban-chat-${conversationId}`)
       .on(
         "postgres_changes",
@@ -1638,7 +1627,7 @@ const ChatModal = ({ contact, onClose, getInitials }: ChatModalProps) => {
         }
       )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => { db.removeChannel(channel); };
   }, [conversationId]);
 
   // Auto scroll
@@ -1679,7 +1668,7 @@ const ChatModal = ({ contact, onClose, getInitials }: ChatModalProps) => {
           throw new Error("Contato não encontrado para iniciar conversa");
         }
 
-        const { data: newConvo, error: createConversationError } = await supabase
+        const { data: newConvo, error: createConversationError } = await db
           .from("conversations")
           .insert({ contact_id: targetContactId, instance_name: instanceName, status: "open" })
           .select("id")
@@ -1694,7 +1683,7 @@ const ChatModal = ({ contact, onClose, getInitials }: ChatModalProps) => {
 
       await sendMessage(instanceName, contact.phone, text);
 
-      const { error: insertMessageError } = await supabase.from("messages").insert({
+      const { error: insertMessageError } = await db.from("messages").insert({
         conversation_id: cId,
         body: text,
         from_me: true,
@@ -1703,7 +1692,7 @@ const ChatModal = ({ contact, onClose, getInitials }: ChatModalProps) => {
 
       if (insertMessageError) throw insertMessageError;
 
-      const { error: updateConversationError } = await supabase
+      const { error: updateConversationError } = await db
         .from("conversations")
         .update({ last_message_at: new Date().toISOString(), status: "open" })
         .eq("id", cId);
@@ -1737,7 +1726,7 @@ const ChatModal = ({ contact, onClose, getInitials }: ChatModalProps) => {
         toast.error("Contato não encontrado");
         return;
       }
-      const { data: newConvo } = await supabase
+      const { data: newConvo } = await db
         .from("conversations")
         .insert({ contact_id: targetContactId, instance_name: instanceName, status: "open" })
         .select("id")
@@ -1905,7 +1894,7 @@ const ChatModal = ({ contact, onClose, getInitials }: ChatModalProps) => {
             <SignatureButton
               userName={profileName}
               signing={signing}
-              onToggle={async () => { const next = !signing; setSigning(next); if (user) { const { error } = await supabase.from("profiles").update({ signing_enabled: next }).eq("id", user.id); if (error) setSigning(!next); } }}
+              onToggle={async () => { const next = !signing; setSigning(next); if (user) { const { error } = await db.from("profiles").update({ signing_enabled: next }).eq("id", user.id); if (error) setSigning(!next); } }}
               disabled={instanceConnected === false || uploading}
             />
             <QuickMessagesButton
@@ -1978,7 +1967,7 @@ const KanbanCardDetail = ({ contact, onClose, onOpenChat, getInitials }: KanbanC
         if (!contact.contact_id) { setLoadingData(false); return; }
 
         // Load conversations (latest + count)
-        const { data: convos, count } = await supabase
+        const { data: convos, count } = await db
           .from("conversations")
           .select("id", { count: "exact" })
           .eq("contact_id", contact.contact_id)
@@ -1989,7 +1978,7 @@ const KanbanCardDetail = ({ contact, onClose, onOpenChat, getInitials }: KanbanC
         setConversationCount(count || 0);
 
         // Load opportunities
-        const { data: oppsData } = await supabase
+        const { data: oppsData } = await db
           .from("opportunities")
           .select("id, title, value, status")
           .eq("contact_id", contact.contact_id)
@@ -1998,7 +1987,7 @@ const KanbanCardDetail = ({ contact, onClose, onOpenChat, getInitials }: KanbanC
 
         // Load notes for the latest conversation
         if (latestConvoId) {
-          const { data: notesData } = await supabase
+          const { data: notesData } = await db
             .from("conversation_notes")
             .select("id, content, created_at")
             .eq("conversation_id", latestConvoId)
@@ -2018,7 +2007,7 @@ const KanbanCardDetail = ({ contact, onClose, onOpenChat, getInitials }: KanbanC
     if (!newNote.trim() || !conversationId) return;
     setAddingNote(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("conversation_notes")
         .insert({ conversation_id: conversationId, content: newNote.trim() })
         .select("id, content, created_at")

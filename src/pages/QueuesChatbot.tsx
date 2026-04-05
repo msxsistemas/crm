@@ -19,7 +19,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle
 } from "@/components/ui/alert-dialog";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -117,10 +117,10 @@ const QueuesChatbot = () => {
     setLoadingQueues(true);
     try {
       const [queuesRes, agentsRes, profilesRes, connRes] = await Promise.all([
-        supabase.from("queues" as any).select("*").eq("user_id", user.id).order("created_at"),
-        supabase.from("queue_agents" as any).select("queue_id, user_id"),
-        supabase.from("profiles").select("id, full_name, email"),
-        supabase.from("evolution_connections" as any).select("instance_name").eq("user_id", user.id),
+        db.from("queues" as any).select("*").eq("user_id", user.id).order("created_at"),
+        db.from("queue_agents" as any).select("queue_id, user_id"),
+        db.from("profiles").select("id, full_name, email"),
+        db.from("evolution_connections" as any).select("instance_name").eq("user_id", user.id),
       ]);
 
       const rawQueues: Queue[] = (queuesRes.data || []) as Queue[];
@@ -145,7 +145,7 @@ const QueuesChatbot = () => {
   const loadChatbotRules = async () => {
     setLoadingRules(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("chatbot_rules")
         .select("id, name, trigger_type, trigger_value, is_active, priority")
         .order("priority", { ascending: false });
@@ -217,7 +217,7 @@ const QueuesChatbot = () => {
       };
 
       if (editingQueue) {
-        const { error } = await supabase
+        const { error } = await db
           .from("queues" as any)
           .update(payload)
           .eq("id", editingQueue.id);
@@ -226,7 +226,7 @@ const QueuesChatbot = () => {
         setQueueDialogOpen(false);
         loadAll();
       } else {
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from("queues" as any)
           .insert({ ...payload, user_id: user.id })
           .select()
@@ -250,7 +250,7 @@ const QueuesChatbot = () => {
 
   const handleToggleAutoAssign = async (q: Queue, value: boolean) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from("queues" as any)
         .update({ auto_assign: value, updated_at: new Date().toISOString() })
         .eq("id", q.id);
@@ -264,7 +264,7 @@ const QueuesChatbot = () => {
   const openAgents = async (q: Queue) => {
     setAgentsQueue(q);
     // Load existing agents for this queue
-    const { data } = await supabase
+    const { data } = await db
       .from("queue_agents" as any)
       .select("user_id")
       .eq("queue_id", q.id);
@@ -287,14 +287,14 @@ const QueuesChatbot = () => {
     setSavingAgents(true);
     try {
       // Remove all existing agents for this queue
-      await supabase.from("queue_agents" as any).delete().eq("queue_id", agentsQueue.id);
+      await db.from("queue_agents" as any).delete().eq("queue_id", agentsQueue.id);
       // Insert selected agents
       if (queueAgentIds.size > 0) {
         const rows = Array.from(queueAgentIds).map(uid => ({
           queue_id: agentsQueue.id,
           user_id: uid,
         }));
-        const { error } = await supabase.from("queue_agents" as any).insert(rows);
+        const { error } = await db.from("queue_agents" as any).insert(rows);
         if (error) throw error;
       }
       toast.success("Agentes salvos!");
@@ -316,7 +316,7 @@ const QueuesChatbot = () => {
     if (!deleteQueue) return;
     setDeleting(true);
     try {
-      const { error } = await supabase.from("queues" as any).delete().eq("id", deleteQueue.id);
+      const { error } = await db.from("queues" as any).delete().eq("id", deleteQueue.id);
       if (error) throw error;
       toast.success("Fila excluída!");
       setDeleteOpen(false);

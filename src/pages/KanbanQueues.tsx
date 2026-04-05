@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -134,7 +134,7 @@ const KanbanQueues = () => {
     setLoading(true);
     try {
       // 1. Load boards
-      const { data: boardsData, error: boardsErr } = await supabase
+      const { data: boardsData, error: boardsErr } = await db
         .from("kanban_boards" as never)
         .select("id, name, user_id")
         .eq("user_id", user.id)
@@ -158,17 +158,17 @@ const KanbanQueues = () => {
 
       // 2. Load queues, columns, cards in parallel
       const [queuesRes, columnsRes, cardsRes] = await Promise.all([
-        supabase
+        db
           .from("queues" as never)
           .select("id, name, color, connection")
           .eq("user_id", user.id)
           .order("name"),
-        supabase
+        db
           .from("kanban_columns" as never)
           .select("id, board_id, name, color, position")
           .eq("board_id", activeBoardId)
           .order("position"),
-        supabase
+        db
           .from("kanban_cards" as never)
           .select("id, column_id, contact_id, name, phone, value, created_at, updated_at")
           .in(
@@ -185,7 +185,7 @@ const KanbanQueues = () => {
       // 3. Load cards for this board's columns
       let rawCards: KanbanCard[] = [];
       if (columnIds.length > 0) {
-        const { data: cardsData, error: cardsErr } = await supabase
+        const { data: cardsData, error: cardsErr } = await db
           .from("kanban_cards" as never)
           .select("id, column_id, contact_id, name, phone, value, created_at, updated_at")
           .in("column_id", columnIds);
@@ -199,7 +199,7 @@ const KanbanQueues = () => {
       ];
       const contactMap = new Map<string, Contact>();
       if (contactIds.length > 0) {
-        const { data: contactsData } = await supabase
+        const { data: contactsData } = await db
           .from("contacts")
           .select("id, name, phone")
           .in("id", contactIds);
@@ -209,7 +209,7 @@ const KanbanQueues = () => {
       // 5. Load conversations (latest per contact)
       const convMap = new Map<string, Conversation>();
       if (contactIds.length > 0) {
-        const { data: convData } = await supabase
+        const { data: convData } = await db
           .from("conversations")
           .select("id, contact_id, status, instance_name, unread_count, last_message_at")
           .in("contact_id", contactIds)

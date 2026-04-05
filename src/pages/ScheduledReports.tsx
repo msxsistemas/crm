@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -170,29 +170,32 @@ function formatNextSend(isoString: string | null): string {
   return `${dayNameCap} às ${timeStr}`;
 }
 
-// Simple HTML preview table for "send now" simulation
+// HTML preview template — valores são ilustrativos, dados reais são gerados no envio
 function buildReportPreview(report: ScheduledReport): string {
   const typeLabel = REPORT_TYPE_OPTIONS.find(o => o.value === report.report_type)?.label ?? report.report_type;
   const now = new Date();
 
   const rows = [
-    ["Conversas abertas", "47"],
-    ["Conversas fechadas", "31"],
-    ["Tempo médio de resposta", "4m 22s"],
-    ["Mensagens enviadas", "312"],
-    ["Avaliações positivas", "28"],
-    ["SLA violados", "3"],
+    ["Conversas abertas", "—"],
+    ["Conversas fechadas", "—"],
+    ["Tempo médio de resposta", "—"],
+    ["Mensagens enviadas", "—"],
+    ["Avaliações positivas", "—"],
+    ["SLA violados", "—"],
   ];
 
   const rowsHtml = rows
     .map(
       ([label, value]) =>
-        `<tr><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;">${label}</td><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-weight:600;">${value}</td></tr>`
+        `<tr><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;">${label}</td><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-weight:600;color:#9ca3af;">${value}</td></tr>`
     )
     .join("");
 
   return `
 <div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
+  <div style="background:#fefce8;border:1px solid #fde047;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#854d0e;">
+    ⚠️ Prévia do modelo — os valores reais serão preenchidos automaticamente no envio.
+  </div>
   <h2 style="color:#1d4ed8;margin-bottom:4px;">${typeLabel}</h2>
   <p style="color:#6b7280;font-size:14px;">Gerado em ${format(now, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</p>
   <table style="width:100%;border-collapse:collapse;margin-top:16px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
@@ -240,7 +243,7 @@ const ScheduledReports = () => {
 
   const fetchReports = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data } = await db
       .from("scheduled_reports")
       .select("*")
       .order("created_at", { ascending: false });
@@ -324,14 +327,14 @@ const ScheduledReports = () => {
     };
 
     if (editingId) {
-      const { error } = await supabase
+      const { error } = await db
         .from("scheduled_reports")
         .update(payload as any)
         .eq("id", editingId);
       if (error) { toast.error("Erro ao salvar"); setSaving(false); return; }
       toast.success("Relatório atualizado!");
     } else {
-      const { error } = await supabase
+      const { error } = await db
         .from("scheduled_reports")
         .insert(payload as any);
       if (error) { toast.error("Erro ao criar"); setSaving(false); return; }
@@ -345,13 +348,13 @@ const ScheduledReports = () => {
 
   const handleDelete = async (id: string) => {
     if (!confirm("Excluir este relatório agendado?")) return;
-    await supabase.from("scheduled_reports").delete().eq("id", id);
+    await db.from("scheduled_reports").delete().eq("id", id);
     toast.success("Relatório removido");
     fetchReports();
   };
 
   const handleToggleActive = async (report: ScheduledReport) => {
-    await supabase
+    await db
       .from("scheduled_reports")
       .update({ is_active: !report.is_active } as any)
       .eq("id", report.id);
@@ -369,7 +372,7 @@ const ScheduledReports = () => {
     if (!previewReport) return;
     setSendingNow(true);
     // Simulate sending — update last_sent_at
-    await supabase
+    await db
       .from("scheduled_reports")
       .update({ last_sent_at: new Date().toISOString() } as any)
       .eq("id", previewReport.id);

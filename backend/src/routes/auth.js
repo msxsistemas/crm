@@ -45,7 +45,7 @@ export default async function authRoutes(fastify) {
     return { token, refreshToken, csrfToken, user: sanitizeUser(user) };
   });
 
-  // Register
+  // Register — máximo 5 cadastros por IP a cada 1 hora (previne spam)
   fastify.post('/auth/register', {
     schema: {
       body: {
@@ -58,6 +58,15 @@ export default async function authRoutes(fastify) {
           role: { type: 'string', enum: ['admin', 'manager', 'agent'] },
         },
         additionalProperties: false,
+      },
+    },
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '1 hour',
+        errorResponseBuilder: () => ({
+          error: 'Muitos cadastros. Tente novamente em 1 hora.',
+        }),
       },
     },
   }, async (req, reply) => {
@@ -163,8 +172,19 @@ export default async function authRoutes(fastify) {
     return { ok: true };
   });
 
-  // Change password
-  fastify.post('/auth/change-password', { preHandler: fastify.authenticate }, async (req, reply) => {
+  // Change password — máximo 10 tentativas por IP a cada 15 minutos
+  fastify.post('/auth/change-password', {
+    preHandler: fastify.authenticate,
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({
+          error: 'Muitas tentativas. Tente novamente em 15 minutos.',
+        }),
+      },
+    },
+  }, async (req, reply) => {
     const { currentPassword, newPassword } = req.body;
     const { rows } = await query('SELECT password_hash FROM profiles WHERE id = $1', [req.user.id]);
     const valid = await bcrypt.compare(currentPassword, rows[0].password_hash);

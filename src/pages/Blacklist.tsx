@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -99,7 +99,7 @@ const BlacklistPage = () => {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("blacklist" as any)
       .select("*")
       .order("created_at", { ascending: false });
@@ -150,7 +150,7 @@ const BlacklistPage = () => {
     setBlocking(true);
     const expiresAt = computeExpiresAt();
     const profileName = user?.user_metadata?.full_name || user?.email || null;
-    const { error } = await supabase.from("blacklist" as any).upsert({
+    const { error } = await db.from("blacklist" as any).upsert({
       phone: blockPhone.trim(),
       reason: blockReason.trim(),
       blocked_by: user?.id || null,
@@ -175,7 +175,7 @@ const BlacklistPage = () => {
   const handleUnblock = async () => {
     if (!unblockEntry) return;
     setUnblocking(true);
-    const { error } = await supabase
+    const { error } = await db
       .from("blacklist" as any)
       .update({ is_active: false })
       .eq("id", unblockEntry.id);
@@ -199,7 +199,7 @@ const BlacklistPage = () => {
   const handleSaveEdit = async () => {
     if (!editEntry) return;
     setSaving(true);
-    const { error } = await supabase
+    const { error } = await db
       .from("blacklist" as any)
       .update({ reason: editReason.trim() })
       .eq("id", editEntry.id);

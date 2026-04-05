@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +16,7 @@ const ResellerConnections = () => {
 
   const loadConnections = async () => {
     setLoading(true);
-    const evo = await supabase.from("evolution_connections").select("*").eq("user_id", user!.id);
+    const evo = await db.from("evolution_connections").select("*").eq("user_id", user!.id);
     setConnections(((evo.data || []) as any[]).map(c => ({ ...c, provider: "Evolution" })));
     setLoading(false);
   };

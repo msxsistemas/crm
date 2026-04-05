@@ -120,7 +120,7 @@ export default async function messageRoutes(fastify) {
     fastify.io?.to(`conversation:${convId}`).emit('message:new', message);
 
     // Dispatch webhook event
-    deliverWebhook.dispatchEvent('message.new', { message, conversation_id: convId }).catch(() => {});
+    deliverWebhook.dispatchEvent('message.new', { message, conversation_id: convId }).catch(err => console.error('webhook dispatch failed:', err.message));
 
     return reply.status(201).send(message);
   });

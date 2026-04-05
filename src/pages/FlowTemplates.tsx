@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
@@ -222,7 +222,7 @@ const FlowTemplates: React.FC = () => {
 
   const loadTemplates = useCallback(async () => {
     setLoading(true);
-    const { data } = await (supabase.from("attendance_flow_templates" as any) as any)
+    const { data } = await (db.from("attendance_flow_templates" as any) as any)
       .select("*")
       .order("created_at", { ascending: false });
     if (data) {
@@ -239,10 +239,10 @@ const FlowTemplates: React.FC = () => {
   useEffect(() => { loadTemplates(); }, [loadTemplates]);
 
   useEffect(() => {
-    supabase.from("profiles").select("id, full_name").then(({ data }) => {
+    db.from("profiles").select("id, full_name").then(({ data }) => {
       if (data) setAgents(data);
     });
-    (supabase.from("conversation_labels" as any) as any).select("*").order("name").then(({ data }: { data: any }) => {
+    (db.from("conversation_labels" as any) as any).select("*").order("name").then(({ data }: { data: any }) => {
       if (data) setLabels(data);
     });
   }, []);
@@ -306,12 +306,12 @@ const FlowTemplates: React.FC = () => {
       };
 
       if (editingTemplate) {
-        await (supabase.from("attendance_flow_templates" as any) as any)
+        await (db.from("attendance_flow_templates" as any) as any)
           .update(payload)
           .eq("id", editingTemplate.id);
         toast.success("Template atualizado!");
       } else {
-        await (supabase.from("attendance_flow_templates" as any) as any).insert({ ...payload, usage_count: 0 });
+        await (db.from("attendance_flow_templates" as any) as any).insert({ ...payload, usage_count: 0 });
         toast.success("Template criado!");
       }
 
@@ -326,7 +326,7 @@ const FlowTemplates: React.FC = () => {
 
   const handleDelete = async (id: string) => {
     if (!confirm("Excluir este template?")) return;
-    await (supabase.from("attendance_flow_templates" as any) as any).delete().eq("id", id);
+    await (db.from("attendance_flow_templates" as any) as any).delete().eq("id", id);
     toast.success("Template excluído!");
     loadTemplates();
   };

@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { FloatingInput } from "@/components/ui/floating-input";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import ColorPicker from "@/components/shared/ColorPicker";
@@ -27,7 +27,7 @@ const Categories = () => {
 
   const fetchCats = useCallback(async () => {
     if (!user) return;
-    const { data } = await supabase.from("categories").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
+    const { data } = await db.from("categories").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
     if (data) setCategories(data as Category[]);
     setLoading(false);
   }, [user]);
@@ -56,11 +56,11 @@ const Categories = () => {
       return;
     }
     if (editingCat) {
-      const { error } = await supabase.from("categories").update({ name: catName.trim(), description: null, color: catColor }).eq("id", editingCat.id);
+      const { error } = await db.from("categories").update({ name: catName.trim(), description: null, color: catColor }).eq("id", editingCat.id);
       if (error) { toast.error("Erro ao atualizar categoria"); return; }
       toast.success("Categoria atualizada!");
     } else {
-      const { error } = await supabase.from("categories").insert({ name: catName.trim(), description: null, color: catColor, user_id: user.id });
+      const { error } = await db.from("categories").insert({ name: catName.trim(), description: null, color: catColor, user_id: user.id });
       if (error) { toast.error("Erro ao criar categoria"); return; }
       toast.success("Categoria criada!");
     }
@@ -75,7 +75,7 @@ const Categories = () => {
 
   const handleDeleteCat = async () => {
     if (!catToDelete) return;
-    const { error } = await supabase.from("categories").delete().eq("id", catToDelete.id);
+    const { error } = await db.from("categories").delete().eq("id", catToDelete.id);
     if (error) { toast.error("Erro ao excluir"); return; }
     toast.success("Categoria excluída!");
     setDeleteDialogOpen(false);

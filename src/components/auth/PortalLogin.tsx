@@ -43,7 +43,12 @@ const PortalLogin = ({ portal, title, subtitle, showRegisterLink = false }: Port
     e.preventDefault();
     setLoading(true);
     try {
-      await api.post('/auth/login', { email, password });
+      const res = await api.post<{ csrfToken?: string }>('/auth/login', { email, password });
+      // Store CSRF token as a cookie on this domain so getCsrfToken() can read it
+      if (res?.csrfToken) {
+        const secure = location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = `csrf_token=${res.csrfToken}; path=/${secure}; SameSite=Lax`;
+      }
       await refreshUser();
       toast.success("Login realizado com sucesso!");
     } catch (err: unknown) {

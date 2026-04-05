@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 export interface CiabraCustomer {
   fullName: string;
@@ -33,7 +33,7 @@ export interface CiabraInvoice {
 }
 
 async function callCiabra(action: string, params: Record<string, unknown> = {}) {
-  const { data, error } = await supabase.functions.invoke("ciabra", {
+  const { data, error } = await db.functions.invoke("ciabra", {
     body: { action, ...params },
   });
 

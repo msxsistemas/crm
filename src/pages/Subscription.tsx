@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -69,7 +69,7 @@ const SubscriptionPage = () => {
 
   useEffect(() => {
     const loadPlans = async () => {
-      const { data } = await supabase
+      const { data } = await db
         .from("reseller_plans")
         .select("id, name, description, price, max_connections, max_users, max_contacts")
         .eq("is_active", true)
@@ -83,7 +83,7 @@ const SubscriptionPage = () => {
 
     const loadSubscription = async () => {
       if (!user) return;
-      const { data } = await supabase
+      const { data } = await db
         .from("subscriptions")
         .select("*, plan:reseller_plans(*)")
         .eq("user_id", user.id)
@@ -156,11 +156,9 @@ const SubscriptionPage = () => {
         ],
       });
 
-      console.log("Invoice response:", JSON.stringify(invoiceData));
-
       // 3. Save pending subscription in database
       const invoiceId = invoiceData?.id || invoiceData?.invoiceId;
-      await supabase.from("subscriptions").insert({
+      await db.from("subscriptions").insert({
         user_id: user.id,
         plan_id: selected.id,
         status: "pending",

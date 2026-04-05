@@ -46,7 +46,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { createInstance, getQRCode, getInstanceStatus, sendMessage, setupWebhook } from "@/lib/evolution-api";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
@@ -213,7 +213,7 @@ const Inbox = () => {
         const sendInst = convo.instance_name || instanceName;
         await Promise.all([
           sendMessage(sendInst, convo.contacts.phone, qm.content),
-          supabase.from("messages").insert({
+          db.from("messages").insert({
             conversation_id: qm.conversationId,
             from_me: true,
             body: qm.content,
@@ -448,13 +448,13 @@ const Inbox = () => {
   // Typing indicator: subscribe/unsubscribe per active conversation
   useEffect(() => {
     if (typingChannelRef.current) {
-      supabase.removeChannel(typingChannelRef.current);
+      db.removeChannel(typingChannelRef.current);
       typingChannelRef.current = null;
     }
     setTypingUsers([]);
     if (!selected) return;
 
-    const channel = supabase.channel(`typing:${selected}`, {
+    const channel = db.channel(`typing:${selected}`, {
       config: { presence: { key: user?.id || "anon" } },
     });
 
@@ -476,7 +476,7 @@ const Inbox = () => {
 
     return () => {
       if (typingDebounceRef.current) clearTimeout(typingDebounceRef.current);
-      supabase.removeChannel(channel);
+      db.removeChannel(channel);
       typingChannelRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -502,7 +502,7 @@ const Inbox = () => {
   // Load message reactions for the active conversation
   const loadMessageReactions = useCallback(async (conversationId: string) => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("message_reactions" as any)
         .select("message_id, user_id, emoji, profiles(full_name)")
         .filter("message_id", "like", `%${conversationId}%`);
@@ -577,13 +577,13 @@ const Inbox = () => {
 
       try {
         if (alreadyReacted) {
-          await (supabase.from("message_reactions" as any) as any)
+          await (db.from("message_reactions" as any) as any)
             .delete()
             .eq("message_id", msgId)
             .eq("user_id", user.id)
             .eq("emoji", emoji);
         } else {
-          await (supabase.from("message_reactions" as any) as any).upsert({
+          await (db.from("message_reactions" as any) as any).upsert({
             message_id: msgId,
             user_id: user.id,
             emoji,
@@ -618,10 +618,10 @@ const Inbox = () => {
     });
   };
   // Toggle starred in DB and local state
-  const toggleStarred = async (convoId: string, currentStarred: boolean) => {
-    await supabase.from("conversations").update({ starred: !currentStarred }).eq("id", convoId);
+  const toggleStarred = useCallback(async (convoId: string, currentStarred: boolean) => {
+    await db.from("conversations").update({ starred: !currentStarred }).eq("id", convoId);
     setConversations(prev => prev.map(c => c.id === convoId ? { ...c, starred: !currentStarred } : c));
-  };
+  }, []);
 
   // Audio recording functions
   const startRecording = async () => {
@@ -674,13 +674,13 @@ const Inbox = () => {
     const fileName = `audio/${selected}_${timestamp}.webm`;
 
     try {
-      const { error: uploadError } = await supabase.storage
+      const { error: uploadError } = await db.storage
         .from("chat-media")
         .upload(fileName, audioBlob, { contentType: "audio/webm", upsert: true });
 
       if (uploadError) { toast.error("Erro ao enviar áudio: " + uploadError.message); return; }
 
-      const { data: urlData } = supabase.storage.from("chat-media").getPublicUrl(fileName);
+      const { data: urlData } = db.storage.from("chat-media").getPublicUrl(fileName);
       const publicUrl = urlData.publicUrl;
 
       const sendInstanceName = convo.instance_name || instanceName;
@@ -698,7 +698,7 @@ const Inbox = () => {
 
       const [, dbResult] = await Promise.all([
         sendMessage(sendInstanceName, convo.contacts.phone, publicUrl),
-        supabase.from("messages").insert({
+        db.from("messages").insert({
           conversation_id: selected,
           from_me: true,
           body: "🎤 Áudio",
@@ -711,7 +711,7 @@ const Inbox = () => {
       if (dbResult.data) {
         setMessages((prev) => prev.map((m) => m.id === optimisticMsg.id ? (dbResult.data as DBMessage) : m));
       }
-      await supabase.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", selected);
+      await db.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", selected);
 
       if (audioUrl) URL.revokeObjectURL(audioUrl);
       setAudioBlob(null);
@@ -734,7 +734,7 @@ const Inbox = () => {
   // Fetch profile name and signing preference
   useEffect(() => {
     if (!user) return;
-    supabase.from("profiles").select("full_name, signing_enabled").eq("id", user.id).single().then(({ data }) => {
+    db.from("profiles").select("full_name, signing_enabled").eq("id", user.id).single().then(({ data }) => {
       setProfileName(data?.full_name || user.user_metadata?.full_name || null);
       if (data?.signing_enabled !== undefined && data?.signing_enabled !== null) {
         setSigning(data.signing_enabled);
@@ -744,7 +744,7 @@ const Inbox = () => {
 
   // Helper to refresh contact_tags map
   const refreshContactTags = useCallback(async () => {
-    const { data } = await supabase.from("contact_tags").select("contact_id, tag_id, created_at").order("created_at", { ascending: true });
+    const { data } = await db.from("contact_tags").select("contact_id, tag_id, created_at").order("created_at", { ascending: true });
     if (data) {
       const map = new Map<string, string[]>();
       for (const ct of data) {
@@ -758,7 +758,7 @@ const Inbox = () => {
 
   // Load all conversation labels
   useEffect(() => {
-    supabase.from("conversation_labels" as any).select("*").order("name").then(({ data }) => {
+    db.from("conversation_labels" as any).select("*").order("name").then(({ data }) => {
       if (data) setAllLabels(data as ConversationLabel[]);
     });
   }, []);
@@ -767,10 +767,10 @@ const Inbox = () => {
   useEffect(() => {
     if (!user) return;
     Promise.all([
-      supabase.from("categories").select("id, name").eq("user_id", user.id),
-      supabase.from("evolution_connections").select("instance_name").eq("user_id", user.id),
-      supabase.from("tags").select("id, name, color").eq("user_id", user.id),
-      supabase.from("profiles").select("id, full_name"),
+      db.from("categories").select("id, name").eq("user_id", user.id),
+      db.from("evolution_connections").select("instance_name").eq("user_id", user.id),
+      db.from("tags").select("id, name, color").eq("user_id", user.id),
+      db.from("profiles").select("id, full_name"),
     ]).then(([dRes, cRes, tRes, aRes]) => {
       if (dRes.data) setDepartments(dRes.data);
       if (cRes.data) setConnectionsList(cRes.data);
@@ -782,33 +782,33 @@ const Inbox = () => {
 
   // Load quick replies for slash autocomplete
   useEffect(() => {
-    supabase.from("quick_replies").select("shortcut, message").order("created_at").then(({ data }) => {
+    db.from("quick_replies").select("shortcut, message").order("created_at").then(({ data }) => {
       if (data) setQuickRepliesForSlash(data);
     });
   }, []);
 
   // Realtime subscription on contact_tags to keep cards in sync
   useEffect(() => {
-    const channel = supabase
+    const channel = db
       .channel("contact_tags_changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "contact_tags" }, () => {
         refreshContactTags();
         // Also refresh tags list in case a new tag was created
         if (user) {
-          supabase.from("tags").select("id, name, color").eq("user_id", user.id).then(({ data }) => {
+          db.from("tags").select("id, name, color").eq("user_id", user.id).then(({ data }) => {
             if (data) setTags(data);
           });
         }
       })
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => { db.removeChannel(channel); };
   }, [refreshContactTags, user]);
 
   // Fetch the connected instance name from evolution_connections
   useEffect(() => {
     const fetchInstance = async () => {
       if (!user) return;
-      const { data } = await supabase
+      const { data } = await db
         .from("evolution_connections")
         .select("instance_name")
         .eq("user_id", user.id)
@@ -822,7 +822,7 @@ const Inbox = () => {
 
   // Load conversations
   const loadConversations = useCallback(async () => {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("conversations")
       .select("id, contact_id, instance_name, status, unread_count, last_message_at, assigned_to, category_id, starred, sentiment, label_ids, created_at, is_merged, merged_into, contacts(*)")
       .eq("is_merged", false)
@@ -835,7 +835,7 @@ const Inbox = () => {
       // Fetch last message for each conversation
       if (convos.length > 0) {
         const ids = convos.map((c) => c.id);
-        const { data: msgs } = await supabase
+        const { data: msgs } = await db
           .from("messages")
           .select("conversation_id, body, created_at")
           .in("conversation_id", ids)
@@ -861,7 +861,7 @@ const Inbox = () => {
   // Load active blacklist phones
   const loadBlacklist = useCallback(async () => {
     try {
-      const { data } = await supabase
+      const { data } = await db
         .from("blacklist" as any)
         .select("phone, expires_at, is_active")
         .eq("is_active", true);
@@ -894,7 +894,7 @@ const Inbox = () => {
 
   // Load messages for selected conversation
   const loadMessages = useCallback(async (conversationId: string) => {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("messages")
       .select("*")
       .eq("conversation_id", conversationId)
@@ -949,7 +949,7 @@ const Inbox = () => {
 
   // Realtime subscriptions
   useEffect(() => {
-    const messagesChannel = supabase
+    const messagesChannel = db
       .channel("messages-realtime")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (payload) => {
         const newMsg = payload.new as DBMessage;
@@ -987,7 +987,7 @@ const Inbox = () => {
             const infoMsg = "**INFORMAÇÃO** Infelizmente não é possível enviar ou escutar áudios por este canal de atendimento. Envie uma mensagem de **texto**!";
             const sendInst = convo.instance_name || instanceNameRef.current;
             sendMessage(sendInst, convo.contacts.phone, infoMsg).catch(() => {});
-            supabase.from("messages").insert({
+            db.from("messages").insert({
               conversation_id: newMsg.conversation_id,
               from_me: true,
               body: infoMsg,
@@ -999,7 +999,7 @@ const Inbox = () => {
       })
       .subscribe();
 
-    const convosChannel = supabase
+    const convosChannel = db
       .channel("conversations-realtime")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "conversations" }, (payload) => {
         const newConvo = payload.new as { id: string; assigned_to: string | null };
@@ -1018,8 +1018,8 @@ const Inbox = () => {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(messagesChannel);
-      supabase.removeChannel(convosChannel);
+      db.removeChannel(messagesChannel);
+      db.removeChannel(convosChannel);
     };
   }, [selected, loadConversations, soundEnabled, distConfig]);
 
@@ -1037,11 +1037,11 @@ const Inbox = () => {
     // Atualiza estado local imediatamente para o badge sumir
     setConversations((prev) => prev.map((c) => c.id === id ? { ...c, unread_count: 0 } : c));
     await loadMessages(id);
-    await supabase.from("conversations").update({ unread_count: 0 }).eq("id", id);
+    await db.from("conversations").update({ unread_count: 0 }).eq("id", id);
     // Load disable_chatbot for selected contact
     const selectedConvo = conversations.find((c) => c.id === id);
     if (selectedConvo?.contact_id) {
-      const { data } = await supabase
+      const { data } = await db
         .from("contacts")
         .select("disable_chatbot")
         .eq("id", selectedConvo.contact_id)
@@ -1185,7 +1185,7 @@ const Inbox = () => {
       const sendInstanceName = convo.instance_name || instanceName;
       const [, dbResult] = await Promise.all([
         sendMessage(sendInstanceName, convo.contacts.phone, text),
-        supabase.from("messages").insert({
+        db.from("messages").insert({
           conversation_id: selected,
           from_me: true,
           body: text,
@@ -1198,7 +1198,7 @@ const Inbox = () => {
         setMessages((prev) => prev.map((m) => m.id === optimisticMsg.id ? (dbResult.data as DBMessage) : m));
       }
 
-      await supabase.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", selected);
+      await db.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", selected);
     } catch (err: any) {
       // Remove optimistic message on failure
       setMessages((prev) => prev.filter((m) => m.id !== optimisticMsg.id));
@@ -1208,7 +1208,7 @@ const Inbox = () => {
   };
 
   const openHsmDialog = async () => {
-    const { data } = await supabase
+    const { data } = await db
       .from("hsm_templates")
       .select("*")
       .eq("status", "approved")
@@ -1231,7 +1231,7 @@ const Inbox = () => {
   const openCatalogDialog = async () => {
     setCatalogSearch("");
     setSelectedProducts(new Set());
-    const { data } = await supabase
+    const { data } = await db
       .from("products")
       .select("id, name, description, price, image_url, active")
       .eq("active", true)
@@ -1274,7 +1274,7 @@ const Inbox = () => {
         const body = lines.join("\n");
 
         await sendMessage(sendInst, convo.contacts.phone, body);
-        await supabase.from("messages").insert({
+        await db.from("messages").insert({
           conversation_id: selected,
           from_me: true,
           body,
@@ -1310,14 +1310,14 @@ const Inbox = () => {
       const sendInstanceName = convo.instance_name || instanceName;
       await Promise.all([
         sendMessage(sendInstanceName, convo.contacts.phone, body),
-        supabase.from("messages").insert({
+        db.from("messages").insert({
           conversation_id: selected,
           from_me: true,
           body,
           status: "sent",
         }),
       ]);
-      await supabase.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", selected);
+      await db.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", selected);
       toast.success("Template HSM enviado!");
       setHsmDialogOpen(false);
       setHsmSelected(null);
@@ -1331,7 +1331,7 @@ const Inbox = () => {
   const handleScheduleMessage = async (dateTime: string) => {
     const convoForSchedule = conversations.find((c) => c.id === selected);
     if (!convoForSchedule || !messageInput.trim()) return;
-    const { error } = await supabase.from("schedules").insert({
+    const { error } = await db.from("schedules").insert({
       user_id: user?.id,
       contact_name: convoForSchedule.contacts.name || convoForSchedule.contacts.phone,
       contact_phone: convoForSchedule.contacts.phone,
@@ -1434,7 +1434,7 @@ const Inbox = () => {
     const id = convoId || selected;
     if (!id) return;
     try {
-      const { error } = await supabase.from("conversations").update({ unread_count: 0, status: "in_progress" }).eq("id", id);
+      const { error } = await db.from("conversations").update({ unread_count: 0, status: "in_progress" }).eq("id", id);
       if (error) { toast.error("Erro ao atender"); return; }
       setSelected(id);
       setActiveTab("atendendo");
@@ -1452,7 +1452,7 @@ const Inbox = () => {
         const sendInstanceName = convo.instance_name || instanceName;
         await Promise.all([
           sendMessage(sendInstanceName, convo.contacts.phone, closingMessage),
-          supabase.from("messages").insert({
+          db.from("messages").insert({
             conversation_id: selected,
             from_me: true,
             body: closingMessage,
@@ -1460,7 +1460,7 @@ const Inbox = () => {
           }),
         ]);
       }
-      const { error } = await supabase.from("conversations").update({ status: "closed", awaiting_csat: false } as any).eq("id", selected);
+      const { error } = await db.from("conversations").update({ status: "closed", awaiting_csat: false } as any).eq("id", selected);
       if (error) { toast.error("Erro ao encerrar"); return; }
 
       // Auto CSAT survey
@@ -1471,13 +1471,13 @@ const Inbox = () => {
         try {
           await Promise.all([
             sendMessage(sendInstanceName, convo.contacts.phone, csatMessage),
-            supabase.from("messages").insert({
+            db.from("messages").insert({
               conversation_id: selected,
               from_me: true,
               body: csatMessage,
               status: "sent",
             }),
-            supabase.from("conversations").update({ awaiting_csat: true } as any).eq("id", selected),
+            db.from("conversations").update({ awaiting_csat: true } as any).eq("id", selected),
           ]);
         } catch {
           // Non-blocking: CSAT send failure should not break the close flow
@@ -1495,7 +1495,7 @@ const Inbox = () => {
     const currentConvo = conversations.find((c) => c.id === selected);
     if (!currentConvo?.contact_id) return;
     const newValue = !contactDisableChatbot;
-    await supabase.from("contacts").update({ disable_chatbot: newValue }).eq("id", currentConvo.contact_id);
+    await db.from("contacts").update({ disable_chatbot: newValue }).eq("id", currentConvo.contact_id);
     setContactDisableChatbot(newValue);
     toast.success(newValue ? "Bot pausado para este contato" : "Bot reativado para este contato");
   };
@@ -1515,12 +1515,12 @@ const Inbox = () => {
       const update = type === "user"
         ? { assigned_to: targetId } as any
         : { category_id: targetId } as any;
-      const { error } = await supabase.from("conversations").update(update).eq("id", selected);
+      const { error } = await db.from("conversations").update(update).eq("id", selected);
       if (error) { toast.error("Erro ao transferir conversa"); return; }
 
       // Insert into conversation_transfers for history
       if (type === "user" && user) {
-        await (supabase.from("conversation_transfers" as any) as any).insert({
+        await (db.from("conversation_transfers" as any) as any).insert({
           conversation_id: selected,
           from_agent_id: user.id,
           from_agent_name: profileName || user.email || "Agente",
@@ -1533,7 +1533,7 @@ const Inbox = () => {
       // Insert transfer note as internal note (if provided or always as log)
       const noteContent = `[Transferência] ${transferNote || `Conversa transferida para ${targetName}`}`;
       const authorName = profileName || user?.email || "Agente";
-      await supabase.from("conversation_notes").insert({
+      await db.from("conversation_notes").insert({
         conversation_id: selected,
         user_id: user?.id,
         content: noteContent,
@@ -1545,7 +1545,7 @@ const Inbox = () => {
       if (type === "user") {
         const convo = conversations.find((c) => c.id === selected);
         const contactName = convo?.contacts?.name || convo?.contacts?.phone || "";
-        await supabase.from("notifications").insert({
+        await db.from("notifications").insert({
           user_id: targetId,
           title: "Conversa transferida para você",
           body: contactName + (transferNote ? ": " + transferNote : ""),
@@ -1570,14 +1570,14 @@ const Inbox = () => {
       // Check if contact already exists
       let contactId: string;
       const rawPhone = unformatPhone(newPhone);
-      const { data: existing } = await supabase.from("contacts").select("id").eq("phone", rawPhone).limit(1);
+      const { data: existing } = await db.from("contacts").select("id").eq("phone", rawPhone).limit(1);
       if (existing && existing.length > 0) {
         contactId = existing[0].id;
         if (newName.trim()) {
-          await supabase.from("contacts").update({ name: newName.trim() }).eq("id", contactId);
+          await db.from("contacts").update({ name: newName.trim() }).eq("id", contactId);
         }
       } else {
-        const { data: newContact, error } = await supabase.from("contacts").insert({
+        const { data: newContact, error } = await db.from("contacts").insert({
           phone: rawPhone,
           name: newName.trim() || null,
         }).select().single();
@@ -1586,13 +1586,13 @@ const Inbox = () => {
       }
 
       // Check if conversation already exists
-      const { data: existingConvo } = await supabase.from("conversations").select("id").eq("contact_id", contactId).limit(1);
+      const { data: existingConvo } = await db.from("conversations").select("id").eq("contact_id", contactId).limit(1);
       if (existingConvo && existingConvo.length > 0) {
         setSelected(existingConvo[0].id);
         await loadMessages(existingConvo[0].id);
         toast.info("Conversa já existente selecionada");
       } else {
-        const { data: newConvo, error } = await supabase.from("conversations").insert({
+        const { data: newConvo, error } = await db.from("conversations").insert({
           contact_id: contactId,
           instance_name: newConvoInstance || instanceName || "default",
           status: "open",
@@ -1616,7 +1616,7 @@ const Inbox = () => {
   // Bulk actions
   const handleBulkClose = async () => {
     const ids = Array.from(selectedConvos);
-    await supabase.from("conversations").update({ status: "closed", updated_at: new Date().toISOString() }).in("id", ids);
+    await db.from("conversations").update({ status: "closed", updated_at: new Date().toISOString() }).in("id", ids);
     setSelectedConvos(new Set());
     toast.success(`${ids.length} conversa(s) encerrada(s)`);
     loadConversations();
@@ -1624,7 +1624,7 @@ const Inbox = () => {
 
   const handleBulkMarkRead = async () => {
     const ids = Array.from(selectedConvos);
-    await supabase.from("conversations").update({ unread_count: 0, updated_at: new Date().toISOString() }).in("id", ids);
+    await db.from("conversations").update({ unread_count: 0, updated_at: new Date().toISOString() }).in("id", ids);
     setSelectedConvos(new Set());
     toast.success(`${ids.length} conversa(s) marcada(s) como lida(s)`);
     loadConversations();
@@ -1635,7 +1635,7 @@ const Inbox = () => {
     if (!selected) return;
     const currentConvo = conversations.find((c) => c.id === selected);
     if (!currentConvo) return;
-    const { data } = await supabase
+    const { data } = await db
       .from("conversations")
       .select("*, contacts(name, phone)")
       .eq("contact_id", currentConvo.contact_id)
@@ -1651,22 +1651,22 @@ const Inbox = () => {
     setMerging(true);
     try {
       // 1. Move messages
-      await supabase.from("messages")
+      await db.from("messages")
         .update({ conversation_id: targetConversationId })
         .eq("conversation_id", selected);
 
       // 2. Move notes
-      await supabase.from("conversation_notes" as any)
+      await db.from("conversation_notes" as any)
         .update({ conversation_id: targetConversationId })
         .eq("conversation_id", selected);
 
       // 3. Mark current as merged
-      await supabase.from("conversations")
+      await db.from("conversations")
         .update({ is_merged: true, merged_into: targetConversationId, status: "closed" } as any)
         .eq("id", selected);
 
       // 4. Insert system message in target
-      await supabase.from("messages").insert({
+      await db.from("messages").insert({
         conversation_id: targetConversationId,
         content: "[Sistema] Conversa mesclada: histórico importado de uma conversa anterior.",
         body: "[Sistema] Conversa mesclada: histórico importado de uma conversa anterior.",
@@ -1692,7 +1692,7 @@ const Inbox = () => {
   // Load flow templates
   const loadFlowTemplates = useCallback(async () => {
     setFlowTemplatesLoading(true);
-    const { data } = await (supabase.from("attendance_flow_templates" as any) as any)
+    const { data } = await (db.from("attendance_flow_templates" as any) as any)
       .select("*")
       .order("name");
     if (data) {
@@ -1726,15 +1726,15 @@ const Inbox = () => {
           const sendInstanceName = convo.instance_name || instanceName;
           const { sendMessage: sendMsg } = await import("@/lib/evolution-api");
           await sendMsg(sendInstanceName, convo.contacts.phone, step.config.message);
-          await supabase.from("messages").insert({
+          await db.from("messages").insert({
             conversation_id: selected,
             from_me: true,
             body: step.config.message,
             status: "sent",
           });
-          await supabase.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", selected);
+          await db.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", selected);
         } else if (step.type === "send_note" && step.config.note) {
-          await supabase.from("conversation_notes").insert({
+          await db.from("conversation_notes").insert({
             conversation_id: selected,
             user_id: user?.id,
             content: step.config.note,
@@ -1742,10 +1742,10 @@ const Inbox = () => {
             is_internal: true,
           } as any);
         } else if (step.type === "close_conversation") {
-          await supabase.from("conversations").update({ status: "closed" }).eq("id", selected);
+          await db.from("conversations").update({ status: "closed" }).eq("id", selected);
           setConversations((prev) => prev.map((c) => c.id === selected ? { ...c, status: "closed" } : c));
         } else if (step.type === "assign_agent" && step.config.agent_id) {
-          await supabase.from("conversations").update({ assigned_to: step.config.agent_id } as any).eq("id", selected);
+          await db.from("conversations").update({ assigned_to: step.config.agent_id } as any).eq("id", selected);
           setConversations((prev) => prev.map((c) => c.id === selected ? { ...c, assigned_to: step.config.agent_id! } : c));
         } else if (step.type === "add_label" && step.config.label_id) {
           const currentConvo = conversations.find((c) => c.id === selected);
@@ -1753,7 +1753,7 @@ const Inbox = () => {
             const current = currentConvo.label_ids || [];
             if (!current.includes(step.config.label_id)) {
               const next = [...current, step.config.label_id];
-              await (supabase.from("conversations") as any).update({ label_ids: next }).eq("id", selected);
+              await (db.from("conversations") as any).update({ label_ids: next }).eq("id", selected);
               setConversations((prev) => prev.map((c) => c.id === selected ? { ...c, label_ids: next } : c));
             }
           }
@@ -1761,13 +1761,13 @@ const Inbox = () => {
           // Tag is applied by name; look up existing tag
           const existingTag = tags.find((t) => t.name.toLowerCase() === step.config.tag!.toLowerCase());
           if (existingTag && convo.contact_id) {
-            await supabase.from("contact_tags").upsert({ contact_id: convo.contact_id, tag_id: existingTag.id });
+            await db.from("contact_tags").upsert({ contact_id: convo.contact_id, tag_id: existingTag.id });
             refreshContactTags();
           }
         } else if (step.type === "remove_tag" && step.config.tag) {
           const existingTag = tags.find((t) => t.name.toLowerCase() === step.config.tag!.toLowerCase());
           if (existingTag && convo.contact_id) {
-            await supabase.from("contact_tags").delete()
+            await db.from("contact_tags").delete()
               .eq("contact_id", convo.contact_id)
               .eq("tag_id", existingTag.id);
             refreshContactTags();
@@ -1777,7 +1777,7 @@ const Inbox = () => {
       }
 
       // Increment usage_count
-      await (supabase.from("attendance_flow_templates" as any) as any)
+      await (db.from("attendance_flow_templates" as any) as any)
         .update({ usage_count: (template.usage_count || 0) + 1 })
         .eq("id", template.id);
 
@@ -1798,7 +1798,7 @@ const Inbox = () => {
   const loadTransferHistory = useCallback(async (conversationId: string) => {
     setLoadingHistory(true);
     try {
-      const { data } = await (supabase.from("conversation_transfers" as any) as any)
+      const { data } = await (db.from("conversation_transfers" as any) as any)
         .select("*")
         .eq("conversation_id", conversationId)
         .order("transferred_at", { ascending: true });
@@ -1817,7 +1817,7 @@ const Inbox = () => {
     const next = current.includes(labelId)
       ? current.filter(id => id !== labelId)
       : [...current, labelId];
-    await (supabase.from("conversations") as any).update({ label_ids: next }).eq("id", selectedConvo.id);
+    await (db.from("conversations") as any).update({ label_ids: next }).eq("id", selectedConvo.id);
     setConversations(prev => prev.map(c => c.id === selectedConvo.id ? { ...c, label_ids: next } : c));
   };
 
@@ -1836,7 +1836,7 @@ const Inbox = () => {
       }
     }
     const profileNameVal = user?.user_metadata?.full_name || user?.email || null;
-    const { error } = await (supabase.from("blacklist" as any) as any).upsert({
+    const { error } = await (db.from("blacklist" as any) as any).upsert({
       phone: blockPhone.trim(),
       reason: blockReason.trim(),
       blocked_by: user?.id || null,
@@ -1875,7 +1875,7 @@ const Inbox = () => {
           "Sugira 3 respostas curtas e profissionais em português para esta conversa. Retorne apenas as 3 sugestões numeradas, uma por linha.",
       });
 
-      const { data, error } = await supabase.functions.invoke("ai-agent", {
+      const { data, error } = await db.functions.invoke("ai-agent", {
         body: { messages: contextMessages },
       });
 
@@ -1912,7 +1912,7 @@ const Inbox = () => {
     const prompt = `Resuma esta conversa de atendimento em 3-5 frases em português. Inclua: qual é o assunto principal, o que o cliente precisa, e qual foi o desfecho ou status atual.\n\nConversa:\n${context}`;
 
     try {
-      const { data } = await supabase.functions.invoke('ai-agent', {
+      const { data } = await db.functions.invoke('ai-agent', {
         body: { messages: [{ role: 'user', content: prompt }], model: 'claude-haiku-4-5-20251001' }
       });
       setSummary(data?.response || data?.content || data?.message || data?.reply || '');
@@ -1940,7 +1940,7 @@ const Inbox = () => {
     else if (negativeWords.some(w => lower.includes(w))) sentiment = 'negative';
     else if (positiveWords.some(w => lower.includes(w))) sentiment = 'positive';
 
-    await supabase.from('conversations').update({ sentiment } as any).eq('id', conversationId);
+    await db.from('conversations').update({ sentiment } as any).eq('id', conversationId);
     setConversations(prev => prev.map(c => c.id === conversationId ? { ...c, sentiment } : c));
   }
 
@@ -2074,7 +2074,7 @@ const Inbox = () => {
       if (e.key === "n" || e.key === "N") {
         if (!selected) return;
         e.preventDefault();
-        supabase.from("conversations").update({ unread_count: 0 }).eq("id", selected).then(() => {
+        db.from("conversations").update({ unread_count: 0 }).eq("id", selected).then(() => {
           setConversations((prev) => prev.map((c) => c.id === selected ? { ...c, unread_count: 0 } : c));
         });
         return;
@@ -2090,8 +2090,7 @@ const Inbox = () => {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, focusFiltered, conversations, showShortcutsModal, globalSearchOpen]);
+  }, [selected, focusFiltered, conversations, showShortcutsModal, globalSearchOpen, toggleStarred]);
 
   const convoVirtualizer = useVirtualizer({
     count: focusFiltered.length,
@@ -2201,7 +2200,7 @@ const Inbox = () => {
   const loadFileManagerFiles = async () => {
     if (!user) return;
     setFileManagerLoading(true);
-    const { data, error } = await supabase.storage.from('file-manager').list(user.id + '/', { limit: 100 });
+    const { data, error } = await db.storage.from('file-manager').list(user.id + '/', { limit: 100 });
     if (!error && data) {
       setFileManagerFiles(data.filter(f => f.name && f.name !== '.emptyFolderPlaceholder'));
     }
@@ -2216,7 +2215,7 @@ const Inbox = () => {
 
   const handleFileManagerSelect = (file: { name: string; metadata: { size?: number } | null }) => {
     if (!user) return;
-    const publicUrl = supabase.storage.from('file-manager').getPublicUrl(user.id + '/' + file.name).data.publicUrl;
+    const publicUrl = db.storage.from('file-manager').getPublicUrl(user.id + '/' + file.name).data.publicUrl;
     const type = getMediaTypeFromName(file.name);
     setFileManagerSelected({ url: publicUrl, name: file.name, type });
     setFileManagerOpen(false);
@@ -2227,7 +2226,7 @@ const Inbox = () => {
     if (!file || !user) return;
     e.target.value = '';
     const path = user.id + '/' + file.name;
-    const { error } = await supabase.storage.from('file-manager').upload(path, file, { upsert: true });
+    const { error } = await db.storage.from('file-manager').upload(path, file, { upsert: true });
     if (error) { toast.error('Erro ao fazer upload: ' + error.message); return; }
     toast.success('Arquivo enviado!');
     await loadFileManagerFiles();
@@ -2257,7 +2256,7 @@ const Inbox = () => {
       const sendInstanceName = convo.instance_name || instanceName;
       const [, dbResult] = await Promise.all([
         sendMessage(sendInstanceName, convo.contacts.phone, url),
-        supabase.from('messages').insert({
+        db.from('messages').insert({
           conversation_id: selected,
           from_me: true,
           body: name,
@@ -2269,7 +2268,7 @@ const Inbox = () => {
       if (dbResult.data) {
         setMessages((prev) => prev.map((m) => m.id === optimisticMsg.id ? (dbResult.data as DBMessage) : m));
       }
-      await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', selected);
+      await db.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', selected);
     } catch (err: any) {
       setMessages((prev) => prev.filter((m) => m.id !== optimisticMsg.id));
       toast.error('Erro ao enviar arquivo: ' + (err?.message || 'Tente novamente'));
@@ -2866,7 +2865,7 @@ const Inbox = () => {
                                     className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-accent transition-colors"
                                     onClick={async () => {
                                       setSentimentDropdownOpen(false);
-                                      await supabase.from('conversations').update({ sentiment: s } as any).eq('id', selectedConvo.id);
+                                      await db.from('conversations').update({ sentiment: s } as any).eq('id', selectedConvo.id);
                                       setConversations(prev => prev.map(c => c.id === selectedConvo.id ? { ...c, sentiment: s } : c));
                                     }}
                                   >
@@ -3115,7 +3114,7 @@ const Inbox = () => {
               <TagSelector contactId={selectedConvo.contact_id} compact onTagsChange={() => {
                 refreshContactTags();
                 if (user) {
-                  supabase.from("tags").select("id, name, color").eq("user_id", user.id).then(({ data }) => {
+                  db.from("tags").select("id, name, color").eq("user_id", user.id).then(({ data }) => {
                     if (data) setTags(data);
                   });
                 }
@@ -3240,7 +3239,7 @@ const Inbox = () => {
                                 <DropdownMenuItem
                                   className="text-[14px] cursor-pointer hover:bg-accent focus:bg-accent focus:text-accent-foreground rounded px-3 py-2 text-destructive focus:text-destructive"
                                   onClick={async () => {
-                                    const { error } = await supabase.from("messages").delete().eq("id", msg.id);
+                                    const { error } = await db.from("messages").delete().eq("id", msg.id);
                                     if (error) { toast.error("Erro ao deletar"); return; }
                                     setMessages((prev) => prev.filter((m) => m.id !== msg.id));
                                     toast.success("Mensagem deletada");
@@ -3729,7 +3728,7 @@ const Inbox = () => {
                     <SignatureButton
                       userName={profileName}
                       signing={signing}
-                      onToggle={async () => { const next = !signing; setSigning(next); if (user) { const { error } = await supabase.from("profiles").update({ signing_enabled: next }).eq("id", user.id); if (error) setSigning(!next); } }}
+                      onToggle={async () => { const next = !signing; setSigning(next); if (user) { const { error } = await db.from("profiles").update({ signing_enabled: next }).eq("id", user.id); if (error) setSigning(!next); } }}
                       disabled={uploading}
                     />
                     <QuickMessagesButton
@@ -4056,7 +4055,7 @@ const Inbox = () => {
                     .filter((f) => f.name.toLowerCase().includes(fileManagerSearch.toLowerCase()))
                     .map((file) => {
                       const type = getMediaTypeFromName(file.name);
-                      const publicUrl = user ? supabase.storage.from('file-manager').getPublicUrl(user.id + '/' + file.name).data.publicUrl : '';
+                      const publicUrl = user ? db.storage.from('file-manager').getPublicUrl(user.id + '/' + file.name).data.publicUrl : '';
                       return (
                         <button
                           key={file.name}
@@ -4199,13 +4198,13 @@ const Inbox = () => {
                   await Promise.all(targets.map(async (convo) => {
                     const sendInst = convo.instance_name || instanceName;
                     await sendMessage(sendInst, convo.contacts.phone, fwdBody);
-                    await supabase.from("messages").insert({
+                    await db.from("messages").insert({
                       conversation_id: convo.id,
                       from_me: true,
                       body: fwdBody,
                       status: "sent",
                     });
-                    await supabase.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", convo.id);
+                    await db.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", convo.id);
                   }));
                   toast.success(`Encaminhado para ${targets.length} conversa(s)`);
                   setForwardingMsg(null);

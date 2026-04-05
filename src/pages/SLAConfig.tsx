@@ -37,7 +37,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -375,7 +375,7 @@ const SLAConfig = () => {
   const loadRules = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("sla_rules" as never)
         .select("*")
         .order("created_at", { ascending: true });
@@ -406,14 +406,14 @@ const SLAConfig = () => {
       };
 
       if (editingRule) {
-        const { error } = await supabase
+        const { error } = await db
           .from("sla_rules" as never)
           .update(payload as never)
           .eq("id" as never, editingRule.id);
         if (error) throw error;
         toast.success("Regra atualizada com sucesso");
       } else {
-        const { error } = await supabase
+        const { error } = await db
           .from("sla_rules" as never)
           .insert(payload as never);
         if (error) throw error;
@@ -433,7 +433,7 @@ const SLAConfig = () => {
   const handleDelete = async () => {
     if (!deleteId) return;
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from("sla_rules" as never)
         .delete()
         .eq("id" as never, deleteId);
@@ -449,7 +449,7 @@ const SLAConfig = () => {
   const handleToggle = async (rule: SLARule) => {
     setToggling(rule.id);
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from("sla_rules" as never)
         .update({ is_active: !rule.is_active } as never)
         .eq("id" as never, rule.id);

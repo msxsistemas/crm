@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 export async function logAudit(
   action: string,
@@ -9,16 +9,16 @@ export async function logAudit(
 ) {
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await db.auth.getUser();
   if (!user) return;
 
-  const { data: profile } = await supabase
+  const { data: profile } = await db
     .from("profiles")
     .select("name")
     .eq("id", user.id)
     .single();
 
-  supabase
+  db
     .from("access_audit")
     .insert({
       user_id: user.id,

@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 interface Product {
   id: string;
@@ -58,7 +58,7 @@ const Products = () => {
     if (!user) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("products")
         .select("*")
         .eq("user_id", user.id)
@@ -115,7 +115,7 @@ const Products = () => {
       };
 
       if (editingId) {
-        const { error } = await supabase
+        const { error } = await db
           .from("products")
           .update(payload)
           .eq("id", editingId)
@@ -123,7 +123,7 @@ const Products = () => {
         if (error) throw error;
         toast.success("Produto atualizado!");
       } else {
-        const { error } = await supabase
+        const { error } = await db
           .from("products")
           .insert(payload);
         if (error) throw error;
@@ -144,7 +144,7 @@ const Products = () => {
     if (!user) return;
     if (!confirm("Deseja excluir este produto?")) return;
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from("products")
         .delete()
         .eq("id", id)
@@ -161,7 +161,7 @@ const Products = () => {
   const handleToggleActive = async (product: Product) => {
     if (!user) return;
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from("products")
         .update({ active: !product.active, updated_at: new Date().toISOString() })
         .eq("id", product.id)

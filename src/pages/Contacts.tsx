@@ -1,4 +1,6 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import api from "@/lib/api";
 import { formatPhoneBR, unformatPhone } from "@/lib/phone-mask";
 import {
   Search, Plus, Download, Upload, Pencil, Trash2, X,
@@ -19,7 +21,7 @@ import { Switch } from "@/components/ui/switch";
 import { FloatingInput } from "@/components/ui/floating-input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card } from "@/components/ui/card";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -61,16 +63,16 @@ function getScoreBadge(score: number | null | undefined) {
 }
 
 async function calculateContactScore(contactId: string): Promise<number> {
-  const { data: rules } = await supabase.from('lead_scoring_rules').select('*').eq('is_active', true);
+  const { data: rules } = await db.from('lead_scoring_rules').select('*').eq('is_active', true);
   let score = 50;
   for (const rule of rules || []) {
     if (rule.condition_type === 'has_conversation') {
-      const { count } = await supabase.from('conversations').select('*', { count: 'exact', head: true })
+      const { count } = await db.from('conversations').select('*', { count: 'exact', head: true })
         .eq('contact_id', contactId).eq('status', rule.condition_value || 'open');
       if ((count || 0) > 0) score += rule.points;
     }
     if (rule.condition_type === 'has_opportunity') {
-      const { count } = await supabase.from('opportunities').select('*', { count: 'exact', head: true })
+      const { count } = await db.from('opportunities').select('*', { count: 'exact', head: true })
         .eq('contact_id', contactId);
       if ((count || 0) > 0) score += rule.points;
     }
@@ -78,17 +80,17 @@ async function calculateContactScore(contactId: string): Promise<number> {
       const days = parseInt(rule.condition_value || '30');
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - days);
-      const { data: contact } = await supabase.from('contacts').select('updated_at').eq('id', contactId).single();
+      const { data: contact } = await db.from('contacts').select('updated_at').eq('id', contactId).single();
       if (contact && new Date((contact as any).updated_at) < cutoff) score += rule.points;
     }
     if (rule.condition_type === 'campaign_opened') {
-      const { count } = await supabase.from('campaign_contacts').select('*', { count: 'exact', head: true })
+      const { count } = await db.from('campaign_contacts').select('*', { count: 'exact', head: true })
         .eq('contact_id', contactId).eq('status', 'sent');
       if ((count || 0) > 0) score += rule.points;
     }
     if (rule.condition_type === 'message_count') {
       const threshold = parseInt(rule.condition_value || '10');
-      const { count } = await supabase.from('messages')
+      const { count } = await db.from('messages')
         .select('id', { count: 'exact', head: true })
         .eq('conversation_id', contactId);
       if ((count || 0) >= threshold) score += rule.points;
@@ -151,6 +153,7 @@ const Contacts = () => {
   // Main tab: "contacts" | "segments"
   const [mainTab, setMainTab] = useState<"contacts" | "segments">("contacts");
 
+  const queryClient = useQueryClient();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -259,7 +262,7 @@ const Contacts = () => {
     for (const id of allContactIds) {
       try {
         const score = await calculateContactScore(id);
-        await supabase.from('contacts').update({
+        await db.from('contacts').update({
           lead_score: score,
           lead_score_updated_at: new Date().toISOString(),
         } as any).eq('id', id);
@@ -272,32 +275,42 @@ const Contacts = () => {
     fetchContacts();
   };
 
-  const fetchContacts = async () => {
-    setLoading(true);
-    const [{ data, error }, { data: convos }] = await Promise.all([
-      supabase.from("contacts").select("*").order("created_at", { ascending: false }),
-      supabase.from("conversations").select("contact_id, last_message_at").order("last_message_at", { ascending: false }),
-    ]);
-
-    if (!error && data) {
+  const fetchContactsQuery = useQuery({
+    queryKey: ['contacts'],
+    queryFn: async (): Promise<Contact[]> => {
+      const [data, convos] = await Promise.all([
+        api.get<Contact[]>('/contacts?limit=9999&order=created_at.desc'),
+        api.get<{ contact_id: string; last_message_at: string }[]>('/conversations?select=contact_id,last_message_at&limit=9999&order=last_message_at.desc'),
+      ]);
       const lastMsgMap = new Map<string, string>();
-      for (const c of convos || []) {
+      for (const c of (convos || [])) {
         if (c.last_message_at && !lastMsgMap.has(c.contact_id)) {
           lastMsgMap.set(c.contact_id, c.last_message_at);
         }
       }
-      const enriched: Contact[] = data.map((c) => ({
+      return (data || []).map((c) => ({
         ...c,
         last_message_at: lastMsgMap.get(c.id) || null,
       }));
-      setContacts(enriched);
+    },
+    staleTime: 30_000,
+  });
+
+  // Sync query result into local state (preserves all existing UI code)
+  useEffect(() => {
+    if (fetchContactsQuery.data !== undefined) {
+      setContacts(fetchContactsQuery.data);
     }
-    setLoading(false);
-  };
+    setLoading(fetchContactsQuery.isLoading);
+  }, [fetchContactsQuery.data, fetchContactsQuery.isLoading]);
+
+  const fetchContacts = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['contacts'] });
+  }, [queryClient]);
 
   const fetchSegments = async () => {
     setSegmentsLoading(true);
-    const { data } = await supabase
+    const { data } = await db
       .from("contact_segments")
       .select("*")
       .order("created_at", { ascending: false });
@@ -315,9 +328,8 @@ const Contacts = () => {
   };
 
   useEffect(() => {
-    fetchContacts();
     // Load available tags for bulk tagging
-    supabase.from("tags").select("id, name, color").then(({ data }) => {
+    db.from("tags").select("id, name, color").then(({ data }) => {
       if (data) setAvailableTags(data);
     });
   }, []);
@@ -327,7 +339,7 @@ const Contacts = () => {
   }, [mainTab]);
 
   const loadWhatsAppConnections = async () => {
-    const { data } = await supabase.from("evolution_connections").select("id, instance_name");
+    const { data } = await db.from("evolution_connections").select("id, instance_name");
     setWhatsappConnections((data || []) as { id: string; instance_name: string }[]);
   };
 
@@ -341,7 +353,7 @@ const Contacts = () => {
     if (!selectedWAInstance) return;
     setImportingWhatsApp(true);
     try {
-      const { data: result, error } = await supabase.functions.invoke("evolution-api", {
+      const { data: result, error } = await db.functions.invoke("evolution-api", {
         body: { action: "fetch_contacts", instanceName: selectedWAInstance },
       });
 
@@ -376,7 +388,7 @@ const Contacts = () => {
       for (let i = 0; i < mapped.length; i += BATCH) {
         const batch = mapped.slice(i, i + BATCH);
         toast.info(`Importando ${Math.min(i + BATCH, mapped.length)} de ${mapped.length} contatos...`);
-        const { error: upsertErr } = await supabase
+        const { error: upsertErr } = await db
           .from("contacts")
           .upsert(batch as any, { onConflict: "phone", ignoreDuplicates: false });
         if (!upsertErr) imported += batch.length;
@@ -528,26 +540,23 @@ const Contacts = () => {
     };
 
     if (editingContact) {
-      const { error } = await supabase
-        .from("contacts")
-        .update(contactData)
-        .eq("id", editingContact.id);
-      if (error) {
-        toast.error("Erro ao atualizar contato");
-      } else {
+      try {
+        await api.patch(`/contacts/${editingContact.id}`, contactData);
         logAudit("edit_contact", "contact", editingContact.id, contactData.name || editingContact.phone);
         toast.success("Contato atualizado!");
         setDialogOpen(false);
-        fetchContacts();
+        queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      } catch {
+        toast.error("Erro ao atualizar contato");
       }
     } else {
-      const { error } = await supabase.from("contacts").insert(contactData);
-      if (error) {
-        toast.error("Erro ao criar contato");
-      } else {
+      try {
+        await api.post('/contacts', contactData);
         toast.success("Contato adicionado!");
         setDialogOpen(false);
-        fetchContacts();
+        queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      } catch {
+        toast.error("Erro ao criar contato");
       }
     }
   };
@@ -559,15 +568,15 @@ const Contacts = () => {
 
   const handleDelete = async () => {
     if (!contactToDelete) return;
-    const { error } = await supabase.from("contacts").delete().eq("id", contactToDelete.id);
-    if (error) {
-      toast.error("Erro ao excluir contato");
-    } else {
+    try {
+      await api.delete(`/contacts/${contactToDelete.id}`);
       logAudit("delete_contact", "contact", contactToDelete.id, contactToDelete.name || contactToDelete.phone);
       toast.success("Contato excluído");
       setDeleteOpen(false);
       setContactToDelete(null);
-      fetchContacts();
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+    } catch {
+      toast.error("Erro ao excluir contato");
     }
   };
 
@@ -654,7 +663,7 @@ const Contacts = () => {
   const handleBulkDelete = async () => {
     setBulkDeleting(true);
     const ids = Array.from(selectedContacts);
-    const { error } = await supabase.from("contacts").delete().in("id", ids);
+    const { error } = await db.from("contacts").delete().in("id", ids);
     setBulkDeleting(false);
     if (error) {
       toast.error("Erro ao excluir contatos");
@@ -679,7 +688,7 @@ const Contacts = () => {
     const rows = contactIds.flatMap((contact_id) =>
       tagIds.map((tag_id) => ({ contact_id, tag_id }))
     );
-    const { error } = await supabase.from("contact_tags").upsert(rows, { onConflict: "contact_id,tag_id", ignoreDuplicates: true });
+    const { error } = await db.from("contact_tags").upsert(rows, { onConflict: "contact_id,tag_id", ignoreDuplicates: true });
     setBulkTagApplying(false);
     if (error) {
       toast.error("Erro ao aplicar tags");
@@ -727,7 +736,7 @@ const Contacts = () => {
       const BATCH = 50;
       for (let i = 0; i < records.length; i += BATCH) {
         const batch = records.slice(i, i + BATCH);
-        const { error } = await supabase.from("contacts").upsert(batch as any, { onConflict: "phone", ignoreDuplicates: false });
+        const { error } = await db.from("contacts").upsert(batch as any, { onConflict: "phone", ignoreDuplicates: false });
         if (!error) imported += batch.length;
       }
 
@@ -746,7 +755,7 @@ const Contacts = () => {
     if (!raw || raw.length < 8) { setDuplicateWarning(null); return; }
     setCheckingDuplicate(true);
     try {
-      const query = supabase.from("contacts").select("id, name").eq("phone", raw).single();
+      const query = db.from("contacts").select("id, name").eq("phone", raw).single();
       const { data: existing } = await query;
       if (existing && (!editingContact || existing.id !== editingContact.id)) {
         setDuplicateWarning({ id: existing.id, name: existing.name });
@@ -828,10 +837,10 @@ const Contacts = () => {
       if (!phone || phone.length < 8) { errors++; setCsvImportProgress(Math.round(((i + 1) / total) * 100)); continue; }
 
       // Duplicate check
-      const { data: existing } = await supabase.from("contacts").select("id").eq("phone", phone).single();
+      const { data: existing } = await db.from("contacts").select("id").eq("phone", phone).single();
       if (existing) { skipped++; setCsvImportProgress(Math.round(((i + 1) / total) * 100)); continue; }
 
-      const { error } = await supabase.from("contacts").insert({
+      const { error } = await db.from("contacts").insert({
         name: name || null,
         phone,
         email: email || null,
@@ -891,14 +900,14 @@ const Contacts = () => {
   };
 
   const buildSegmentQuery = async (criteria: SegmentCriterion[]) => {
-    let query = supabase.from("contacts").select("id, name, phone");
+    let query = db.from("contacts").select("id, name, phone");
 
     for (const c of criteria) {
       if (!c.value.trim()) continue;
 
       if (c.field === "tag") {
         // query contact_tags to find contact IDs with this tag
-        const { data: tagRows } = await supabase
+        const { data: tagRows } = await db
           .from("contact_tags")
           .select("contact_id")
           .ilike("tag", `%${c.value}%`);
@@ -919,7 +928,7 @@ const Contacts = () => {
         const days = parseInt(c.value) || 0;
         const cutoff = subDays(new Date(), days).toISOString();
         // find contacts that have no conversation since cutoff OR never had one
-        const { data: activeConvos } = await supabase
+        const { data: activeConvos } = await db
           .from("conversations")
           .select("contact_id")
           .gte("last_message_at", cutoff);
@@ -980,14 +989,14 @@ const Contacts = () => {
     };
 
     if (editingSegment) {
-      const { error } = await supabase
+      const { error } = await db
         .from("contact_segments")
         .update(payload)
         .eq("id", editingSegment.id);
       if (error) { toast.error("Erro ao salvar segmento"); setSegSaving(false); return; }
       toast.success("Segmento atualizado!");
     } else {
-      const { error } = await supabase.from("contact_segments").insert(payload);
+      const { error } = await db.from("contact_segments").insert(payload);
       if (error) { toast.error("Erro ao criar segmento"); setSegSaving(false); return; }
       toast.success("Segmento criado!");
     }
@@ -998,7 +1007,7 @@ const Contacts = () => {
   };
 
   const handleDeleteSegment = async (id: string) => {
-    const { error } = await supabase.from("contact_segments").delete().eq("id", id);
+    const { error } = await db.from("contact_segments").delete().eq("id", id);
     if (error) { toast.error("Erro ao excluir segmento"); return; }
     toast.success("Segmento excluído");
     fetchSegments();

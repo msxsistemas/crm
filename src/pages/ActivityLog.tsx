@@ -26,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -227,7 +227,7 @@ const ActivityLog = () => {
   // Log page view on mount
   useEffect(() => {
     if (user) {
-      supabase.from("activity_log" as never).insert({
+      db.from("activity_log" as never).insert({
         user_id: user.id,
         action: "page_view",
         entity_type: "page",
@@ -237,14 +237,14 @@ const ActivityLog = () => {
   }, [user]);
 
   const loadProfiles = useCallback(async () => {
-    const { data } = await supabase.from("profiles").select("id, full_name");
+    const { data } = await db.from("profiles").select("id, full_name");
     setProfiles((data as Profile[]) ?? []);
   }, []);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("activity_log" as never)
         .select("*")
         .order("created_at", { ascending: false })

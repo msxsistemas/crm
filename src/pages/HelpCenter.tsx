@@ -15,7 +15,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -86,7 +86,7 @@ const HelpCenter = () => {
   const fetchArticles = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("help_articles")
         .select("*")
         .order("pinned", { ascending: false })
@@ -100,7 +100,7 @@ const HelpCenter = () => {
       const userIds = [...new Set(rows.map(r => r.user_id).filter(Boolean))] as string[];
       let profileMap: Record<string, string> = {};
       if (userIds.length > 0) {
-        const { data: profData } = await supabase
+        const { data: profData } = await db
           .from("profiles")
           .select("id, full_name")
           .in("id", userIds);
@@ -182,7 +182,7 @@ const HelpCenter = () => {
       ? (form.customCategory.trim() || "Geral")
       : form.category;
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user } } = await db.auth.getUser();
 
     setSaving(true);
     try {
@@ -196,14 +196,14 @@ const HelpCenter = () => {
       };
 
       if (editingId) {
-        const { error } = await supabase
+        const { error } = await db
           .from("help_articles")
           .update(payload)
           .eq("id", editingId);
         if (error) throw error;
         toast.success("Artigo atualizado!");
       } else {
-        const { error } = await supabase
+        const { error } = await db
           .from("help_articles")
           .insert({ ...payload, user_id: user?.id ?? null });
         if (error) throw error;
@@ -222,7 +222,7 @@ const HelpCenter = () => {
   const handleDelete = async (id: string) => {
     if (!confirm("Deseja excluir este artigo?")) return;
     try {
-      const { error } = await supabase.from("help_articles").delete().eq("id", id);
+      const { error } = await db.from("help_articles").delete().eq("id", id);
       if (error) throw error;
       toast.success("Artigo excluído!");
       setArticles(prev => prev.filter(a => a.id !== id));
@@ -233,7 +233,7 @@ const HelpCenter = () => {
 
   const handlePinToggle = async (article: HelpArticle) => {
     try {
-      const { error } = await supabase
+      const { error } = await db
         .from("help_articles")
         .update({ pinned: !article.pinned, updated_at: new Date().toISOString() })
         .eq("id", article.id);
@@ -251,7 +251,7 @@ const HelpCenter = () => {
     setViewArticle(article);
     // Increment views
     const newViews = (article.views ?? 0) + 1;
-    await supabase
+    await db
       .from("help_articles")
       .update({ views: newViews })
       .eq("id", article.id);

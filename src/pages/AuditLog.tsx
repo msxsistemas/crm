@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -79,7 +79,7 @@ export default function AuditLog() {
   const fetchEntries = useCallback(async () => {
     setLoading(true);
     try {
-      let query = supabase
+      let query = db
         .from("access_audit")
         .select("*", { count: "exact" })
         .order("created_at", { ascending: false })

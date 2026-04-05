@@ -1,9 +1,9 @@
 import { useState, useRef } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { sendMedia } from "@/lib/evolution-api";
 import { toast } from "sonner";
 
-const SUPABASE_URL = "https://vjpkrulpokzjihlmevht.supabase.co";
+const SUPABASE_URL = "https://vjpkrulpokzjihlmevht.db.co";
 
 function getMediaType(file: File): string {
   if (file.type.startsWith("image/")) return "image";
@@ -57,7 +57,7 @@ export function useMediaUpload() {
 
     try {
       // Upload to Supabase Storage
-      const { error: uploadError } = await supabase.storage
+      const { error: uploadError } = await db.storage
         .from("chat-media")
         .upload(filePath, file, { contentType: file.type });
 
@@ -69,7 +69,7 @@ export function useMediaUpload() {
       await sendMedia(instanceName, phone, publicUrl, mediaType, file.name);
 
       // Persist in DB
-      const { error: dbError } = await supabase.from("messages").insert({
+      const { error: dbError } = await db.from("messages").insert({
         conversation_id: conversationId,
         body: file.name,
         from_me: true,
@@ -80,7 +80,7 @@ export function useMediaUpload() {
 
       if (dbError) throw dbError;
 
-      await supabase
+      await db
         .from("conversations")
         .update({ last_message_at: new Date().toISOString() })
         .eq("id", conversationId);

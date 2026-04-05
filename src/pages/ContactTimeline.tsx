@@ -18,7 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 
 interface Contact {
@@ -109,17 +109,17 @@ export default function ContactTimeline() {
         { data: campaignsData },
         { data: opportunitiesData },
       ] = await Promise.all([
-        supabase.from("contacts").select("*").eq("id", contactId).single(),
-        supabase
+        db.from("contacts").select("*").eq("id", contactId).single(),
+        db
           .from("conversations")
           .select("id, status, created_at, assigned_to, profiles(name)")
           .eq("contact_id", contactId)
           .order("created_at", { ascending: false }),
-        supabase
+        db
           .from("campaign_contacts")
           .select("id, status, sent_at, campaigns(name)")
           .eq("contact_id", contactId),
-        supabase
+        db
           .from("opportunities")
           .select("*")
           .eq("contact_id", contactId),
@@ -137,7 +137,7 @@ export default function ContactTimeline() {
       const convIds = (conversationsData || []).map((c: any) => c.id);
       let notesData: any[] = [];
       if (convIds.length > 0) {
-        const { data: n } = await supabase
+        const { data: n } = await db
           .from("conversation_notes")
           .select("*")
           .in("conversation_id", convIds);

@@ -7,7 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { CreditCard, QrCode, Shield, Settings2, Loader2, Copy } from "lucide-react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 interface GatewayField {
   key: string;
@@ -24,7 +24,7 @@ interface GatewayConfig {
   fields: GatewayField[];
 }
 
-const WEBHOOK_URL = "https://vjpkrulpokzjihlmevht.supabase.co/functions/v1/ciabra-webhook";
+const WEBHOOK_URL = "https://vjpkrulpokzjihlmevht.db.co/functions/v1/ciabra-webhook";
 
 const gatewayConfigs: GatewayConfig[] = [
   {
@@ -97,7 +97,7 @@ const AdminGateway = () => {
   // Load from DB
   useEffect(() => {
     const load = async () => {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("gateway_configs" as any)
         .select("*");
 
@@ -163,7 +163,7 @@ const AdminGateway = () => {
       updated_at: new Date().toISOString(),
     };
 
-    const { error } = await (supabase as any)
+    const { error } = await (db as any)
       .from("gateway_configs")
       .upsert(payload, { onConflict: "gateway_name" });
 

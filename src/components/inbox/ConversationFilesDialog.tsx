@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { FileText, Download, Image, Film, Music, ExternalLink } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 interface MediaFile {
   id: string;
@@ -32,7 +32,7 @@ const ConversationFilesDialog = ({ open, onOpenChange, conversationId, contactNa
     if (!open || !conversationId) return;
     setLoading(true);
     setPage(1);
-    supabase
+    db
       .from("messages")
       .select("id, media_url, media_type, body, created_at, from_me")
       .eq("conversation_id", conversationId)

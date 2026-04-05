@@ -16,7 +16,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { FlowCanvas, FlowNode as CanvasFlowNode, FlowConnection as CanvasFlowConnection } from "@/components/bots/FlowCanvas";
@@ -1259,7 +1259,7 @@ const AnalyticsTab = ({ rules }: { rules: ChatbotRule[] }) => {
     if (!selectedRuleId) { setNodeStats({}); return; }
     const fetchEvents = async () => {
       setLoading(true);
-      const { data: events } = await supabase
+      const { data: events } = await db
         .from("chatbot_node_events")
         .select("node_id, node_type, event_type")
         .eq("rule_id", selectedRuleId)
@@ -1421,7 +1421,7 @@ const GatilhosTab = ({ rules }: { rules: ChatbotRule[] }) => {
 
   const loadTriggers = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from("event_triggers").select("*").order("created_at", { ascending: false });
+    const { data, error } = await db.from("event_triggers").select("*").order("created_at", { ascending: false });
     if (error) { toast.error("Erro ao carregar gatilhos"); }
     else { setTriggers((data as EventTrigger[]) || []); }
     setLoading(false);
@@ -1452,7 +1452,7 @@ const GatilhosTab = ({ rules }: { rules: ChatbotRule[] }) => {
     setSaving(true);
     try {
       if (editingTrigger) {
-        const { error } = await supabase.from("event_triggers").update({
+        const { error } = await db.from("event_triggers").update({
           name: form.name,
           event_type: form.event_type,
           rule_id: form.rule_id,
@@ -1462,7 +1462,7 @@ const GatilhosTab = ({ rules }: { rules: ChatbotRule[] }) => {
         if (error) throw error;
         toast.success("Gatilho atualizado!");
       } else {
-        const { error } = await supabase.from("event_triggers").insert({
+        const { error } = await db.from("event_triggers").insert({
           name: form.name,
           event_type: form.event_type,
           rule_id: form.rule_id,
@@ -1482,14 +1482,14 @@ const GatilhosTab = ({ rules }: { rules: ChatbotRule[] }) => {
   };
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase.from("event_triggers").delete().eq("id", id);
+    const { error } = await db.from("event_triggers").delete().eq("id", id);
     if (error) { toast.error("Erro ao excluir gatilho"); return; }
     toast.success("Gatilho excluído");
     setTriggers((prev) => prev.filter((t) => t.id !== id));
   };
 
   const handleToggle = async (t: EventTrigger) => {
-    const { error } = await supabase.from("event_triggers").update({ is_active: !t.is_active }).eq("id", t.id);
+    const { error } = await db.from("event_triggers").update({ is_active: !t.is_active }).eq("id", t.id);
     if (error) { toast.error("Erro ao atualizar status"); return; }
     setTriggers((prev) => prev.map((x) => x.id === t.id ? { ...x, is_active: !x.is_active } : x));
   };
@@ -1782,11 +1782,11 @@ const IntencoesTab = ({ rules }: { rules: ChatbotRule[] }) => {
   const [formThreshold, setFormThreshold] = useState(70);
   const [formActive, setFormActive] = useState(true);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     const [{ data: intentData }, { data: queueData }] = await Promise.all([
-      supabase.from("intent_configs").select("*").order("created_at", { ascending: true }),
-      supabase.from("queues").select("id, name").order("name"),
+      db.from("intent_configs").select("*").order("created_at", { ascending: true }),
+      db.from("queues").select("id, name").order("name"),
     ]);
     const loadedIntents = (intentData as IntentConfig[]) || [];
     setIntents(loadedIntents);
@@ -1794,16 +1794,16 @@ const IntencoesTab = ({ rules }: { rules: ChatbotRule[] }) => {
 
     // Seed defaults if empty
     if (loadedIntents.length === 0) {
-      const { data: seeded } = await supabase
+      const { data: seeded } = await db
         .from("intent_configs")
         .insert(DEFAULT_INTENTS as any)
         .select();
       if (seeded) setIntents(seeded as IntentConfig[]);
     }
     setLoading(false);
-  };
+  }, []);
 
-  useEffect(() => { loadData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadData(); }, [loadData]);
 
   const openNew = () => {
     setEditingIntent(null);
@@ -1863,11 +1863,11 @@ const IntencoesTab = ({ rules }: { rules: ChatbotRule[] }) => {
         is_active: formActive,
       };
       if (editingIntent) {
-        const { error } = await supabase.from("intent_configs").update(payload as any).eq("id", editingIntent.id);
+        const { error } = await db.from("intent_configs").update(payload as any).eq("id", editingIntent.id);
         if (error) throw error;
         toast.success("Intenção atualizada!");
       } else {
-        const { error } = await supabase.from("intent_configs").insert(payload as any);
+        const { error } = await db.from("intent_configs").insert(payload as any);
         if (error) throw error;
         toast.success("Intenção criada!");
       }
@@ -1881,14 +1881,14 @@ const IntencoesTab = ({ rules }: { rules: ChatbotRule[] }) => {
   };
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase.from("intent_configs").delete().eq("id", id);
+    const { error } = await db.from("intent_configs").delete().eq("id", id);
     if (error) { toast.error("Erro ao excluir"); return; }
     toast.success("Intenção excluída");
     setIntents((prev) => prev.filter((i) => i.id !== id));
   };
 
   const handleToggle = async (intent: IntentConfig) => {
-    const { error } = await supabase.from("intent_configs").update({ is_active: !intent.is_active } as any).eq("id", intent.id);
+    const { error } = await db.from("intent_configs").update({ is_active: !intent.is_active } as any).eq("id", intent.id);
     if (error) { toast.error("Erro ao atualizar status"); return; }
     setIntents((prev) => prev.map((i) => i.id === intent.id ? { ...i, is_active: !i.is_active } : i));
   };
@@ -2227,7 +2227,7 @@ const Bots = () => {
 
   const loadRules = async () => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("chatbot_rules")
         .select("*")
         .order("priority", { ascending: false });
@@ -2259,12 +2259,12 @@ const Bots = () => {
     setView("editor");
   };
 
-  // Note: supabase/functions/chatbot/index.ts should also handle variations
+  // Note: db/functions/chatbot/index.ts should also handle variations
   // by picking a random variation when executing message nodes
   const handleSaveFlow = async (name: string, nodes: FlowNode[], connections: FlowConnection[], triggerType: string, isActive: boolean) => {
     try {
       if (editingRule) {
-        const { error } = await supabase
+        const { error } = await db
           .from("chatbot_rules")
           .update({ name, flow_data: { nodes, connections }, trigger_type: triggerType, is_active: isActive } as any)
           .eq("id", editingRule.id);
@@ -2272,7 +2272,7 @@ const Bots = () => {
         if (error) throw error;
         toast.success("Fluxo atualizado!");
       } else {
-        const { error } = await supabase.from("chatbot_rules").insert({
+        const { error } = await db.from("chatbot_rules").insert({
           name,
           trigger_type: triggerType,
           response_text: "Fluxo automático",

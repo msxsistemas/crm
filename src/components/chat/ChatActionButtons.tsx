@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 // --- Signature Button ---
 interface SignatureButtonProps {
@@ -47,7 +47,7 @@ const DEFAULT_QUICK_MESSAGES = [
 
 const loadQuickRepliesFromDB = async (): Promise<{ label: string; text: string }[]> => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("quick_replies")
       .select("shortcut, message")
       .order("created_at", { ascending: true });

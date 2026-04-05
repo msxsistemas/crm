@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 const DEFAULT_NAME = "ZapCRM";
 let cachedName: string | null = null;
 const listeners = new Set<(name: string) => void>();
 
 const fetchName = async () => {
-  const { data } = await supabase
+  const { data } = await db
     .from("system_settings")
     .select("value")
     .eq("key", "platform_name")
@@ -25,7 +25,7 @@ const fetchName = async () => {
 fetchName();
 
 // Realtime subscription — auto-refresh on any system_settings change
-const channel = supabase
+const channel = db
   .channel("platform-name-realtime")
   .on(
     "postgres_changes" as any,

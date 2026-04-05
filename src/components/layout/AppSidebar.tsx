@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { useUserRole } from "@/hooks/useUserRole";
 import { usePlatformName } from "@/hooks/usePlatformName";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 // Map from route path patterns to permission keys
 const ROUTE_PERMISSION_MAP: Record<string, string> = {
@@ -257,7 +257,7 @@ const AppSidebar = ({ onStartTour }: AppSidebarProps) => {
 
   useEffect(() => {
     if (!user || isAdmin || isReseller) return;
-    supabase
+    db
       .from("profiles")
       .select("permissions")
       .eq("id", user.id)

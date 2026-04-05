@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -21,15 +21,15 @@ const ResellerDashboard = () => {
 
   const loadData = async () => {
     setLoading(true);
-    const { data: acc } = await supabase.from("reseller_accounts").select("*").eq("user_id", user!.id).single();
+    const { data: acc } = await db.from("reseller_accounts").select("*").eq("user_id", user!.id).single();
     setAccount(acc);
     if (acc?.plan_id) {
-      const { data: p } = await supabase.from("reseller_plans").select("*").eq("id", acc.plan_id).single();
+      const { data: p } = await db.from("reseller_plans").select("*").eq("id", acc.plan_id).single();
       setPlan(p);
     }
-    const { data: subs } = await supabase.from("reseller_sub_users").select("*").eq("reseller_id", user!.id);
+    const { data: subs } = await db.from("reseller_sub_users").select("*").eq("reseller_id", user!.id);
     setSubUsers(subs || []);
-    const { data: conns } = await supabase.from("evolution_connections").select("*").eq("user_id", user!.id);
+    const { data: conns } = await db.from("evolution_connections").select("*").eq("user_id", user!.id);
     setConnections(conns || []);
     setLoading(false);
   };

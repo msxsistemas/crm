@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 interface Profile {
   id: string;
@@ -86,8 +86,8 @@ const SalesGoals = () => {
     setLoading(true);
     try {
       const [profilesRes, goalsRes] = await Promise.all([
-        supabase.from("profiles").select("id, full_name, email"),
-        supabase
+        db.from("profiles").select("id, full_name, email"),
+        db
           .from("sales_goals")
           .select("*")
           .eq("period_month", month)
@@ -107,18 +107,18 @@ const SalesGoals = () => {
       if (agentIds.length === 0) { setLoading(false); return; }
 
       const [convRes, oppRes, reviewsRes] = await Promise.all([
-        supabase
+        db
           .from("conversations")
           .select("id, assigned_to, created_at")
           .gte("created_at", startDate)
           .lte("created_at", endDate)
           .in("assigned_to", agentIds),
-        supabase
+        db
           .from("opportunities")
           .select("id, assigned_to, value, status, created_at")
           .gte("created_at", startDate)
           .lte("created_at", endDate),
-        supabase
+        db
           .from("reviews")
           .select("id, agent_id, rating, created_at")
           .gte("created_at", startDate)
@@ -179,7 +179,7 @@ const SalesGoals = () => {
 
       for (const entry of entries) {
         if (entry.target_value <= 0) continue;
-        const { error } = await supabase
+        const { error } = await db
           .from("sales_goals")
           .upsert({
             agent_id: formAgent,

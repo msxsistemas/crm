@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 interface Profile {
   id: string;
@@ -38,8 +38,8 @@ const TransferDialog = ({ open, onOpenChange, onTransfer }: TransferDialogProps)
     if (!open) return;
     const load = async () => {
       const [{ data: p }, { data: d }] = await Promise.all([
-        supabase.from("profiles").select("id, full_name, avatar_url"),
-        supabase.from("categories").select("id, name, color"),
+        db.from("profiles").select("id, full_name, avatar_url"),
+        db.from("categories").select("id, name, color"),
       ]);
       setProfiles((p as Profile[]) || []);
       setDepartments((d as Department[]) || []);

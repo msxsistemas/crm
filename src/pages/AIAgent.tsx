@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -78,7 +78,7 @@ const AIAgent = () => {
   }, [chatMessages]);
 
   const loadConfig = async () => {
-    const { data } = await supabase
+    const { data } = await db
       .from("ai_agent_config")
       .select("*")
       .eq("user_id", user!.id)
@@ -100,7 +100,7 @@ const AIAgent = () => {
   };
 
   const loadKnowledge = async () => {
-    const { data } = await supabase
+    const { data } = await db
       .from("ai_knowledge_base")
       .select("*")
       .eq("user_id", user!.id)
@@ -125,14 +125,14 @@ const AIAgent = () => {
     };
 
     if (config.id) {
-      const { error } = await supabase
+      const { error } = await db
         .from("ai_agent_config")
         .update(payload)
         .eq("id", config.id);
       if (error) toast.error("Erro ao salvar: " + error.message);
       else toast.success("Configurações salvas!");
     } else {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("ai_agent_config")
         .insert(payload)
         .select("id")
@@ -149,7 +149,7 @@ const AIAgent = () => {
   const addKnowledge = async () => {
     if (!newTitle.trim() || !newContent.trim() || !user) return;
 
-    const { error } = await supabase.from("ai_knowledge_base").insert({
+    const { error } = await db.from("ai_knowledge_base").insert({
       user_id: user.id,
       title: newTitle.trim(),
       content: newContent.trim(),
@@ -167,7 +167,7 @@ const AIAgent = () => {
   };
 
   const deleteKnowledge = async (id: string) => {
-    const { error } = await supabase.from("ai_knowledge_base").delete().eq("id", id);
+    const { error } = await db.from("ai_knowledge_base").delete().eq("id", id);
     if (error) toast.error("Erro ao excluir");
     else {
       toast.success("Documento removido");
@@ -185,7 +185,7 @@ const AIAgent = () => {
     setChatLoading(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke("ai-agent", {
+      const { data, error } = await db.functions.invoke("ai-agent", {
         body: { messages: allMessages, action: "test" },
       });
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,8 +31,8 @@ const AdminUsers = () => {
   const loadData = async () => {
     setLoading(true);
     const [p, r] = await Promise.all([
-      supabase.from("profiles").select("id, full_name, created_at"),
-      supabase.from("user_roles").select("user_id, role"),
+      db.from("profiles").select("id, full_name, created_at"),
+      db.from("user_roles").select("user_id, role"),
     ]);
     setProfiles((p.data as any[]) || []);
     setRoles((r.data as any[]) || []);
@@ -45,9 +45,9 @@ const AdminUsers = () => {
   };
 
   const changeRole = async (userId: string, newRole: string) => {
-    await supabase.from("user_roles").delete().eq("user_id", userId);
+    await db.from("user_roles").delete().eq("user_id", userId);
     if (newRole !== "user") {
-      const { error } = await supabase.from("user_roles").insert({ user_id: userId, role: newRole } as any);
+      const { error } = await db.from("user_roles").insert({ user_id: userId, role: newRole } as any);
       if (error) return toast.error(error.message);
     }
     toast.success("Role atualizada!");

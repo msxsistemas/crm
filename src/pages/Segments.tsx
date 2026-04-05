@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -68,7 +68,7 @@ async function calculateSegment(
   conditions: SegmentCondition[],
   operator: "AND" | "OR"
 ): Promise<ContactPreview[]> {
-  let query = supabase.from("contacts").select("id, name, phone, tags, created_at");
+  let query = db.from("contacts").select("id, name, phone, tags, created_at");
 
   if (operator === "AND") {
     for (const cond of conditions) {
@@ -123,7 +123,7 @@ const Segments = () => {
 
   const loadSegments = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("segments")
       .select("*")
       .order("created_at", { ascending: false });
@@ -161,7 +161,7 @@ const Segments = () => {
 
   const handleDelete = async (id: string) => {
     if (!confirm("Excluir este segmento?")) return;
-    const { error } = await supabase.from("segments").delete().eq("id", id);
+    const { error } = await db.from("segments").delete().eq("id", id);
     if (error) toast.error("Erro ao excluir");
     else {
       toast.success("Segmento excluído");
@@ -189,7 +189,7 @@ const Segments = () => {
     try {
       const contacts = await calculateSegment(seg.conditions, seg.operator);
       const count = contacts.length;
-      const { error } = await supabase
+      const { error } = await db
         .from("segments")
         .update({ contact_count: count, last_calculated_at: new Date().toISOString() })
         .eq("id", seg.id);
@@ -216,11 +216,11 @@ const Segments = () => {
       };
 
       if (editingId) {
-        const { error } = await supabase.from("segments").update(payload).eq("id", editingId);
+        const { error } = await db.from("segments").update(payload).eq("id", editingId);
         if (error) throw error;
         toast.success("Segmento atualizado");
       } else {
-        const { error } = await supabase.from("segments").insert(payload);
+        const { error } = await db.from("segments").insert(payload);
         if (error) throw error;
         toast.success("Segmento criado");
       }

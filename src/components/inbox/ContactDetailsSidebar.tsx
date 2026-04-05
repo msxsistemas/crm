@@ -3,7 +3,7 @@ import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clo
 import TagSelector from "@/components/shared/TagSelector";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 interface ContactDetailsSidebarProps {
   contactId: string;
@@ -131,7 +131,7 @@ const ContactDetailsSidebar = ({
 
   // Load agents on mount
   useEffect(() => {
-    supabase
+    db
       .from("profiles")
       .select("id, full_name")
       .then(({ data }) => {
@@ -223,7 +223,7 @@ const ContactDetailsSidebar = ({
       const items: TimelineItem[] = [];
 
       // Conversations
-      const { data: convs } = await supabase
+      const { data: convs } = await db
         .from("conversations")
         .select("id, status, created_at, updated_at, instance_name")
         .eq("contact_id", contactId)
@@ -243,7 +243,7 @@ const ContactDetailsSidebar = ({
       }
 
       // Schedules (by contact phone)
-      const { data: scheds } = await supabase
+      const { data: scheds } = await db
         .from("schedules")
         .select("id, message, send_at, status, created_at")
         .eq("contact_phone", contactPhone)
@@ -264,7 +264,7 @@ const ContactDetailsSidebar = ({
       }
 
       // Opportunities
-      const { data: opps } = await supabase
+      const { data: opps } = await db
         .from("opportunities")
         .select("id, title, value, status, created_at")
         .eq("contact_id", contactId)
@@ -295,7 +295,7 @@ const ContactDetailsSidebar = ({
   };
 
   const loadNotes = async (convId: string) => {
-    const { data } = await supabase
+    const { data } = await db
       .from("conversation_notes")
       .select("id, content, created_at, user_id, profiles(full_name)")
       .eq("conversation_id", convId)
@@ -307,12 +307,12 @@ const ContactDetailsSidebar = ({
     if (!noteText.trim()) return;
     setSavingNote(true);
     try {
-      const { data: userData } = await supabase.auth.getUser();
+      const { data: userData } = await db.auth.getUser();
       if (!userData.user) return;
 
       const content = noteText.trim();
 
-      await supabase.from("conversation_notes").insert({
+      await db.from("conversation_notes").insert({
         conversation_id: conversationId,
         user_id: userData.user.id,
         content,
@@ -327,7 +327,7 @@ const ContactDetailsSidebar = ({
           (a) => a.name.split(" ")[0].toLowerCase() === mentionedFirstName
         );
         if (agent) {
-          await supabase.from("notifications").insert({
+          await db.from("notifications").insert({
             user_id: agent.id,
             title: "Você foi mencionado",
             body: content.substring(0, 100),
@@ -362,7 +362,7 @@ const ContactDetailsSidebar = ({
   useEffect(() => {
     const load = async () => {
       // Load lead score and birthday
-      const { data: contactData } = await supabase
+      const { data: contactData } = await db
         .from("contacts")
         .select("lead_score, birthday")
         .eq("id", contactId)
@@ -373,7 +373,7 @@ const ContactDetailsSidebar = ({
       }
 
       // Try to find kanban card for this contact
-      const { data: cards } = await supabase
+      const { data: cards } = await db
         .from("kanban_cards")
         .select("id, column_id, kanban_columns(name, color, board_id, kanban_boards(name))")
         .eq("contact_id", contactId)
@@ -389,7 +389,7 @@ const ContactDetailsSidebar = ({
       }
 
       // Count previous conversations
-      const { count } = await supabase
+      const { count } = await db
         .from("conversations")
         .select("id", { count: "exact", head: true })
         .eq("contact_id", contactId);
@@ -402,7 +402,7 @@ const ContactDetailsSidebar = ({
       await loadTimeline();
 
       // Load campaign history
-      const { data: campData } = await supabase
+      const { data: campData } = await db
         .from("campaign_contacts")
         .select("id, status, sent_at, campaigns(id, name)")
         .eq("contact_id", contactId)

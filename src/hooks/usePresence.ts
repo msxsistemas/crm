@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 export interface AgentPresence {
   user_id: string;
@@ -11,12 +11,12 @@ export interface AgentPresence {
 
 export function usePresence(userId: string | undefined, userName: string) {
   const [onlineAgents, setOnlineAgents] = useState<AgentPresence[]>([]);
-  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const channelRef = useRef<ReturnType<typeof db.channel> | null>(null);
 
   useEffect(() => {
     if (!userId) return;
 
-    const channel = supabase.channel("agent-presence", {
+    const channel = db.channel("agent-presence", {
       config: { presence: { key: userId } },
     });
 
@@ -70,7 +70,7 @@ export function usePresence(userId: string | undefined, userName: string) {
     return () => {
       window.removeEventListener("blur", handleBlur);
       window.removeEventListener("focus", handleFocus);
-      supabase.removeChannel(channel);
+      db.removeChannel(channel);
     };
   }, [userId, userName]);
 

@@ -1,6 +1,5 @@
 /**
  * DB client — abstração sobre a API REST do backend.
- * Mantém interface compatível com supabase-js para páginas existentes.
  */
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'https://api.msxzap.pro';
@@ -128,6 +127,8 @@ const TABLE_MAP: Record<string, string> = {
   business_hours: '/__skip__',
   business_hours_config: '/__skip__',
   ai_knowledge_base: '/__skip__',
+  ai_agent_config: '/__skip__',
+  gateway_configs: '/__skip__',
 };
 
 type FilterOp = { col: string; val: unknown; op: string };
@@ -326,13 +327,89 @@ class StorageBucketProxy {
 }
 
 // ── Realtime ──────────────────────────────────────────────────────────────────
+type PgChangesFilter = { event?: string; schema?: string; table?: string; filter?: string };
+type PgChangesCallback = (payload: { eventType: string; new: unknown; old: unknown }) => void;
+
+interface StoredListener {
+  event: string;
+  filter: PgChangesFilter;
+  callback: PgChangesCallback;
+}
+
 class ChannelProxy {
-  on(_event: string, _filter: unknown, _callback?: unknown) { return this; }
-  subscribe(cb?: (status: string) => void) {
-    if (cb) setTimeout(() => cb('SUBSCRIBED'), 100);
+  private _listeners: StoredListener[] = [];
+  private _socketHandlers: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
+
+  on(event: string, filter: unknown, callback?: unknown) {
+    if (event === 'postgres_changes' && typeof callback === 'function') {
+      this._listeners.push({ event, filter: (filter as PgChangesFilter) || {}, callback: callback as PgChangesCallback });
+    }
     return this;
   }
-  unsubscribe() {}
+
+  subscribe(cb?: (status: string) => void) {
+    try {
+      // Dynamic import to avoid circular deps at module load time
+      import('./socket').then(({ getSocket }) => {
+        try {
+          const s = getSocket();
+
+          for (const listener of this._listeners) {
+            const table = listener.filter?.table || '';
+            let socketEvent: string | null = null;
+
+            if (table === 'conversations') socketEvent = 'conversation:updated';
+            else if (table === 'messages') socketEvent = 'message:new';
+            else if (table === 'notifications') socketEvent = 'notification:new';
+            else if (table === 'kanban_cards') socketEvent = 'kanban:updated';
+
+            if (!socketEvent) continue;
+
+            const storedCallback = listener.callback;
+            const handler = (data: unknown) => {
+              storedCallback({ eventType: 'UPDATE', new: data, old: {} });
+            };
+
+            this._socketHandlers.push({ event: socketEvent, handler });
+            s.on(socketEvent, handler);
+          }
+
+          if (cb) {
+            if (s.connected) {
+              cb('SUBSCRIBED');
+            } else {
+              s.once('connect', () => cb('SUBSCRIBED'));
+            }
+          }
+        } catch {
+          if (cb) setTimeout(() => cb('SUBSCRIBED'), 100);
+        }
+      }).catch(() => {
+        if (cb) setTimeout(() => cb('SUBSCRIBED'), 100);
+      });
+    } catch {
+      if (cb) setTimeout(() => cb('SUBSCRIBED'), 100);
+    }
+    return this;
+  }
+
+  unsubscribe() {
+    try {
+      import('./socket').then(({ getSocket }) => {
+        try {
+          const s = getSocket();
+          for (const { event, handler } of this._socketHandlers) {
+            s.off(event, handler);
+          }
+        } catch { /* ignore */ }
+      }).catch(() => { /* ignore */ });
+    } catch { /* ignore */ }
+    this._socketHandlers = [];
+    this._listeners = [];
+  }
+
+  async track(_payload: unknown) { return 'ok'; }
+  presenceState<T = unknown>(): Record<string, T[]> { return {}; }
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -447,7 +524,7 @@ const functionsShim = {
 };
 
 // ── Main export ───────────────────────────────────────────────────────────────
-export const supabase = {
+export const db = {
   from: (table: string) => new QueryBuilder(table),
   auth: authShim,
   storage: { from: (bucket: string) => new StorageBucketProxy(bucket) },
@@ -465,4 +542,4 @@ export const supabase = {
   },
 };
 
-export default supabase;
+export default db;

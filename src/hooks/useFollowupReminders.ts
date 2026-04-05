@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
@@ -28,7 +28,7 @@ export function useFollowupReminders() {
   const fetchReminders = useCallback(async () => {
     if (!user) return;
     setLoading(true);
-    const { data } = await supabase
+    const { data } = await db
       .from("followup_reminders")
       .select(`
         *,
@@ -96,7 +96,7 @@ export function useFollowupReminders() {
     id: string,
     status: "completed" | "dismissed"
   ) => {
-    await supabase
+    await db
       .from("followup_reminders")
       .update({ status } as any)
       .eq("id", id);
@@ -110,7 +110,7 @@ export function useFollowupReminders() {
     note: string;
   }) => {
     if (!user) return;
-    const { error } = await supabase.from("followup_reminders").insert({
+    const { error } = await db.from("followup_reminders").insert({
       ...payload,
       agent_id: user.id,
       status: "pending",

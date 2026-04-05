@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -390,18 +390,18 @@ const SupervisorDashboard = () => {
   const fetchData = useCallback(async () => {
     try {
       const [agentsRes, activeRes, waitingRes] = await Promise.all([
-        supabase
+        db
           .from("profiles")
           .select("id, full_name, avatar_url, role, status")
           .in("role", ["agent", "admin"]),
-        supabase
+        db
           .from("conversations")
           .select(
             "id, contact_id, assigned_to, status, created_at, unread_count, contacts(name, phone)"
           )
           .eq("status", "open")
           .not("assigned_to", "is", null),
-        supabase
+        db
           .from("conversations")
           .select(
             "id, contact_id, assigned_to, created_at, contacts(name, phone)"
@@ -414,7 +414,7 @@ const SupervisorDashboard = () => {
       if (activeRes.data) setActiveConvos(activeRes.data as Conversation[]);
 
       // Load agent schedules
-      const schedRes = await supabase.from("agent_schedules" as any).select("*");
+      const schedRes = await db.from("agent_schedules" as any).select("*");
       if (schedRes.data) {
         const map: Record<string, AgentSchedule> = {};
         for (const s of schedRes.data as AgentSchedule[]) {
@@ -442,7 +442,7 @@ const SupervisorDashboard = () => {
     fetchData();
     const interval = setInterval(fetchData, 30000);
 
-    const channel = supabase
+    const channel = db
       .channel("supervisor-conversations")
       .on(
         "postgres_changes",
@@ -455,13 +455,13 @@ const SupervisorDashboard = () => {
 
     return () => {
       clearInterval(interval);
-      supabase.removeChannel(channel);
+      db.removeChannel(channel);
     };
   }, [fetchData]);
 
   const handleIntervene = async (conversationId: string) => {
     if (!user) return;
-    const { error } = await supabase
+    const { error } = await db
       .from("conversations")
       .update({ assigned_to: user.id })
       .eq("id", conversationId);
@@ -472,7 +472,7 @@ const SupervisorDashboard = () => {
     }
 
     // Insert activity log
-    await supabase.from("activity_logs").insert({
+    await db.from("activity_logs").insert({
       action: "supervisor_intervene",
       entity_type: "conversation",
       entity_id: conversationId,
@@ -489,7 +489,7 @@ const SupervisorDashboard = () => {
   };
 
   const handleAssignAgent = async (conversationId: string, agentId: string) => {
-    const { error } = await supabase
+    const { error } = await db
       .from("conversations")
       .update({ assigned_to: agentId })
       .eq("id", conversationId);

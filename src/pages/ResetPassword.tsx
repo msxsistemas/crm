@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { usePlatformName } from "@/hooks/usePlatformName";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,7 +37,7 @@ const ResetPassword = () => {
     }
     setLoading(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password });
+      const { error } = await db.auth.updateUser({ password });
       if (error) {
         toast.error(error.message);
       } else {

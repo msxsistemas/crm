@@ -2,7 +2,7 @@ import { FileText, RotateCw, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 interface Props {
   open: boolean;
@@ -60,7 +60,7 @@ export default function SummaryDialog({
             disabled={loading || !summary || !conversationId}
             onClick={async () => {
               if (!conversationId || !summary) return;
-              await supabase.from('conversation_notes').insert({
+              await db.from('conversation_notes').insert({
                 conversation_id: conversationId,
                 user_id: userId,
                 content: `[Resumo IA]\n${summary}`,

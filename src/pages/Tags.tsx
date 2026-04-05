@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Pencil, Trash2, Tag, Search, Filter, Users, Settings, RefreshCw, Info, X, MessageSquare, Download, AlertTriangle } from "lucide-react";
 import ColorPicker from "@/components/shared/ColorPicker";
@@ -63,7 +63,7 @@ const Tags = () => {
   const { data: tags = [], isLoading } = useQuery({
     queryKey: ["tags", user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("tags")
         .select("*")
         .eq("user_id", user!.id)
@@ -77,7 +77,7 @@ const Tags = () => {
   const { data: tagContactCounts = {} } = useQuery({
     queryKey: ["tag-contact-counts", user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from("contact_tags").select("tag_id");
+      const { data, error } = await db.from("contact_tags").select("tag_id");
       if (error) throw error;
       const counts: Record<string, number> = {};
       data.forEach((ct) => {
@@ -91,7 +91,7 @@ const Tags = () => {
   const { data: tagContacts = [] } = useQuery({
     queryKey: ["tag-contacts", selectedTag?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("contact_tags")
         .select("contact_id, contacts(id, name, phone, avatar_url)")
         .eq("tag_id", selectedTag!.id);
@@ -104,7 +104,7 @@ const Tags = () => {
   const { data: totalContacts = 0 } = useQuery({
     queryKey: ["total-contacts"],
     queryFn: async () => {
-      const { count, error } = await supabase.from("contacts").select("id", { count: "exact", head: true });
+      const { count, error } = await db.from("contacts").select("id", { count: "exact", head: true });
       if (error) throw error;
       return count || 0;
     },
@@ -122,10 +122,10 @@ const Tags = () => {
         user_id: user!.id,
       };
       if (editingTag) {
-        const { error } = await supabase.from("tags").update(payload).eq("id", editingTag.id);
+        const { error } = await db.from("tags").update(payload).eq("id", editingTag.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("tags").insert(payload);
+        const { error } = await db.from("tags").insert(payload);
         if (error) throw error;
       }
     },
@@ -140,8 +140,8 @@ const Tags = () => {
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       // First remove contact_tags references
-      await supabase.from("contact_tags").delete().eq("tag_id", id);
-      const { error } = await supabase.from("tags").delete().eq("id", id);
+      await db.from("contact_tags").delete().eq("tag_id", id);
+      const { error } = await db.from("tags").delete().eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {

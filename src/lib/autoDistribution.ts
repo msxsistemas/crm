@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 export interface DistributionConfig {
   id: string;
@@ -12,7 +12,7 @@ export interface DistributionConfig {
 }
 
 export async function loadDistributionConfig(): Promise<DistributionConfig | null> {
-  const { data } = await supabase
+  const { data } = await db
     .from("auto_distribution_config")
     .select("*")
     .limit(1)
@@ -25,7 +25,7 @@ export async function distributeConversation(
   config: DistributionConfig
 ): Promise<void> {
   // Get eligible agents (agent or admin roles)
-  let query = supabase
+  let query = db
     .from("profiles")
     .select("id, name")
     .in("role", ["agent", "admin"]);
@@ -42,7 +42,7 @@ export async function distributeConversation(
   if (!agents?.length) return;
 
   // Count open conversations per agent
-  const { data: openCounts } = await supabase
+  const { data: openCounts } = await db
     .from("conversations")
     .select("assigned_to")
     .eq("status", "open")
@@ -77,12 +77,12 @@ export async function distributeConversation(
     localStorage.setItem("rr_last_idx", String(nextIdx));
   }
 
-  await supabase
+  await db
     .from("conversations")
     .update({ assigned_to: selected.id })
     .eq("id", conversationId);
 
-  await supabase.from("distribution_log").insert({
+  await db.from("distribution_log").insert({
     conversation_id: conversationId,
     assigned_to: selected.id,
     assigned_to_name: selected.name,

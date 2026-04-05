@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
@@ -67,7 +67,7 @@ export default function AutoDistribution() {
   const [loadingLog, setLoadingLog] = useState(false);
 
   const loadConfig = useCallback(async () => {
-    const { data } = await supabase
+    const { data } = await db
       .from("auto_distribution_config")
       .select("*")
       .limit(1)
@@ -89,7 +89,7 @@ export default function AutoDistribution() {
   }, []);
 
   const loadAgents = useCallback(async () => {
-    const { data } = await supabase
+    const { data } = await db
       .from("profiles")
       .select("id, name, role")
       .in("role", ["agent", "admin"]);
@@ -98,7 +98,7 @@ export default function AutoDistribution() {
 
   const loadLog = useCallback(async () => {
     setLoadingLog(true);
-    const { data } = await supabase
+    const { data } = await db
       .from("distribution_log")
       .select("*")
       .order("created_at", { ascending: false })
@@ -117,13 +117,13 @@ export default function AutoDistribution() {
     setSaving(true);
     try {
       if (config?.id) {
-        const { error } = await supabase
+        const { error } = await db
           .from("auto_distribution_config")
           .update({ ...form, updated_at: new Date().toISOString() })
           .eq("id", config.id);
         if (error) throw error;
       } else {
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from("auto_distribution_config")
           .insert(form)
           .select()
@@ -145,7 +145,7 @@ export default function AutoDistribution() {
     const newForm = { ...form, is_active: value };
     setForm(newForm);
     if (config?.id) {
-      await supabase
+      await db
         .from("auto_distribution_config")
         .update({ is_active: value, updated_at: new Date().toISOString() })
         .eq("id", config.id);
@@ -170,7 +170,7 @@ export default function AutoDistribution() {
 
   const handleClearLog = async () => {
     if (!window.confirm("Deseja limpar todo o log de distribuição?")) return;
-    await supabase.from("distribution_log").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+    await db.from("distribution_log").delete().neq("id", "00000000-0000-0000-0000-000000000000");
     setLog([]);
     toast.success("Log limpo.");
   };

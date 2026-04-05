@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -27,7 +27,7 @@ const AdminFinance = () => {
 
   const loadTransactions = async () => {
     setLoading(true);
-    const { data } = await supabase.from("reseller_transactions").select("*").order("created_at", { ascending: false }).limit(200);
+    const { data } = await db.from("reseller_transactions").select("*").order("created_at", { ascending: false }).limit(200);
     const txs = (data as any[]) || [];
     setTransactions(txs);
 

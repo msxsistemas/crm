@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FloatingInput, FloatingSelectWrapper } from "@/components/ui/floating-input";
 import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useNavigate } from "react-router-dom";
 
 interface Profile { id: string; full_name: string | null; }
@@ -51,11 +51,11 @@ const Search = () => {
 
   const loadFilterOptions = async () => {
     const [profRes, connRes, tagRes, contRes, catRes] = await Promise.all([
-      supabase.from("profiles").select("id, full_name"),
-      supabase.from("evolution_connections").select("id, instance_name"),
-      supabase.from("tags").select("id, name, color"),
-      supabase.from("contacts").select("id, name, phone").limit(200).order("name"),
-      supabase.from("categories").select("id, name"),
+      db.from("profiles").select("id, full_name"),
+      db.from("evolution_connections").select("id, instance_name"),
+      db.from("tags").select("id, name, color"),
+      db.from("contacts").select("id, name, phone").limit(200).order("name"),
+      db.from("categories").select("id, name"),
     ]);
     setProfiles((profRes.data as Profile[]) || []);
     setConnections((connRes.data as Connection[]) || []);
@@ -73,7 +73,7 @@ const Search = () => {
 
       // Filter by tag via contact_tags
       if (tagFilter && tagFilter !== "all") {
-        const { data: ctData } = await supabase
+        const { data: ctData } = await db
           .from("contact_tags")
           .select("contact_id")
           .eq("tag_id", tagFilter);
@@ -86,7 +86,7 @@ const Search = () => {
           return;
         }
         // Get conversations for these contacts
-        const { data: convByTag } = await supabase
+        const { data: convByTag } = await db
           .from("conversations")
           .select("id")
           .in("contact_id", tagContactIds);
@@ -96,7 +96,7 @@ const Search = () => {
 
       // Filter by message text
       if (messageText.trim()) {
-        const { data: msgData } = await supabase
+        const { data: msgData } = await db
           .from("messages")
           .select("conversation_id")
           .ilike("body", `%${messageText.trim()}%`);
@@ -114,7 +114,7 @@ const Search = () => {
         }
       }
 
-      let query = supabase.from("conversations").select("*, contacts(name, phone)");
+      let query = db.from("conversations").select("*, contacts(name, phone)");
 
       if (statusFilter && statusFilter !== "all") query = query.eq("status", statusFilter);
       if (startDate) query = query.gte("created_at", new Date(startDate).toISOString());
@@ -138,7 +138,7 @@ const Search = () => {
       // Load tags for results
       if (rows.length > 0) {
         const convIds = rows.map((r: any) => r.id);
-        const { data: convTagData } = await supabase
+        const { data: convTagData } = await db
           .from("conversation_tags")
           .select("conversation_id, tag_id")
           .in("conversation_id", convIds);
@@ -155,7 +155,7 @@ const Search = () => {
         setResultTags(tagMap);
 
         // Load reviews
-        const { data: reviewData } = await supabase
+        const { data: reviewData } = await db
           .from("reviews")
           .select("conversation_id, rating, nps")
           .in("conversation_id", convIds);

@@ -18,15 +18,20 @@ export default async function userRoutes(fastify) {
     if (role) { conditions.push(`role = $${p}`); params.push(role); p++; }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     params.push(limit, offset);
+    // Agentes só veem nome+id (sem email) — admins/managers veem tudo
+    const isPrivileged = req.user.role === 'admin' || req.user.role === 'manager';
+    const fields = isPrivileged
+      ? 'id, name, name as full_name, email, role, avatar_url, permissions, status, signing_enabled, created_at, last_login'
+      : 'id, name, name as full_name, role, avatar_url, status';
     const { rows } = await query(
-      `SELECT id, name, name as full_name, email, role, avatar_url, permissions, status, signing_enabled, created_at, last_login FROM profiles ${where} ORDER BY name LIMIT $${p} OFFSET $${p + 1}`,
+      `SELECT ${fields} FROM profiles ${where} ORDER BY name LIMIT $${p} OFFSET $${p + 1}`,
       params
     );
     return rows;
   });
 
-  // manage-users function shim — returns { users: [...] }
-  fastify.get('/manage-users', auth, async (req) => {
+  // manage-users function shim — returns { users: [...] } — apenas admin/manager
+  fastify.get('/manage-users', { preHandler: [fastify.authenticate, authorize('admin', 'manager')] }, async (req) => {
     const { rows } = await query('SELECT id, name, name as full_name, email, role, avatar_url, permissions, status, signing_enabled, created_at, last_login FROM profiles ORDER BY name');
     return { users: rows };
   });
@@ -48,7 +53,7 @@ export default async function userRoutes(fastify) {
       [name, email.toLowerCase(), hash, role, !password]
     );
     if (!password) {
-      notifyTempPassword({ email: email.toLowerCase(), name, tempPassword }).catch(() => {});
+      notifyTempPassword({ email: email.toLowerCase(), name, tempPassword }).catch(err => console.error('notifyTempPassword failed:', err.message));
     }
     return reply.status(201).send({ ...rows[0], ...(password ? {} : { tempPassword }) });
   });

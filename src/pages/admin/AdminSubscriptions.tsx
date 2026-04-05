@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -31,9 +31,9 @@ const AdminSubscriptions = () => {
   const loadData = async () => {
     setLoading(true);
     const [subs, prof, pl] = await Promise.all([
-      supabase.from("subscriptions").select("*"),
-      supabase.from("profiles").select("id, full_name"),
-      supabase.from("reseller_plans").select("id, name, price"),
+      db.from("subscriptions").select("*"),
+      db.from("profiles").select("id, full_name"),
+      db.from("reseller_plans").select("id, name, price"),
     ]);
     setSubscriptions((subs.data as any[]) || []);
     setProfiles((prof.data as any[]) || []);
@@ -73,7 +73,7 @@ const AdminSubscriptions = () => {
   const handleCancel = async () => {
     if (!cancelDialog) return;
     setActionLoading(true);
-    const { error } = await supabase.from("subscriptions").update({ status: "cancelled" }).eq("id", cancelDialog.id);
+    const { error } = await db.from("subscriptions").update({ status: "cancelled" }).eq("id", cancelDialog.id);
     setActionLoading(false);
     if (error) {
       toast({ title: "Erro", description: "Não foi possível cancelar a assinatura.", variant: "destructive" });
@@ -89,7 +89,7 @@ const AdminSubscriptions = () => {
     setActionLoading(true);
     const newExpiry = new Date();
     newExpiry.setDate(newExpiry.getDate() + 30);
-    const { error } = await supabase.from("subscriptions").update({
+    const { error } = await db.from("subscriptions").update({
       status: "active",
       expires_at: newExpiry.toISOString(),
       paid_at: new Date().toISOString(),
@@ -107,7 +107,7 @@ const AdminSubscriptions = () => {
   const handleChangePlan = async () => {
     if (!changePlanDialog || !selectedPlanId) return;
     setActionLoading(true);
-    const { error } = await supabase.from("subscriptions").update({ plan_id: selectedPlanId }).eq("id", changePlanDialog.id);
+    const { error } = await db.from("subscriptions").update({ plan_id: selectedPlanId }).eq("id", changePlanDialog.id);
     setActionLoading(false);
     if (error) {
       toast({ title: "Erro", description: "Não foi possível alterar o plano.", variant: "destructive" });

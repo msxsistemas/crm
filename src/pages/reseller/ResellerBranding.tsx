@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ const ResellerBranding = () => {
 
   const loadAccount = async () => {
     setLoading(true);
-    const { data: acc } = await supabase.from("reseller_accounts").select("*").eq("user_id", user!.id).single();
+    const { data: acc } = await db.from("reseller_accounts").select("*").eq("user_id", user!.id).single();
     setAccount(acc);
     if (acc) {
       setBranding({
@@ -34,7 +34,7 @@ const ResellerBranding = () => {
 
   const saveBranding = async () => {
     if (!account) return;
-    const { error } = await supabase.from("reseller_accounts").update({
+    const { error } = await db.from("reseller_accounts").update({
       company_name: branding.company_name,
       primary_color: branding.primary_color,
       logo_url: branding.logo_url,

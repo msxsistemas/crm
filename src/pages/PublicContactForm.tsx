@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -62,7 +62,7 @@ const PublicContactForm = () => {
 
   useEffect(() => {
     if (!slug) { setNotFound(true); setLoadingConfig(false); return; }
-    (supabase as any)
+    (db as any)
       .from("contact_forms")
       .select("*")
       .eq("slug", slug)
@@ -97,7 +97,7 @@ const PublicContactForm = () => {
 
     try {
       if (phone) {
-        const { data: existing } = await supabase
+        const { data: existing } = await db
           .from("contacts")
           .select("id")
           .eq("phone", phone)
@@ -112,10 +112,10 @@ const PublicContactForm = () => {
           if (formConfig.assign_tag) {
             (insertPayload as any).tags = [formConfig.assign_tag];
           }
-          await supabase.from("contacts").insert(insertPayload as any);
+          await db.from("contacts").insert(insertPayload as any);
 
           // Update submission count
-          await (supabase as any)
+          await (db as any)
             .from("contact_forms")
             .update({ submission_count: (formConfig as any).submission_count + 1 })
             .eq("id", formConfig.id);

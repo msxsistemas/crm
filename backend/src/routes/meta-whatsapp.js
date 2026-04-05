@@ -283,9 +283,9 @@ async function handleIncomingMetaMessage({ msg, phoneNumberId, contacts, accessT
         // Download async — don't block webhook response
         downloadMetaMedia(mediaId, accessToken).then(async (result) => {
           if (result?.url) {
-            await query('UPDATE messages SET media_url=$1 WHERE external_id=$2', [result.url, msg.id]).catch(() => {});
+            await query('UPDATE messages SET media_url=$1 WHERE external_id=$2', [result.url, msg.id]).catch(err => console.error('media_url update failed:', err.message));
           }
-        });
+        }).catch(err => console.error('downloadMetaMedia failed:', err.message));
         mediaUrl = `pending:${mediaId}`; // temporary placeholder
       }
     }
@@ -317,6 +317,6 @@ async function handleMetaStatusUpdate(status) {
   const STATUS_MAP = { sent: 'sent', delivered: 'delivered', read: 'read', failed: 'failed' };
   const mapped = STATUS_MAP[status.status];
   if (mapped && status.id) {
-    await query('UPDATE messages SET status=$1 WHERE external_id=$2', [mapped, status.id]).catch(() => {});
+    await query('UPDATE messages SET status=$1 WHERE external_id=$2', [mapped, status.id]).catch(err => console.error('message status update failed:', err.message));
   }
 }

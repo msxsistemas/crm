@@ -1,10 +1,10 @@
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://api.msxzap.pro';
 
 async function callEvolutionApi(action: string, instanceName?: string, data?: Record<string, unknown>) {
   try {
-    const { data: result, error } = await supabase.functions.invoke("evolution-api", {
+    const { data: result, error } = await db.functions.invoke("evolution-api", {
       body: { action, instanceName, data },
     });
 

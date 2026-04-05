@@ -76,7 +76,7 @@ export function startSLAWorker() {
           contactName: conv.contact_name,
           conversationId: conv.id,
           minutesLeft,
-        }).catch(() => {});
+        }).catch(err => console.error('notifySLAWarning failed:', err.message));
       }
     }
   }, { connection, concurrency: 1 });

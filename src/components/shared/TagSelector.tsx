@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 
 const TAG_COLORS = ["#8B5CF6", "#EF4444", "#F59E0B", "#10B981", "#3B82F6", "#EC4899", "#6366F1", "#14B8A6"];
@@ -52,8 +52,8 @@ const TagSelector = ({ contactId, compact = false, onTagsChange }: TagSelectorPr
   const fetchTags = useCallback(async () => {
     if (!user) return;
     const [{ data: tags }, { data: assigned }] = await Promise.all([
-      supabase.from("tags").select("id, name, color").eq("user_id", user.id),
-      supabase.from("contact_tags").select("tag_id").eq("contact_id", contactId),
+      db.from("tags").select("id, name, color").eq("user_id", user.id),
+      db.from("contact_tags").select("tag_id").eq("contact_id", contactId),
     ]);
     setAllTags((tags as TagItem[]) || []);
     setAssignedTagIds(new Set((assigned || []).map((a: any) => a.tag_id)));
@@ -63,10 +63,10 @@ const TagSelector = ({ contactId, compact = false, onTagsChange }: TagSelectorPr
 
   const toggleTag = async (tagId: string) => {
     if (assignedTagIds.has(tagId)) {
-      await supabase.from("contact_tags").delete().eq("contact_id", contactId).eq("tag_id", tagId);
+      await db.from("contact_tags").delete().eq("contact_id", contactId).eq("tag_id", tagId);
       setAssignedTagIds((prev) => { const n = new Set(prev); n.delete(tagId); return n; });
     } else {
-      await supabase.from("contact_tags").insert({ contact_id: contactId, tag_id: tagId });
+      await db.from("contact_tags").insert({ contact_id: contactId, tag_id: tagId });
       setAssignedTagIds((prev) => new Set(prev).add(tagId));
     }
     onTagsChange?.();
@@ -76,10 +76,10 @@ const TagSelector = ({ contactId, compact = false, onTagsChange }: TagSelectorPr
     if (!user || creating) return;
     setCreating(true);
     const color = TAG_COLORS[allTags.length % TAG_COLORS.length];
-    const { data } = await supabase.from("tags").insert({ name: name.trim(), color, user_id: user.id }).select("id, name, color").single();
+    const { data } = await db.from("tags").insert({ name: name.trim(), color, user_id: user.id }).select("id, name, color").single();
     if (data) {
       setAllTags((prev) => [...prev, data as TagItem]);
-      await supabase.from("contact_tags").insert({ contact_id: contactId, tag_id: data.id });
+      await db.from("contact_tags").insert({ contact_id: contactId, tag_id: data.id });
       setAssignedTagIds((prev) => new Set(prev).add(data.id));
     }
     setSearchTerm("");

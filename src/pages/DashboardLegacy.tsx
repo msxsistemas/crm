@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { usePlatformName } from "@/hooks/usePlatformName";
 import { FloatingInput } from "@/components/ui/floating-input";
@@ -35,12 +35,12 @@ const DashboardLegacy = () => {
     const load = async () => {
       setLoading(true);
       const [c, m, ct, evo, pr, sub] = await Promise.all([
-        supabase.from("conversations").select("*"),
-        supabase.from("messages").select("*"),
-        supabase.from("contacts").select("*"),
-        supabase.from("evolution_connections").select("*"),
-        supabase.from("profiles").select("*"),
-        supabase.from("subscriptions").select("*"),
+        db.from("conversations").select("*"),
+        db.from("messages").select("*"),
+        db.from("contacts").select("*"),
+        db.from("evolution_connections").select("*"),
+        db.from("profiles").select("*"),
+        db.from("subscriptions").select("*"),
       ]);
       setConversations(c.data || []);
       setMessages(m.data || []);

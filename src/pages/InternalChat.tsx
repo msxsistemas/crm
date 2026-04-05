@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { io, Socket } from "socket.io-client";
+import { getSocket } from "@/lib/socket";
 import api from "@/lib/api";
 import { MessagesSquare, Users, X, Send, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -35,8 +35,6 @@ interface Message {
   created_at: string;
 }
 
-const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-
 const InternalChat = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -46,7 +44,6 @@ const InternalChat = () => {
   const [newTitle, setNewTitle] = useState("");
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const socketRef = useRef<Socket | null>(null);
 
   // TanStack Query: conversations
   const { data: conversations = [] } = useQuery<Conversation[]>({
@@ -115,29 +112,10 @@ const InternalChat = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Socket.io: connect once using a short-lived token from the API
+  // Socket.io: subscribe to messages in selected conversation via shared singleton
   useEffect(() => {
-    if (!user) return;
-    let socket: Socket;
-    api.get<{ token: string }>('/auth/socket-token').then(({ token }) => {
-      socket = io(SOCKET_URL, {
-        auth: { token },
-        transports: ['websocket', 'polling'],
-        reconnection: true,
-      });
-      socketRef.current = socket;
-    }).catch(() => {});
-    return () => {
-      if (socket) socket.disconnect();
-      socketRef.current = null;
-    };
-  }, [user]);
-
-  // Socket.io: subscribe to messages in selected conversation
-  useEffect(() => {
-    const socket = socketRef.current;
-    if (!socket || !selectedConvoId) return;
-
+    if (!selectedConvoId) return;
+    const socket = getSocket();
     const event = `chat:${selectedConvoId}`;
     const handler = (msg: Message) => {
       queryClient.setQueryData<Message[]>(['internal-messages', selectedConvoId], (prev = []) => {

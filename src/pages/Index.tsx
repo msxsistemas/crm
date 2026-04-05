@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,8 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
+import { getSocket } from "@/lib/socket";
 import { useAuth } from "@/hooks/useAuth";
 import { usePlatformName } from "@/hooks/usePlatformName";
 import { Loader2 } from "lucide-react";
@@ -86,7 +87,7 @@ function useTopContacts() {
     setLoading(true);
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    supabase
+    db
       .from('messages')
       .select('conversation_id')
       .gte('created_at', thirtyDaysAgo.toISOString())
@@ -101,7 +102,7 @@ function useTopContacts() {
           .sort((a, b) => b[1] - a[1])
           .slice(0, 5)
           .map(([id]) => id);
-        const { data: convos } = await supabase
+        const { data: convos } = await db
           .from('conversations')
           .select('id, contact_id, contacts(name, phone)')
           .in('id', topConvIds);
@@ -125,7 +126,7 @@ function useRecentActivity() {
 
   useEffect(() => {
     setLoading(true);
-    supabase
+    db
       .from('activity_log')
       .select('*')
       .order('created_at', { ascending: false })
@@ -154,7 +155,7 @@ function useUpcomingBirthdays() {
 
   useEffect(() => {
     setLoading(true);
-    supabase
+    db
       .from('contacts')
       .select('id, name, phone, birthday')
       .not('birthday', 'is', null)
@@ -198,7 +199,7 @@ function useDashboardData() {
   const [isLive, setIsLive] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     // Limit messages to last 90 days to avoid loading entire history
     const ninetyDaysAgo = new Date();
@@ -206,12 +207,12 @@ function useDashboardData() {
     const cutoff = ninetyDaysAgo.toISOString();
 
     const [convRes, msgRes, contRes, evoRes, profRes, subRes] = await Promise.all([
-      supabase.from("conversations").select("id, status, unread_count, last_message_at, created_at, instance_name, contact_id, assigned_to").order("last_message_at", { ascending: false }),
-      supabase.from("messages").select("id, conversation_id, from_me, created_at, status").gte("created_at", cutoff).order("created_at", { ascending: false }),
-      supabase.from("contacts").select("id, name, phone, created_at"),
-      supabase.from("evolution_connections").select("id, instance_name, status"),
-      supabase.from("profiles").select("id, full_name, status"),
-      supabase.from("subscriptions").select("id, user_id, expires_at, status"),
+      db.from("conversations").select("id, status, unread_count, last_message_at, created_at, instance_name, contact_id, assigned_to").order("last_message_at", { ascending: false }),
+      db.from("messages").select("id, conversation_id, from_me, created_at, status").gte("created_at", cutoff).order("created_at", { ascending: false }),
+      db.from("contacts").select("id, name, phone, created_at"),
+      db.from("evolution_connections").select("id, instance_name, status"),
+      db.from("profiles").select("id, full_name, status"),
+      db.from("subscriptions").select("id, user_id, expires_at, status"),
     ]);
     setConversations(convRes.data || []);
     setMessages(msgRes.data || []);
@@ -220,43 +221,41 @@ function useDashboardData() {
     setProfiles(profRes.data || []);
     setSubscriptions(subRes.data || []);
     setLoading(false);
-  };
-
-  useEffect(() => {
-    fetchData().then(() => {
-      const convChannel = supabase
-        .channel('dashboard-conversations')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' },
-          (payload) => {
-            setLastUpdate(new Date());
-            if (payload.eventType === 'INSERT') {
-              setConversations(prev => [payload.new as any, ...prev]);
-            } else if (payload.eventType === 'UPDATE') {
-              setConversations(prev => prev.map(c => c.id === payload.new.id ? { ...c, ...payload.new } : c));
-            } else if (payload.eventType === 'DELETE') {
-              setConversations(prev => prev.filter(c => c.id !== (payload.old as any).id));
-            }
-          }
-        )
-        .subscribe(() => setIsLive(true));
-
-      const msgChannel = supabase
-        .channel('dashboard-messages')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' },
-          (payload) => {
-            setLastUpdate(new Date());
-            setMessages(prev => [payload.new as any, ...prev]);
-          }
-        )
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(convChannel);
-        supabase.removeChannel(msgChannel);
-        setIsLive(false);
-      };
-    });
   }, []);
+
+  // Initial load
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Realtime via socket
+  useEffect(() => {
+    const socket = getSocket();
+
+    const handleConvUpdate = (data: any) => {
+      setLastUpdate(new Date());
+      setConversations(prev => {
+        const exists = prev.find(c => c.id === data.id);
+        if (exists) return prev.map(c => c.id === data.id ? { ...c, ...data } : c);
+        return prev;
+      });
+      fetchData();
+    };
+
+    const handleMsgNew = () => {
+      setLastUpdate(new Date());
+      fetchData();
+    };
+
+    socket.on('conversation:updated', handleConvUpdate);
+    socket.on('message:new', handleMsgNew);
+    setIsLive(socket.connected);
+    socket.on('connect', () => setIsLive(true));
+    socket.on('disconnect', () => setIsLive(false));
+
+    return () => {
+      socket.off('conversation:updated', handleConvUpdate);
+      socket.off('message:new', handleMsgNew);
+    };
+  }, [fetchData]);
 
   const allConnections = useMemo(() => {
     return evoConnections.map(c => ({ ...c, type: "whatsapp_whatsmeow_pro", label: c.instance_name }));
@@ -359,10 +358,10 @@ function useMyGoals(userId: string | undefined) {
     const end = new Date(y, m, 0, 23, 59, 59).toISOString();
 
     Promise.all([
-      supabase.from("sales_goals").select("*").eq("agent_id", userId).eq("period_month", m).eq("period_year", y),
-      supabase.from("conversations").select("id").eq("assigned_to", userId).gte("created_at", start).lte("created_at", end),
-      supabase.from("opportunities").select("id, value, status").eq("assigned_to", userId).gte("created_at", start).lte("created_at", end),
-      supabase.from("reviews").select("rating").eq("agent_id", userId).gte("created_at", start).lte("created_at", end),
+      db.from("sales_goals").select("*").eq("agent_id", userId).eq("period_month", m).eq("period_year", y),
+      db.from("conversations").select("id").eq("assigned_to", userId).gte("created_at", start).lte("created_at", end),
+      db.from("opportunities").select("id, value, status").eq("assigned_to", userId).gte("created_at", start).lte("created_at", end),
+      db.from("reviews").select("rating").eq("agent_id", userId).gte("created_at", start).lte("created_at", end),
     ]).then(([goalsRes, convRes, oppRes, reviewRes]) => {
       setGoals(goalsRes.data || []);
       const convs = convRes.data || [];
@@ -480,7 +479,7 @@ const Index = () => {
     setBdayMessage(`🎂 Feliz aniversário, ${c.name || c.phone}! Que seu dia seja especial! Da equipe MSX CRM`);
     setBdaySelectedConn("");
     setBdayDialogOpen(true);
-    supabase.from("evolution_connections").select("id, instance_name").then(({ data }) => {
+    db.from("evolution_connections").select("id, instance_name").then(({ data }) => {
       setBdayConnections((data || []) as { id: string; instance_name: string }[]);
     });
   };
@@ -489,7 +488,7 @@ const Index = () => {
     if (!bdayContact || !bdaySelectedConn || !bdayMessage.trim()) return;
     setBdaySending(true);
     try {
-      const { error } = await supabase.functions.invoke("evolution-api", {
+      const { error } = await db.functions.invoke("evolution-api", {
         body: { action: "send_message", instanceName: bdaySelectedConn, data: { phone: bdayContact.phone, message: bdayMessage } },
       });
       if (error) throw new Error(error.message);

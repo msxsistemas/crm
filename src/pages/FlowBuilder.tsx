@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Workflow, Play, Eye, Plus, ArrowRight, BookOpen, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 
@@ -331,16 +331,15 @@ const FlowBuilder = () => {
     if (!useTemplate || !user) return;
     setCreating(true);
     try {
-      const { error } = await supabase.from("chatbot_rules").insert({
+      const { error } = await db.from("chatbot_rules").insert({
         name: ruleName.trim() || useTemplate.name,
         trigger_type: triggerType,
         trigger_value: triggerValue || null,
         response_type: "text",
         response_text: "Iniciando fluxo...",
-        // @ts-expect-error: flow_data column added via migration, not yet in generated types
         flow_data: useTemplate.flowData,
         is_active: false,
-      });
+      } as any);
 
       if (error) throw error;
 

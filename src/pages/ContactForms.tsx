@@ -11,7 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FloatingInput } from "@/components/ui/floating-input";
-import { supabase } from "@/lib/db";
+import { db } from "@/lib/db";
 import { toast } from "sonner";
 
 interface ContactForm {
@@ -76,13 +76,13 @@ const ContactForms = () => {
 
   const fetchForms = async () => {
     setLoading(true);
-    const { data } = await (supabase as any).from("contact_forms").select("*").order("created_at", { ascending: false });
+    const { data } = await (db as any).from("contact_forms").select("*").order("created_at", { ascending: false });
     setForms((data || []) as ContactForm[]);
     setLoading(false);
   };
 
   const fetchAgents = async () => {
-    const { data } = await supabase.from("profiles").select("id, full_name, email");
+    const { data } = await db.from("profiles").select("id, full_name, email");
     setAgents((data || []) as AgentOption[]);
   };
 
@@ -129,11 +129,11 @@ const ContactForms = () => {
     };
 
     if (editingForm) {
-      const { error } = await (supabase as any).from("contact_forms").update(payload).eq("id", editingForm.id);
+      const { error } = await (db as any).from("contact_forms").update(payload).eq("id", editingForm.id);
       if (error) { toast.error("Erro ao salvar formulário"); setSaving(false); return; }
       toast.success("Formulário atualizado!");
     } else {
-      const { error } = await (supabase as any).from("contact_forms").insert(payload);
+      const { error } = await (db as any).from("contact_forms").insert(payload);
       if (error) { toast.error("Erro ao criar formulário"); setSaving(false); return; }
       toast.success("Formulário criado!");
     }
@@ -143,13 +143,13 @@ const ContactForms = () => {
   };
 
   const handleToggleActive = async (form: ContactForm) => {
-    await (supabase as any).from("contact_forms").update({ is_active: !form.is_active }).eq("id", form.id);
+    await (db as any).from("contact_forms").update({ is_active: !form.is_active }).eq("id", form.id);
     setForms((prev) => prev.map((f) => f.id === form.id ? { ...f, is_active: !f.is_active } : f));
   };
 
   const handleDelete = async () => {
     if (!deleteConfirm) return;
-    await (supabase as any).from("contact_forms").delete().eq("id", deleteConfirm.id);
+    await (db as any).from("contact_forms").delete().eq("id", deleteConfirm.id);
     toast.success("Formulário excluído!");
     setDeleteConfirm(null);
     fetchForms();
