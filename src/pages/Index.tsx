@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, startTransition, useDeferredValue } from "react";
 import { motion } from "framer-motion";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -209,20 +209,29 @@ function useDashboardData() {
     const cutoff = ninetyDaysAgo.toISOString();
 
     const [convRes, msgRes, contRes, evoRes, profRes, subRes] = await Promise.all([
-      db.from("conversations").select("id, status, unread_count, last_message_at, created_at, instance_name, contact_id, assigned_to").order("last_message_at", { ascending: false }).limit(1000),
-      db.from("messages").select("id, conversation_id, from_me, created_at, status").gte("created_at", cutoff).order("created_at", { ascending: false }).limit(2000),
-      db.from("contacts").select("id, name, phone, created_at").limit(1000),
+      db.from("conversations").select("id, status, unread_count, last_message_at, created_at, updated_at, instance_name, contact_id, assigned_to").order("last_message_at", { ascending: false }).limit(500),
+      db.from("messages").select("id, conversation_id, from_me, created_at, status").gte("created_at", cutoff).order("created_at", { ascending: false }).limit(1000),
+      db.from("contacts").select("id, name, phone, created_at").limit(500),
       db.from("evolution_connections").select("id, instance_name, status"),
       db.from("profiles").select("id, full_name, status"),
       db.from("subscriptions").select("id, user_id, expires_at, status"),
     ]);
-    setConversations(convRes.data || []);
-    setMessages(msgRes.data || []);
-    setContacts(contRes.data || []);
-    setEvoConnections(evoRes.data || []);
-    setProfiles(profRes.data || []);
-    setSubscriptions(subRes.data || []);
-    setLoading(false);
+
+    // Pre-parse dates as timestamps once (avoids repeated new Date() in useMemo)
+    const convs = (convRes.data || []).map((c: any) => ({ ...c, _ts: Date.parse(c.created_at), _uts: Date.parse(c.updated_at) }));
+    const msgs = (msgRes.data || []).map((m: any) => ({ ...m, _ts: Date.parse(m.created_at) }));
+    const conts = (contRes.data || []).map((c: any) => ({ ...c, _ts: Date.parse(c.created_at) }));
+
+    // Use startTransition so heavy downstream memos don't block initial paint
+    startTransition(() => {
+      setConversations(convs);
+      setMessages(msgs);
+      setContacts(conts);
+      setEvoConnections(evoRes.data || []);
+      setProfiles(profRes.data || []);
+      setSubscriptions(subRes.data || []);
+      setLoading(false);
+    });
   }, []);
 
   // Debounced re-fetch — socket events can fire many times per second
@@ -420,7 +429,11 @@ const GOAL_TYPE_CONFIG: Record<string, { label: string; icon: React.ReactNode; f
 const Index = () => {
   const { user } = useAuth();
   const { platformName } = usePlatformName();
-  const { conversations, messages, contacts, connections, profiles, subscriptions, loading, refresh, isLive, lastUpdate } = useDashboardData();
+  const { conversations: rawConversations, messages: rawMessages, contacts: rawContacts, connections, profiles, subscriptions, loading, refresh, isLive, lastUpdate } = useDashboardData();
+  // Defer heavy data so initial render isn't blocked by downstream memos
+  const conversations = useDeferredValue(rawConversations);
+  const messages = useDeferredValue(rawMessages);
+  const contacts = useDeferredValue(rawContacts);
   const { goals: myGoals, currentVals: myGoalCurrentVals } = useMyGoals(user?.id);
 
   // Defer non-critical widgets until after first render settles
@@ -550,43 +563,50 @@ const Index = () => {
     return items.filter(item => item[field] === selectedConnection);
   };
 
-  // Filtered data
+  // Timestamps for fast comparisons (avoid new Date() inside memos)
+  const dateStartMs = dateStart.getTime();
+  const dateEndMs = dateEnd.getTime();
+
+  // Filtered data — use pre-parsed _ts timestamps
   const filteredConvos = useMemo(() =>
-    filterByConnection(conversations.filter(c => {
-      const d = new Date(c.created_at);
-      const inDate = d >= dateStart && d <= dateEnd;
+    filterByConnection(conversations.filter((c: any) => {
+      const ts = c._ts ?? Date.parse(c.created_at);
+      const inDate = ts >= dateStartMs && ts <= dateEndMs;
       const inAgent = agentFilter === "all" || c.assigned_to === agentFilter;
       return inDate && inAgent;
-    })), [conversations, startDate, endDate, selectedConnection, agentFilter]);
+    })), [conversations, dateStartMs, dateEndMs, selectedConnection, agentFilter]);
 
   const filteredMessages = useMemo(() =>
-    messages.filter(m => {
-      const d = new Date(m.created_at);
-      return d >= dateStart && d <= dateEnd;
-    }), [messages, startDate, endDate]);
+    messages.filter((m: any) => {
+      const ts = m._ts ?? Date.parse(m.created_at);
+      return ts >= dateStartMs && ts <= dateEndMs;
+    }), [messages, dateStartMs, dateEndMs]);
 
   const filteredContacts = useMemo(() =>
-    contacts.filter(c => {
-      const d = new Date(c.created_at);
-      return d >= dateStart && d <= dateEnd;
-    }), [contacts, startDate, endDate]);
+    contacts.filter((c: any) => {
+      const ts = c._ts ?? Date.parse(c.created_at);
+      return ts >= dateStartMs && ts <= dateEndMs;
+    }), [contacts, dateStartMs, dateEndMs]);
 
   // Previous period data (for comparison)
+  const prevStartMs = prevDateRange.start.getTime();
+  const prevEndMs = prevDateRange.end.getTime();
+
   const prevConvos = useMemo(() => {
     if (!comparePrevious) return [];
-    return filterByConnection(conversations.filter(c => {
-      const d = new Date(c.created_at);
-      return d >= prevDateRange.start && d <= prevDateRange.end;
+    return filterByConnection(conversations.filter((c: any) => {
+      const ts = c._ts ?? Date.parse(c.created_at);
+      return ts >= prevStartMs && ts <= prevEndMs;
     }));
-  }, [conversations, prevDateRange, comparePrevious, selectedConnection]);
+  }, [conversations, prevStartMs, prevEndMs, comparePrevious, selectedConnection]);
 
   const prevMessages = useMemo(() => {
     if (!comparePrevious) return [];
-    return messages.filter(m => {
-      const d = new Date(m.created_at);
-      return d >= prevDateRange.start && d <= prevDateRange.end;
+    return messages.filter((m: any) => {
+      const ts = m._ts ?? Date.parse(m.created_at);
+      return ts >= prevStartMs && ts <= prevEndMs;
     });
-  }, [messages, prevDateRange, comparePrevious]);
+  }, [messages, prevStartMs, prevEndMs, comparePrevious]);
 
   // Real-time stats
   const openConvos = filterByConnection(conversations.filter(c => c.status === "open"));
@@ -617,15 +637,15 @@ const Index = () => {
 
   const avgResolutionTime = useMemo(() => {
     const times = closedConvos
-      .filter(c => c.created_at && c.updated_at)
-      .map(c => (new Date(c.updated_at).getTime() - new Date(c.created_at).getTime()) / 1000 / 3600);
-    return times.length > 0 ? times.reduce((a, b) => a + b, 0) / times.length : 0;
+      .filter((c: any) => c._ts && c._uts)
+      .map((c: any) => (c._uts - c._ts) / 1000 / 3600);
+    return times.length > 0 ? times.reduce((a: number, b: number) => a + b, 0) / times.length : 0;
   }, [closedConvos]);
 
   const slaCompliance = useMemo(() => {
     if (resolvedTickets === 0) return 0;
-    const within24h = closedConvos.filter(c => {
-      const diff = (new Date(c.updated_at).getTime() - new Date(c.created_at).getTime()) / 1000 / 3600;
+    const within24h = closedConvos.filter((c: any) => {
+      const diff = ((c._uts ?? Date.parse(c.updated_at)) - (c._ts ?? Date.parse(c.created_at))) / 1000 / 3600;
       return diff < 24;
     }).length;
     return Math.round((within24h / resolvedTickets) * 100);
@@ -689,15 +709,15 @@ const Index = () => {
         d.setDate(d.getDate() + 1);
       }
       for (const c of filteredConvos) {
-        const key = formatDateShort(new Date(c.created_at));
+        const key = formatDateShort(new Date(c._ts ?? Date.parse(c.created_at)));
         if (buckets[key]) buckets[key].created++;
       }
       for (const c of closedConvos) {
-        const key = formatDateShort(new Date(c.updated_at));
+        const key = formatDateShort(new Date(c._uts ?? Date.parse(c.updated_at)));
         if (buckets[key]) buckets[key].resolved++;
       }
-      for (const c of filteredConvos.filter(c => c.status === "open" && c.unread_count > 0)) {
-        const key = formatDateShort(new Date(c.created_at));
+      for (const c of filteredConvos.filter((c: any) => c.status === "open" && c.unread_count > 0)) {
+        const key = formatDateShort(new Date(c._ts ?? Date.parse(c.created_at)));
         if (buckets[key]) buckets[key].pending++;
       }
     } else if (groupBy === "week") {
@@ -708,16 +728,16 @@ const Index = () => {
         d.setDate(d.getDate() + 7);
       }
       for (const c of filteredConvos) {
-        const key = `Sem ${getWeekKey(new Date(c.created_at))}`;
+        const key = `Sem ${getWeekKey(new Date(c._ts ?? Date.parse(c.created_at)))}`;
         if (!buckets[key]) buckets[key] = { created: 0, resolved: 0, pending: 0 };
         buckets[key].created++;
       }
       for (const c of closedConvos) {
-        const key = `Sem ${getWeekKey(new Date(c.updated_at))}`;
+        const key = `Sem ${getWeekKey(new Date(c._uts ?? Date.parse(c.updated_at)))}`;
         if (buckets[key]) buckets[key].resolved++;
       }
-      for (const c of filteredConvos.filter(c => c.status === "open" && c.unread_count > 0)) {
-        const key = `Sem ${getWeekKey(new Date(c.created_at))}`;
+      for (const c of filteredConvos.filter((c: any) => c.status === "open" && c.unread_count > 0)) {
+        const key = `Sem ${getWeekKey(new Date(c._ts ?? Date.parse(c.created_at)))}`;
         if (buckets[key]) buckets[key].pending++;
       }
     } else {
@@ -729,16 +749,16 @@ const Index = () => {
         d.setMonth(d.getMonth() + 1);
       }
       for (const c of filteredConvos) {
-        const key = getMonthKey(new Date(c.created_at));
+        const key = getMonthKey(new Date(c._ts ?? Date.parse(c.created_at)));
         if (!buckets[key]) buckets[key] = { created: 0, resolved: 0, pending: 0 };
         buckets[key].created++;
       }
       for (const c of closedConvos) {
-        const key = getMonthKey(new Date(c.updated_at));
+        const key = getMonthKey(new Date(c._uts ?? Date.parse(c.updated_at)));
         if (buckets[key]) buckets[key].resolved++;
       }
-      for (const c of filteredConvos.filter(c => c.status === "open" && c.unread_count > 0)) {
-        const key = getMonthKey(new Date(c.created_at));
+      for (const c of filteredConvos.filter((c: any) => c.status === "open" && c.unread_count > 0)) {
+        const key = getMonthKey(new Date(c._ts ?? Date.parse(c.created_at)));
         if (buckets[key]) buckets[key].pending++;
       }
     }
@@ -763,7 +783,7 @@ const Index = () => {
       const key = c.created_at?.split("T")[0];
       if (key && days[key] !== undefined) days[key]++;
     }
-    let cumulative = contacts.filter(c => new Date(c.created_at) < dateStart).length;
+    let cumulative = contacts.filter((c: any) => (c._ts ?? Date.parse(c.created_at)) < dateStartMs).length;
     return Object.entries(days).map(([date, v]) => {
       cumulative += v;
       return {
@@ -779,7 +799,7 @@ const Index = () => {
     const hours: Record<number, number> = {};
     for (let i = 0; i < 24; i++) hours[i] = 0;
     for (const m of filteredMessages) {
-      const h = new Date(m.created_at).getHours();
+      const h = new Date(m._ts ?? Date.parse(m.created_at)).getHours();
       hours[h]++;
     }
     return Object.entries(hours).map(([h, v]) => ({ name: `${h}h`, value: v }));
