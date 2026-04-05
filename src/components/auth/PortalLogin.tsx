@@ -26,7 +26,11 @@ const PortalLogin = ({ portal, title, subtitle, showRegisterLink = false }: Port
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  if (authLoading || (session && roleLoading)) {
+  // If user just signed out, don't redirect back to dashboard even if session loads
+  const justSignedOut = sessionStorage.getItem('signed_out') === '1';
+  if (justSignedOut) sessionStorage.removeItem('signed_out');
+
+  if (!justSignedOut && (authLoading || (session && roleLoading))) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-primary">
         <Loader2 className="h-8 w-8 animate-spin text-primary-foreground" />
@@ -34,7 +38,7 @@ const PortalLogin = ({ portal, title, subtitle, showRegisterLink = false }: Port
     );
   }
 
-  if (!authLoading && session) {
+  if (!justSignedOut && !authLoading && session) {
     const redirectTo = isAdmin ? "/admin" : "/";
     return <Navigate to={redirectTo} replace />;
   }
