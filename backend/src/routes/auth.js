@@ -122,6 +122,7 @@ export default async function authRoutes(fastify) {
 
   // Get current user (30s Redis cache)
   fastify.get('/auth/me', { preHandler: fastify.authenticate }, async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
     const { redis } = await import('../redis.js');
     const cacheKey = `auth:me:${req.user.id}`;
     const cached = await redis.get(cacheKey).catch(() => null);

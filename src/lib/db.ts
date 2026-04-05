@@ -21,6 +21,7 @@ async function apiFetch(method: string, path: string, body?: unknown): Promise<u
     method,
     headers,
     credentials: 'include',
+    cache: 'no-store',
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 

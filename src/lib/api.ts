@@ -28,6 +28,7 @@ async function request<T = unknown>(
     method,
     headers,
     credentials: 'include', // send httpOnly cookies automatically
+    cache: 'no-store',       // never serve auth requests from browser cache
     body: body !== undefined ? JSON.stringify(body) : undefined,
     signal: options?.signal,
   });
