@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { db } from "@/lib/db";
 
-const DEFAULT_NAME = "ZapCRM";
+const DEFAULT_NAME = "MSX CRM";
 let cachedName: string | null = null;
 const listeners = new Set<(name: string) => void>();
 
