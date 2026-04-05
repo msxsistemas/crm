@@ -47,7 +47,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => { loadUser(); }, []);
 
   const signOut = async () => {
-    try { await api.post('/auth/logout'); } catch {}
+    try { await api.post('/auth/logout', {}); } catch {}
     setUser(null);
     // Flag tells the login page this is a fresh logout — skip any cached session redirect
     sessionStorage.setItem('signed_out', '1');
