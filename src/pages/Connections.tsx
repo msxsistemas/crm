@@ -50,15 +50,28 @@ declare global {
 }
 
 function loadFBSDK(appId: string): Promise<void> {
-  return new Promise((resolve) => {
-    if (window.FB) { resolve(); return; }
-    window.fbAsyncInit = () => {
+  return new Promise((resolve, reject) => {
+    // SDK já carregado
+    if (window.FB) {
       window.FB.init({ appId, autoLogAppEvents: true, xfbml: false, version: 'v21.0' });
       resolve();
+      return;
+    }
+    const timeout = setTimeout(() => reject(new Error('Timeout ao carregar SDK da Meta')), 10000);
+    window.fbAsyncInit = () => {
+      clearTimeout(timeout);
+      try {
+        window.FB.init({ appId, autoLogAppEvents: true, xfbml: false, version: 'v21.0' });
+        resolve();
+      } catch (e) {
+        reject(e);
+      }
     };
     const s = document.createElement('script');
     s.src = 'https://connect.facebook.net/pt_BR/sdk.js';
-    s.async = true; s.defer = true;
+    s.async = true;
+    s.defer = true;
+    s.onerror = () => { clearTimeout(timeout); reject(new Error('Falha ao baixar SDK da Meta')); };
     document.body.appendChild(s);
   });
 }
@@ -134,8 +147,8 @@ const Connections = () => {
         scope: 'whatsapp_business_management,whatsapp_business_messaging',
         return_scopes: true,
       });
-    } catch {
-      toast.error('Erro ao carregar SDK da Meta');
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao carregar SDK da Meta');
       setEmbeddedLoading(false);
     }
   };
