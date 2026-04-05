@@ -114,11 +114,18 @@ export default async function authRoutes(fastify) {
     return { token };
   });
 
-  // Get current user
+  // Get current user (30s Redis cache)
   fastify.get('/auth/me', { preHandler: fastify.authenticate }, async (req, reply) => {
+    const { redis } = await import('../redis.js');
+    const cacheKey = `auth:me:${req.user.id}`;
+    const cached = await redis.get(cacheKey).catch(() => null);
+    if (cached) return JSON.parse(cached);
+
     const { rows } = await query('SELECT * FROM profiles WHERE id = $1', [req.user.id]);
     if (!rows[0]) return reply.status(404).send({ error: 'Usuário não encontrado' });
-    return sanitizeUser(rows[0]);
+    const user = sanitizeUser(rows[0]);
+    await redis.set(cacheKey, JSON.stringify(user), 'EX', 30).catch(() => null);
+    return user;
   });
 
   // Update profile
@@ -138,6 +145,8 @@ export default async function authRoutes(fastify) {
       `UPDATE profiles SET ${updates.join(', ')} WHERE id = $${p} RETURNING *`,
       params
     );
+    const { redis } = await import('../redis.js');
+    await redis.del(`auth:me:${req.user.id}`).catch(() => null);
     return sanitizeUser(rows[0]);
   });
 

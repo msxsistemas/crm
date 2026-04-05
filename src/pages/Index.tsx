@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useCallback, useRef, startTransition, useDeferredValue } from "react";
-import { motion } from "framer-motion";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -1056,17 +1055,12 @@ const Index = () => {
     );
   }
 
-  const fadeUp = (delay = 0) => ({
-    initial: { opacity: 0, y: 20 },
-    animate: { opacity: 1, y: 0 },
-    transition: { duration: 0.5, delay, ease: "easeOut" as const },
-  });
 
   return (
     <div className="flex-1 overflow-y-auto">
 
       {/* Header */}
-      <motion.div {...fadeUp(0)} className="mx-6 py-3 border-b border-border flex items-center justify-between">
+      <div className="mx-6 py-3 border-b border-border flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-primary flex items-center gap-2">
             <BarChart3 className="h-5 w-5" /> Estatísticas e Informações
@@ -1094,7 +1088,7 @@ const Index = () => {
             <RefreshCw className="h-4 w-4" /> ATUALIZAR
           </Button>
         </div>
-      </motion.div>
+      </div>
 
       {/* ── Dashboard Customization Drawer ── */}
       {customizeOpen && (
@@ -1161,7 +1155,7 @@ const Index = () => {
 
       <div className="p-6 space-y-6">
         {/* ── Advanced Filters (always visible) ── */}
-        <motion.div {...fadeUp(0.05)}>
+        <div>
         <Card className="p-5">
           <button
             onClick={() => setFiltersOpen(!filtersOpen)}
@@ -1240,13 +1234,13 @@ const Index = () => {
             </div>
           )}
         </Card>
-        </motion.div>
+        </div>
 
         {/* ── Widget-based content ── */}
         {visibleWidgets.map((wl, wIdx) => {
 
         if (wl.id === 'realtime_indicator') return (
-        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)}>
+        <div key={wl.id}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
               <Clock className="h-5 w-5" /> Status dos Atendimentos em Tempo Real
@@ -1322,11 +1316,11 @@ const Index = () => {
               <p className="text-sm text-muted-foreground">Tickets finalizados (status: closed)</p>
             </div>
           </div>
-        </motion.div>
+        </div>
         ); // end realtime_indicator
 
         if (wl.id === 'stats_cards') return (
-        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)}>
+        <div key={wl.id}>
           <h2 className="text-lg font-semibold text-foreground flex items-center gap-2 mb-4">
             <Activity className="h-5 w-5" /> Indicadores Chave de Performance
           </h2>
@@ -1382,11 +1376,11 @@ const Index = () => {
               <p className="text-[10px] text-muted-foreground mt-2">Contatos na plataforma</p>
             </div>
           </div>
-        </motion.div>
+        </div>
         ); // end stats_cards
 
         if (wl.id === 'conversations_chart') return (
-        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)} className="rounded-xl border bg-card p-6">
+        <div key={wl.id} className="rounded-xl border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-foreground">Linha do Tempo de Tickets</h3>
             <Badge variant="outline" className="text-[10px]">Agrupado por: {groupBy === "day" ? "Dia" : groupBy === "week" ? "Semana" : "Mês"}</Badge>
@@ -1444,7 +1438,7 @@ const Index = () => {
               />
             </AreaChart>
           </ResponsiveContainer>
-        </motion.div>
+        </div>
         ); // end conversations_chart
 
         if (wl.id === 'heatmap') {
@@ -1470,7 +1464,7 @@ const Index = () => {
             return "bg-primary";
           };
           return (
-            <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)}>
+            <div key={wl.id}>
               <Card className="p-6">
                 <div className="flex items-center justify-between mb-1">
                   <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
@@ -1507,12 +1501,12 @@ const Index = () => {
                   <span className="text-[10px] text-muted-foreground">Alto</span>
                 </div>
               </Card>
-            </motion.div>
+            </div>
           );
         }
 
         if (wl.id === 'agent_performance') return (
-        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div key={wl.id} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Alerts */}
           <div className="rounded-xl border bg-card p-6">
             <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-4">
@@ -1621,13 +1615,13 @@ const Index = () => {
               </Table>
             </div>
           </div>
-        </motion.div>
+        </div>
         ); // end agent_performance
 
         // Channel Stats & Per-Agent Table are always visible (not in widget registry)
         if (wl.id === 'sales_goals') return (
         <>{myGoals.length > 0 && (
-        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)} className="rounded-xl border bg-card p-6">
+        <div key={wl.id} className="rounded-xl border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
               <Target className="h-4 w-4 text-primary" /> Metas do Mês
@@ -1660,12 +1654,12 @@ const Index = () => {
               );
             })}
           </div>
-        </motion.div>
+        </div>
         )}</>
         ); // end sales_goals
 
         if (wl.id === 'top_contacts') return (
-        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)} className="rounded-xl border bg-card p-6">
+        <div key={wl.id} className="rounded-xl border bg-card p-6">
           <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-4">
             <Users className="h-4 w-4 text-primary" /> Top Contatos (últimos 30 dias)
           </h3>
@@ -1685,11 +1679,11 @@ const Index = () => {
               ))}
             </div>
           )}
-        </motion.div>
+        </div>
         ); // end top_contacts
 
         if (wl.id === 'recent_activity') return (
-        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)} className="rounded-xl border bg-card p-6">
+        <div key={wl.id} className="rounded-xl border bg-card p-6">
           <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-4">
             <Zap className="h-4 w-4 text-primary" /> Atividade Recente
           </h3>
@@ -1708,11 +1702,11 @@ const Index = () => {
               ))}
             </div>
           )}
-        </motion.div>
+        </div>
         ); // end recent_activity
 
         if (wl.id === 'birthdays') return (
-        <motion.div key={wl.id} {...fadeUp(0.1 + wIdx * 0.05)} className="rounded-xl border bg-card p-6">
+        <div key={wl.id} className="rounded-xl border bg-card p-6">
           <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-4">
             <Cake className="h-4 w-4 text-pink-500" />
             <span>🎂 Aniversários (próximos 7 dias)</span>
@@ -1756,14 +1750,14 @@ const Index = () => {
               })}
             </div>
           )}
-        </motion.div>
+        </div>
         ); // end birthdays
 
         return null; // unknown widget
         })} {/* end visibleWidgets.map */}
 
         {/* ── Channel Stats (always visible) ── */}
-        <motion.div {...fadeUp(0.7)}>
+        <div>
           <h2 className="text-lg font-semibold text-foreground flex items-center gap-2 mb-4">
             <Wifi className="h-5 w-5" /> Estatísticas por Canal
           </h2>
@@ -1841,10 +1835,10 @@ const Index = () => {
               })
             )}
           </div>
-        </motion.div>
+        </div>
 
         {/* ── Per-Agent Performance Table ── */}
-        <motion.div {...fadeUp(0.75)} className="rounded-xl border bg-card p-6">
+        <div className="rounded-xl border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
               <Shield className="h-4 w-4 text-primary" /> Performance por Agente
@@ -1910,10 +1904,10 @@ const Index = () => {
               </TableBody>
             </Table>
           </div>
-        </motion.div>
+        </div>
 
         {/* ── Detailed Reports ── */}
-        <motion.div {...fadeUp(0.8)} className="rounded-xl border bg-card p-6">
+        <div className="rounded-xl border bg-card p-6">
           <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-4">
             <BarChart3 className="h-4 w-4 text-primary" /> Relatórios Detalhados
           </h3>
@@ -2030,12 +2024,12 @@ const Index = () => {
               </div>
             </TabsContent>
           </Tabs>
-        </motion.div>
+        </div>
 
         {/* Metas now handled by widget system */}
 
         {/* ── Export ── */}
-        <motion.div {...fadeUp(0.9)} className="flex items-center justify-between">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Button className="gap-2 rounded-lg" size="sm" onClick={handleExportDashboard}>
               <Download className="h-4 w-4" /> Exportar para Excel
@@ -2045,7 +2039,7 @@ const Index = () => {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">{updatedAt}</p>
-        </motion.div>
+        </div>
       </div>
 
       {/* ── Birthday "Enviar Parabéns" Dialog ── */}

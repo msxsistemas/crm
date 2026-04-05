@@ -1,11 +1,16 @@
 import { query } from '../database.js';
+import { redis } from '../redis.js';
 
 export default async function statsRoutes(fastify) {
   const auth = { preHandler: fastify.authenticate };
 
-  // Single endpoint replacing the 5 parallel TopBar queries
+  // Single endpoint replacing the 5 parallel TopBar queries (30s Redis cache)
   fastify.get('/stats/topbar', auth, async (req) => {
     const userId = req.user.id;
+    const cacheKey = `stats:topbar:${userId}`;
+
+    const cached = await redis.get(cacheKey).catch(() => null);
+    if (cached) return JSON.parse(cached);
 
     const { rows } = await query(`
       SELECT
@@ -19,13 +24,15 @@ export default async function statsRoutes(fastify) {
     `, [userId]);
 
     const row = rows[0] || {};
-    return {
+    const result = {
       fullName: row.full_name || null,
       status: row.status || 'online',
       connectionCount: row.connection_count ?? 0,
       unreadConversations: row.unread_conversations ?? 0,
       waitingConversations: row.waiting_conversations ?? 0,
     };
+    await redis.set(cacheKey, JSON.stringify(result), 'EX', 30).catch(() => null);
+    return result;
   });
 
   // Dashboard summary — returns aggregated counts without loading all rows
