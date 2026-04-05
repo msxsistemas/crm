@@ -79,11 +79,12 @@ function saveWidgetLayout(layout: WidgetLayout[]) {
 }
 
 // ── Top Contacts Widget ──
-function useTopContacts() {
+function useTopContacts(enabled: boolean) {
   const [topContacts, setTopContacts] = useState<{ name: string | null; phone: string; count: number }[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (!enabled) return;
     setLoading(true);
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -114,17 +115,18 @@ function useTopContacts() {
         setTopContacts(result);
         setLoading(false);
       });
-  }, []);
+  }, [enabled]);
 
   return { topContacts, loading };
 }
 
 // ── Recent Activity Widget ──
-function useRecentActivity() {
+function useRecentActivity(enabled: boolean) {
   const [activities, setActivities] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (!enabled) return;
     setLoading(true);
     db
       .from('activity_log')
@@ -135,7 +137,7 @@ function useRecentActivity() {
         setActivities(data || []);
         setLoading(false);
       });
-  }, []);
+  }, [enabled]);
 
   return { activities, loading };
 }
@@ -149,16 +151,18 @@ interface BirthdayContact {
   daysUntil: number;
 }
 
-function useUpcomingBirthdays() {
+function useUpcomingBirthdays(enabled: boolean) {
   const [birthdays, setBirthdays] = useState<BirthdayContact[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (!enabled) return;
     setLoading(true);
     db
       .from('contacts')
       .select('id, name, phone, birthday')
       .not('birthday', 'is', null)
+      .limit(2000)
       .then(({ data }) => {
         if (!data) { setLoading(false); return; }
         const today = new Date();
@@ -167,9 +171,7 @@ function useUpcomingBirthdays() {
         for (const c of data) {
           if (!c.birthday) continue;
           const bday = new Date(c.birthday as string);
-          // Use this year's birthday
           let thisYearBday = new Date(today.getFullYear(), bday.getMonth(), bday.getDate());
-          // If already passed this year, check next year
           if (thisYearBday.getTime() < todayMs) {
             thisYearBday = new Date(today.getFullYear() + 1, bday.getMonth(), bday.getDate());
           }
@@ -182,7 +184,7 @@ function useUpcomingBirthdays() {
         setBirthdays(upcoming);
         setLoading(false);
       });
-  }, []);
+  }, [enabled]);
 
   return { birthdays, loading };
 }
@@ -198,18 +200,18 @@ function useDashboardData() {
   const [loading, setLoading] = useState(true);
   const [isLive, setIsLive] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    // Limit messages to last 90 days to avoid loading entire history
     const ninetyDaysAgo = new Date();
     ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
     const cutoff = ninetyDaysAgo.toISOString();
 
     const [convRes, msgRes, contRes, evoRes, profRes, subRes] = await Promise.all([
-      db.from("conversations").select("id, status, unread_count, last_message_at, created_at, instance_name, contact_id, assigned_to").order("last_message_at", { ascending: false }),
-      db.from("messages").select("id, conversation_id, from_me, created_at, status").gte("created_at", cutoff).order("created_at", { ascending: false }),
-      db.from("contacts").select("id, name, phone, created_at"),
+      db.from("conversations").select("id, status, unread_count, last_message_at, created_at, instance_name, contact_id, assigned_to").order("last_message_at", { ascending: false }).limit(1000),
+      db.from("messages").select("id, conversation_id, from_me, created_at, status").gte("created_at", cutoff).order("created_at", { ascending: false }).limit(2000),
+      db.from("contacts").select("id, name, phone, created_at").limit(1000),
       db.from("evolution_connections").select("id, instance_name, status"),
       db.from("profiles").select("id, full_name, status"),
       db.from("subscriptions").select("id, user_id, expires_at, status"),
@@ -223,10 +225,16 @@ function useDashboardData() {
     setLoading(false);
   }, []);
 
+  // Debounced re-fetch — socket events can fire many times per second
+  const debouncedFetch = useCallback(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchData(), 3000);
+  }, [fetchData]);
+
   // Initial load
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Realtime via socket
+  // Realtime via socket — update local state instantly, debounce full re-fetch
   useEffect(() => {
     const socket = getSocket();
 
@@ -237,12 +245,12 @@ function useDashboardData() {
         if (exists) return prev.map(c => c.id === data.id ? { ...c, ...data } : c);
         return prev;
       });
-      fetchData();
+      debouncedFetch();
     };
 
     const handleMsgNew = () => {
       setLastUpdate(new Date());
-      fetchData();
+      debouncedFetch();
     };
 
     socket.on('conversation:updated', handleConvUpdate);
@@ -254,8 +262,9 @@ function useDashboardData() {
     return () => {
       socket.off('conversation:updated', handleConvUpdate);
       socket.off('message:new', handleMsgNew);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [fetchData]);
+  }, [debouncedFetch]);
 
   const allConnections = useMemo(() => {
     return evoConnections.map(c => ({ ...c, type: "whatsapp_whatsmeow_pro", label: c.instance_name }));
@@ -413,6 +422,13 @@ const Index = () => {
   const { platformName } = usePlatformName();
   const { conversations, messages, contacts, connections, profiles, subscriptions, loading, refresh, isLive, lastUpdate } = useDashboardData();
   const { goals: myGoals, currentVals: myGoalCurrentVals } = useMyGoals(user?.id);
+
+  // Defer non-critical widgets until after first render settles
+  const [widgetsReady, setWidgetsReady] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setWidgetsReady(true), 1500);
+    return () => clearTimeout(t);
+  }, []);
   const [datePreset, setDatePreset] = useState("7days");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -461,10 +477,10 @@ const Index = () => {
     updateWidgetLayout(defaults);
   };
 
-  // Extra widget data
-  const { topContacts } = useTopContacts();
-  const { activities } = useRecentActivity();
-  const { birthdays } = useUpcomingBirthdays();
+  // Extra widget data — deferred until after primary render
+  const { topContacts } = useTopContacts(widgetsReady);
+  const { activities } = useRecentActivity(widgetsReady);
+  const { birthdays } = useUpcomingBirthdays(widgetsReady);
 
   // Birthday "Enviar parabéns" dialog state
   const [bdayDialogOpen, setBdayDialogOpen] = useState(false);

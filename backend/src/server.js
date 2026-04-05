@@ -38,6 +38,7 @@ import blacklistRoutes from './routes/blacklist.js';
 import reviewRoutes from './routes/reviews.js';
 import proposalRoutes from './routes/proposals.js';
 import internalChatRoutes from './routes/internal-chat.js';
+import statsRoutes from './routes/stats.js';
 import metaWhatsAppRoutes from './routes/meta-whatsapp.js';
 import { startMessageWorker } from './jobs/messageQueue.js';
 import { startSchedulesWorker } from './jobs/schedulesWorker.js';
@@ -150,6 +151,7 @@ await fastify.register(reviewRoutes);
 await fastify.register(proposalRoutes);
 await fastify.register(internalChatRoutes);
 await fastify.register(metaWhatsAppRoutes);
+await fastify.register(statsRoutes);
 
 // 404 handler
 fastify.setNotFoundHandler((req, reply) => {

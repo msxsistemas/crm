@@ -115,13 +115,17 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
 
   const unreadNotifCount = notifications.filter(n => !n.read).length;
 
-  // Measure real latency with a lightweight ping
+  // Measure real latency with a lightweight ping (deferred — not on critical path)
   const measureLatency = useCallback(async () => {
     const start = performance.now();
-    const { error } = await db.from("profiles").select("id", { count: "exact", head: true }).limit(1);
-    const elapsed = Math.round(performance.now() - start);
-    setLatencyMs(elapsed);
-    setApiStatus(error ? 'disconnected' : 'connected');
+    try {
+      await api.get('/health');
+      const elapsed = Math.round(performance.now() - start);
+      setLatencyMs(elapsed);
+      setApiStatus('connected');
+    } catch {
+      setApiStatus('disconnected');
+    }
   }, []);
 
   const requestNotificationPermission = useCallback(async () => {
@@ -191,32 +195,36 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
       .eq("read", false);
   }, [user]);
 
-  // Fetch profile & connections
+  // Single request replacing 5 parallel calls
   const fetchData = useCallback(async () => {
     if (!user) return;
-
-    const [profileRes, evoRes, cloudRes, unreadRes, waitingRes] = await Promise.all([
-      db.from("profiles").select("full_name, status").eq("id", user.id).maybeSingle(),
-      db.from("evolution_connections").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "open"),
-      db.from("whatsapp_cloud_connections").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "active"),
-      db.from("conversations").select("id", { count: "exact", head: true }).gt("unread_count", 0),
-      db.from("conversations").select("id", { count: "exact", head: true }).eq("status", "open"),
-    ]);
-
-    if (profileRes.data?.full_name) setFullName(profileRes.data.full_name);
-    if (profileRes.data?.status) setStatus(profileRes.data.status as UserStatus);
-    setConnectionCount((evoRes.count ?? 0) + (cloudRes.count ?? 0));
-    setUnreadConversations(unreadRes.count ?? 0);
-    setWaitingConversations(waitingRes.count ?? 0);
+    try {
+      const stats = await api.get<{
+        fullName: string | null;
+        status: string;
+        connectionCount: number;
+        unreadConversations: number;
+        waitingConversations: number;
+      }>('/stats/topbar');
+      if (stats.fullName) setFullName(stats.fullName);
+      if (stats.status) setStatus(stats.status as UserStatus);
+      setConnectionCount(stats.connectionCount ?? 0);
+      setUnreadConversations(stats.unreadConversations ?? 0);
+      setWaitingConversations(stats.waitingConversations ?? 0);
+    } catch { /* ignore — ui stays with previous values */ }
   }, [user]);
 
   useEffect(() => {
     fetchData();
-    measureLatency();
     requestNotificationPermission();
-    // Ping latency every 30s
-    const interval = setInterval(measureLatency, 30000);
-    return () => clearInterval(interval);
+    // Defer latency ping — not on the critical render path
+    const firstPing = setTimeout(() => {
+      measureLatency();
+      const interval = setInterval(measureLatency, 30000);
+      // Store interval id for cleanup via closure
+      return () => clearInterval(interval);
+    }, 2000);
+    return () => clearTimeout(firstPing);
   }, [fetchData, measureLatency, requestNotificationPermission]);
 
   // Browser notifications + DB insert when unread/waiting count increases
