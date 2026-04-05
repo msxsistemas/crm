@@ -32,6 +32,37 @@ interface MetaConnection {
   created_at: string;
 }
 
+interface EmbeddedPhone {
+  waba_id: string;
+  waba_name: string;
+  phone_number_id: string;
+  display_phone_number: string;
+  verified_name: string;
+  status: string;
+  access_token: string;
+}
+
+declare global {
+  interface Window {
+    FB: any;
+    fbAsyncInit: () => void;
+  }
+}
+
+function loadFBSDK(appId: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (window.FB) { resolve(); return; }
+    window.fbAsyncInit = () => {
+      window.FB.init({ appId, autoLogAppEvents: true, xfbml: false, version: 'v21.0' });
+      resolve();
+    };
+    const s = document.createElement('script');
+    s.src = 'https://connect.facebook.net/pt_BR/sdk.js';
+    s.async = true; s.defer = true;
+    document.body.appendChild(s);
+  });
+}
+
 interface Instance {
   instanceName: string;
   status?: string;
@@ -57,6 +88,71 @@ const Connections = () => {
   const [metaAccessToken, setMetaAccessToken] = useState("");
   const [metaWabaId, setMetaWabaId] = useState("");
   const [metaCreating, setMetaCreating] = useState(false);
+
+  // Embedded Signup state
+  const [embeddedLoading, setEmbeddedLoading] = useState(false);
+  const [embeddedPhones, setEmbeddedPhones] = useState<EmbeddedPhone[]>([]);
+  const [embeddedSelectOpen, setEmbeddedSelectOpen] = useState(false);
+
+  const handleEmbeddedSignup = async () => {
+    const appId = import.meta.env.VITE_META_APP_ID;
+    if (!appId) {
+      toast.error('VITE_META_APP_ID não configurado');
+      return;
+    }
+    setEmbeddedLoading(true);
+    try {
+      await loadFBSDK(appId);
+      window.FB.login(async (response: any) => {
+        if (!response.authResponse?.accessToken) {
+          setEmbeddedLoading(false);
+          if (response.status !== 'connected') toast.error('Login cancelado ou negado');
+          return;
+        }
+        try {
+          const res = await api.post<{ phones: EmbeddedPhone[] }>(
+            '/meta-connections/embedded-signup',
+            { access_token: response.authResponse.accessToken }
+          );
+          if (res.phones.length === 1) {
+            const saved = await api.post<MetaConnection>(
+              '/meta-connections/embedded-signup/save',
+              res.phones[0]
+            );
+            setMetaConnections(prev => [...prev.filter(c => c.phone_number_id !== saved.phone_number_id), saved]);
+            toast.success(`${saved.label} conectado com sucesso!`);
+          } else {
+            setEmbeddedPhones(res.phones);
+            setEmbeddedSelectOpen(true);
+          }
+        } catch (e: any) {
+          toast.error(e?.message || 'Erro ao conectar');
+        } finally {
+          setEmbeddedLoading(false);
+        }
+      }, {
+        scope: 'whatsapp_business_management,whatsapp_business_messaging',
+        return_scopes: true,
+      });
+    } catch {
+      toast.error('Erro ao carregar SDK da Meta');
+      setEmbeddedLoading(false);
+    }
+  };
+
+  const saveEmbeddedPhone = async (phone: EmbeddedPhone) => {
+    try {
+      const saved = await api.post<MetaConnection>(
+        '/meta-connections/embedded-signup/save',
+        phone
+      );
+      setMetaConnections(prev => [...prev.filter(c => c.phone_number_id !== saved.phone_number_id), saved]);
+      setEmbeddedSelectOpen(false);
+      toast.success(`${saved.label} conectado com sucesso!`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao salvar conexão');
+    }
+  };
 
   // Status check state
   const [checkingInstance, setCheckingInstance] = useState<string | null>(null);
@@ -546,20 +642,46 @@ const Connections = () => {
                 <p className="text-sm text-muted-foreground">API Oficial do WhatsApp Business (Meta)</p>
                 <p className="text-xs text-muted-foreground mt-0.5">Cada número paga seus próprios custos de conversação direto à Meta.</p>
               </div>
-              <Button size="sm" className="gap-2" onClick={() => setMetaNewOpen(true)}>
-                <Plus className="h-4 w-4" /> Adicionar número
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  className="gap-2 bg-[#1877F2] hover:bg-[#166FE5] text-white"
+                  onClick={handleEmbeddedSignup}
+                  disabled={embeddedLoading}
+                >
+                  {embeddedLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : (
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/>
+                    </svg>
+                  )}
+                  Conectar com WhatsApp
+                </Button>
+                <Button size="sm" variant="outline" className="gap-2" onClick={() => setMetaNewOpen(true)}>
+                  <Plus className="h-4 w-4" /> Manual
+                </Button>
+              </div>
             </div>
 
             {metaLoading ? (
               <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
             ) : metaConnections.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
+              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-4">
                 <MessageSquare className="h-12 w-12 opacity-20" />
-                <p className="text-sm font-medium">Nenhuma conexão configurada</p>
-                <p className="text-xs text-center max-w-xs">Configure um número da API Oficial do WhatsApp Business para começar.</p>
-                <Button size="sm" variant="outline" className="gap-2 mt-2" onClick={() => setMetaNewOpen(true)}>
-                  <Plus className="h-4 w-4" /> Adicionar número
+                <div className="text-center">
+                  <p className="text-sm font-medium">Nenhuma conexão configurada</p>
+                  <p className="text-xs mt-1 max-w-xs">Clique em "Conectar com WhatsApp" para autorizar sua conta Meta em poucos cliques.</p>
+                </div>
+                <Button
+                  className="gap-2 bg-[#1877F2] hover:bg-[#166FE5] text-white mt-1"
+                  onClick={handleEmbeddedSignup}
+                  disabled={embeddedLoading}
+                >
+                  {embeddedLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : (
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/>
+                    </svg>
+                  )}
+                  Conectar com WhatsApp
                 </Button>
               </div>
             ) : (
@@ -631,6 +753,45 @@ const Connections = () => {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Embedded Signup — Phone Selection Dialog */}
+      <Dialog open={embeddedSelectOpen} onOpenChange={setEmbeddedSelectOpen}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden gap-0 [&>button.absolute]:hidden">
+          <div className="bg-[#1877F2] px-6 py-5 flex items-center gap-3">
+            <div className="h-10 w-10 rounded-full bg-white/20 flex items-center justify-center">
+              <MessageSquare className="h-5 w-5 text-white" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-lg font-bold text-white">Selecione o número</h2>
+              <p className="text-sm text-white/70">Escolha qual número deseja conectar</p>
+            </div>
+            <button onClick={() => setEmbeddedSelectOpen(false)} className="text-white/70 hover:text-white">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="px-6 py-4 space-y-2 max-h-96 overflow-y-auto">
+            {embeddedPhones.map((phone) => (
+              <button
+                key={phone.phone_number_id}
+                onClick={() => saveEmbeddedPhone(phone)}
+                className="w-full flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-muted/50 transition-colors text-left"
+              >
+                <div className="h-9 w-9 rounded-full bg-green-500/10 flex items-center justify-center shrink-0">
+                  <MessageSquare className="h-4 w-4 text-green-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{phone.verified_name || phone.display_phone_number}</p>
+                  <p className="text-xs text-muted-foreground truncate">{phone.display_phone_number} · {phone.waba_name}</p>
+                </div>
+                <CheckCircle className="h-4 w-4 text-muted-foreground shrink-0" />
+              </button>
+            ))}
+          </div>
+          <div className="px-6 pb-5">
+            <Button variant="outline" className="w-full" onClick={() => setEmbeddedSelectOpen(false)}>Cancelar</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Meta - New Connection Dialog */}
       <Dialog open={metaNewOpen} onOpenChange={setMetaNewOpen}>

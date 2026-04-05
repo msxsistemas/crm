@@ -62,6 +62,83 @@ export default async function metaWhatsAppRoutes(fastify) {
     return reply.status(200).send({ ok: true });
   });
 
+  // ── Embedded Signup — troca token do SDK e busca WABAs + números ─────────
+  fastify.post('/meta-connections/embedded-signup', auth, async (req, reply) => {
+    const { access_token } = req.body;
+    if (!access_token) return reply.status(400).send({ error: 'access_token é obrigatório' });
+
+    const APP_ID = process.env.META_APP_ID;
+    const SECRET = process.env.META_APP_SECRET;
+
+    // Troca por token de longa duração (60 dias)
+    let longToken = access_token;
+    if (APP_ID && SECRET) {
+      try {
+        const r = await fetch(
+          `${GRAPH_URL}/oauth/access_token?grant_type=fb_exchange_token&client_id=${APP_ID}&client_secret=${SECRET}&fb_exchange_token=${access_token}`
+        );
+        const d = await r.json();
+        if (d.access_token) longToken = d.access_token;
+      } catch {}
+    }
+
+    // Busca WABAs vinculadas ao usuário
+    const wabaRes = await fetch(`${GRAPH_URL}/me/whatsapp_business_accounts?access_token=${longToken}&fields=id,name`);
+    const wabaData = await wabaRes.json();
+    if (wabaData.error) return reply.status(400).send({ error: wabaData.error.message });
+
+    const phones = [];
+    for (const waba of wabaData.data || []) {
+      const phoneRes = await fetch(
+        `${GRAPH_URL}/${waba.id}/phone_numbers?access_token=${longToken}&fields=id,display_phone_number,verified_name,status,quality_rating`
+      );
+      const phoneData = await phoneRes.json();
+      for (const phone of phoneData.data || []) {
+        phones.push({
+          waba_id: waba.id,
+          waba_name: waba.name,
+          phone_number_id: phone.id,
+          display_phone_number: phone.display_phone_number,
+          verified_name: phone.verified_name,
+          status: phone.status,
+          access_token: longToken,
+        });
+      }
+    }
+
+    if (phones.length === 0) {
+      return reply.status(400).send({ error: 'Nenhum número encontrado. Verifique se o WABA tem números registrados.' });
+    }
+    return { phones };
+  });
+
+  // ── Embedded Signup — salva número selecionado ────────────────────────────
+  fastify.post('/meta-connections/embedded-signup/save', auth, async (req, reply) => {
+    const { phone_number_id, waba_id, access_token, display_phone_number, verified_name, label } = req.body;
+    if (!phone_number_id || !waba_id || !access_token) {
+      return reply.status(400).send({ error: 'Dados incompletos' });
+    }
+
+    // Assina o WABA no webhook automaticamente
+    try {
+      await fetch(`${GRAPH_URL}/${waba_id}/subscribed_apps`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${access_token}` },
+      });
+    } catch {}
+
+    const connLabel = label || verified_name || display_phone_number || phone_number_id;
+    const { rows } = await query(
+      `INSERT INTO meta_connections (user_id, label, phone_number_id, access_token, waba_id, verified_name, display_name)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (user_id, phone_number_id) DO UPDATE
+         SET label=$2, access_token=$4, waba_id=$5, verified_name=$6, display_name=$7, updated_at=NOW()
+       RETURNING id, label, phone_number_id, waba_id, display_name, verified_name, status, created_at`,
+      [req.user.id, connLabel, phone_number_id, access_token, waba_id, verified_name || null, display_phone_number || null]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
   // ── CRUD meta_connections ────────────────────────────────────────────────
   fastify.get('/meta-connections', auth, async (req) => {
     const { rows } = await query(
