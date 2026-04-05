@@ -34,6 +34,12 @@ export async function authenticate(request, reply) {
   // Try JWT first
   try {
     const payload = verifyToken(token);
+    // Check if user logged out after this token was issued
+    const { redis } = await import('./redis.js');
+    const logoutAt = await redis.get(`logout:${payload.id}`).catch(() => null);
+    if (logoutAt && payload.iat < parseInt(logoutAt)) {
+      return reply.status(401).send({ error: 'Sessão encerrada' });
+    }
     request.user = payload;
     return;
   } catch {

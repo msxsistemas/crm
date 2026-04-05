@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { query } from '../database.js';
-import { generateTokens, verifyRefreshToken } from '../auth.js';
+import { generateTokens, verifyToken, verifyRefreshToken } from '../auth.js';
 import { refreshCsrfToken } from '../middleware/csrf.js';
 
 export default async function authRoutes(fastify) {
@@ -94,6 +94,12 @@ export default async function authRoutes(fastify) {
 
     try {
       const payload = verifyRefreshToken(token);
+      // Reject if user logged out after this token was issued
+      const { redis } = await import('../redis.js');
+      const logoutAt = await redis.get(`logout:${payload.id}`).catch(() => null);
+      if (logoutAt && payload.iat < parseInt(logoutAt)) {
+        return reply.status(401).send({ error: 'Sessão encerrada' });
+      }
       const { rows } = await query('SELECT * FROM profiles WHERE id = $1', [payload.id]);
       if (!rows[0]) return reply.status(401).send({ error: 'Usuário não encontrado' });
 
@@ -174,8 +180,21 @@ export default async function authRoutes(fastify) {
     return { token };
   });
 
-  // Logout — clear httpOnly cookies
+  // Logout — clear httpOnly cookies and server-side invalidate the session
   fastify.post('/auth/logout', async (req, reply) => {
+    const token = req.cookies?.access_token;
+    if (token) {
+      try {
+        const payload = verifyToken(token);
+        const { redis } = await import('../redis.js');
+        const logoutTs = Math.floor(Date.now() / 1000) + 1;
+        // Any token with iat < logoutTs is now invalid (covers access + refresh)
+        await Promise.all([
+          redis.set(`logout:${payload.id}`, logoutTs, 'EX', 60 * 60 * 24 * 30),
+          redis.del(`auth:me:${payload.id}`),
+        ]).catch(() => null);
+      } catch {}
+    }
     const secure = process.env.NODE_ENV === 'production';
     reply.clearCookie('access_token', { path: '/', httpOnly: true, secure, sameSite: 'lax' });
     reply.clearCookie('refresh_token', { path: '/auth/refresh', httpOnly: true, secure, sameSite: 'lax' });
