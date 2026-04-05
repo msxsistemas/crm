@@ -116,33 +116,28 @@ const Connections = () => {
     setEmbeddedLoading(true);
     try {
       await loadFBSDK(appId);
-      window.FB.login(async (response: any) => {
+      window.FB.login(function(response: any) {
         if (!response.authResponse?.accessToken) {
           setEmbeddedLoading(false);
           if (response.status !== 'connected') toast.error('Login cancelado ou negado');
           return;
         }
-        try {
-          const res = await api.post<{ phones: EmbeddedPhone[] }>(
-            '/meta-connections/embedded-signup',
-            { access_token: response.authResponse.accessToken }
-          );
-          if (res.phones.length === 1) {
-            const saved = await api.post<MetaConnection>(
-              '/meta-connections/embedded-signup/save',
-              res.phones[0]
-            );
-            setMetaConnections(prev => [...prev.filter(c => c.phone_number_id !== saved.phone_number_id), saved]);
-            toast.success(`${saved.label} conectado com sucesso!`);
-          } else {
-            setEmbeddedPhones(res.phones);
-            setEmbeddedSelectOpen(true);
-          }
-        } catch (e: any) {
-          toast.error(e?.message || 'Erro ao conectar');
-        } finally {
-          setEmbeddedLoading(false);
-        }
+        const token = response.authResponse.accessToken;
+        api.post<{ phones: EmbeddedPhone[] }>('/meta-connections/embedded-signup', { access_token: token })
+          .then((res) => {
+            if (res.phones.length === 1) {
+              return api.post<MetaConnection>('/meta-connections/embedded-signup/save', res.phones[0])
+                .then((saved) => {
+                  setMetaConnections(prev => [...prev.filter(c => c.phone_number_id !== saved.phone_number_id), saved]);
+                  toast.success(`${saved.label} conectado com sucesso!`);
+                });
+            } else {
+              setEmbeddedPhones(res.phones);
+              setEmbeddedSelectOpen(true);
+            }
+          })
+          .catch((e: any) => toast.error(e?.message || 'Erro ao conectar'))
+          .finally(() => setEmbeddedLoading(false));
       }, {
         scope: 'whatsapp_business_management,whatsapp_business_messaging',
         return_scopes: true,
