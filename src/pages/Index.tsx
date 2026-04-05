@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef, startTransition, useDeferredValue } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, startTransition } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -25,6 +25,7 @@ import {
   Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 import { db } from "@/lib/db";
+import { api } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 import { useAuth } from "@/hooks/useAuth";
 import { usePlatformName } from "@/hooks/usePlatformName";
@@ -157,128 +158,84 @@ function useUpcomingBirthdays(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
     setLoading(true);
-    db
-      .from('contacts')
-      .select('id, name, phone, birthday')
-      .not('birthday', 'is', null)
-      .limit(2000)
-      .then(({ data }) => {
-        if (!data) { setLoading(false); return; }
-        const today = new Date();
-        const todayMs = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-        const upcoming: BirthdayContact[] = [];
-        for (const c of data) {
-          if (!c.birthday) continue;
-          const bday = new Date(c.birthday as string);
-          let thisYearBday = new Date(today.getFullYear(), bday.getMonth(), bday.getDate());
-          if (thisYearBday.getTime() < todayMs) {
-            thisYearBday = new Date(today.getFullYear() + 1, bday.getMonth(), bday.getDate());
-          }
-          const diff = Math.round((thisYearBday.getTime() - todayMs) / (1000 * 60 * 60 * 24));
-          if (diff >= 0 && diff <= 7) {
-            upcoming.push({ id: c.id, name: c.name, phone: c.phone, birthday: c.birthday as string, daysUntil: diff });
-          }
-        }
-        upcoming.sort((a, b) => a.daysUntil - b.daysUntil);
-        setBirthdays(upcoming);
-        setLoading(false);
-      });
+    api.get<BirthdayContact[]>('/stats/birthdays')
+      .then(data => { setBirthdays(data || []); setLoading(false); })
+      .catch(() => setLoading(false));
   }, [enabled]);
 
   return { birthdays, loading };
 }
 
-// ── Data hook ──
-function useDashboardData() {
-  const [conversations, setConversations] = useState<any[]>([]);
-  const [messages, setMessages] = useState<any[]>([]);
-  const [contacts, setContacts] = useState<any[]>([]);
-  const [evoConnections, setEvoConnections] = useState<any[]>([]);
-  const [profiles, setProfiles] = useState<any[]>([]);
-  const [subscriptions, setSubscriptions] = useState<any[]>([]);
+// ── Dashboard stats from backend ──
+interface DashboardStats {
+  realtime: { openCount: number; pendingCount: number; closedCount: number };
+  kpis: {
+    totalTickets: number; resolvedTickets: number; resolutionRate: string;
+    avgResponseMinutes: number; avgResolutionHours: number; slaCompliance: number;
+    sentMessages: number; receivedMessages: number; totalContacts: number;
+  };
+  timeline: { name: string; Criados: number; Resolvidos: number; Pendentes: number }[];
+  agentData: { id: string; name: string; email: string; status: string; total: number; resolved: number; rate: string; avgTime: string; initials: string; online: boolean }[];
+  hourlyData: { name: string; value: number }[];
+  heatmapGrid: number[][];
+  connectionStats: { id: string; instance_name: string; label: string; status: string; type: string; sent: number; received: number; created: number; resolved: number }[];
+  profiles: { id: string; full_name: string | null; email: string; status: string }[];
+  prevKpis?: { totalTickets: number; resolutionRate: number; avgResponseMinutes: number; slaCompliance: number };
+}
+
+function useDashboardData(params: {
+  start: string; end: string; groupBy: string; connection: string; agent: string;
+  comparePrevious: boolean; prevStart: string; prevEnd: string;
+}) {
+  const [data, setData] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [isLive, setIsLive] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchData = useCallback(async () => {
+    if (!params.start || !params.end) return;
     setLoading(true);
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-    const cutoff = ninetyDaysAgo.toISOString();
-
-    const [convRes, msgRes, contRes, evoRes, profRes, subRes] = await Promise.all([
-      db.from("conversations").select("id, status, unread_count, last_message_at, created_at, updated_at, instance_name, contact_id, assigned_to").order("last_message_at", { ascending: false }).limit(500),
-      db.from("messages").select("id, conversation_id, from_me, created_at, status").gte("created_at", cutoff).order("created_at", { ascending: false }).limit(1000),
-      db.from("contacts").select("id, name, phone, created_at").limit(500),
-      db.from("evolution_connections").select("id, instance_name, status"),
-      db.from("profiles").select("id, full_name, status"),
-      db.from("subscriptions").select("id, user_id, expires_at, status"),
-    ]);
-
-    // Pre-parse dates as timestamps once (avoids repeated new Date() in useMemo)
-    const convs = (convRes.data || []).map((c: any) => ({ ...c, _ts: Date.parse(c.created_at), _uts: Date.parse(c.updated_at) }));
-    const msgs = (msgRes.data || []).map((m: any) => ({ ...m, _ts: Date.parse(m.created_at) }));
-    const conts = (contRes.data || []).map((c: any) => ({ ...c, _ts: Date.parse(c.created_at) }));
-
-    // Use startTransition so heavy downstream memos don't block initial paint
-    startTransition(() => {
-      setConversations(convs);
-      setMessages(msgs);
-      setContacts(conts);
-      setEvoConnections(evoRes.data || []);
-      setProfiles(profRes.data || []);
-      setSubscriptions(subRes.data || []);
+    try {
+      const qs = new URLSearchParams({
+        start: params.start, end: params.end,
+        groupBy: params.groupBy,
+        connection: params.connection,
+        agent: params.agent,
+        ...(params.comparePrevious && params.prevStart
+          ? { prevStart: params.prevStart, prevEnd: params.prevEnd }
+          : {}),
+      });
+      const result = await api.get<DashboardStats>(`/stats/dashboard-full?${qs}`);
+      startTransition(() => { setData(result); setLoading(false); });
+    } catch {
       setLoading(false);
-    });
-  }, []);
+    }
+  }, [params.start, params.end, params.groupBy, params.connection, params.agent, params.comparePrevious, params.prevStart, params.prevEnd]);
 
-  // Debounced re-fetch — socket events can fire many times per second
   const debouncedFetch = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => fetchData(), 3000);
   }, [fetchData]);
 
-  // Initial load
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Realtime via socket — update local state instantly, debounce full re-fetch
   useEffect(() => {
     const socket = getSocket();
-
-    const handleConvUpdate = (data: any) => {
-      setLastUpdate(new Date());
-      setConversations(prev => {
-        const exists = prev.find(c => c.id === data.id);
-        if (exists) return prev.map(c => c.id === data.id ? { ...c, ...data } : c);
-        return prev;
-      });
-      debouncedFetch();
-    };
-
-    const handleMsgNew = () => {
-      setLastUpdate(new Date());
-      debouncedFetch();
-    };
-
-    socket.on('conversation:updated', handleConvUpdate);
-    socket.on('message:new', handleMsgNew);
+    const handleUpdate = () => { setLastUpdate(new Date()); debouncedFetch(); };
+    socket.on('conversation:updated', handleUpdate);
+    socket.on('message:new', handleUpdate);
     setIsLive(socket.connected);
     socket.on('connect', () => setIsLive(true));
     socket.on('disconnect', () => setIsLive(false));
-
     return () => {
-      socket.off('conversation:updated', handleConvUpdate);
-      socket.off('message:new', handleMsgNew);
+      socket.off('conversation:updated', handleUpdate);
+      socket.off('message:new', handleUpdate);
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [debouncedFetch]);
 
-  const allConnections = useMemo(() => {
-    return evoConnections.map(c => ({ ...c, type: "whatsapp_whatsmeow_pro", label: c.instance_name }));
-  }, [evoConnections]);
-
-  return { conversations, messages, contacts, connections: allConnections, profiles, subscriptions, loading, refresh: fetchData, isLive, lastUpdate };
+  return { data, loading, isLive, lastUpdate, refresh: fetchData };
 }
 
 // ── Helpers ──
@@ -428,11 +385,6 @@ const GOAL_TYPE_CONFIG: Record<string, { label: string; icon: React.ReactNode; f
 const Index = () => {
   const { user } = useAuth();
   const { platformName } = usePlatformName();
-  const { conversations: rawConversations, messages: rawMessages, contacts: rawContacts, connections, profiles, subscriptions, loading, refresh, isLive, lastUpdate } = useDashboardData();
-  // Defer heavy data so initial render isn't blocked by downstream memos
-  const conversations = useDeferredValue(rawConversations);
-  const messages = useDeferredValue(rawMessages);
-  const contacts = useDeferredValue(rawContacts);
   const { goals: myGoals, currentVals: myGoalCurrentVals } = useMyGoals(user?.id);
 
   // Defer non-critical widgets until after first render settles
@@ -442,8 +394,14 @@ const Index = () => {
     return () => clearTimeout(t);
   }, []);
   const [datePreset, setDatePreset] = useState("7days");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [startDate, setStartDate] = useState(() => {
+    const [s] = getDateRange("7days");
+    return s.toISOString().split("T")[0];
+  });
+  const [endDate, setEndDate] = useState(() => {
+    const [, e] = getDateRange("7days");
+    return e.toISOString().split("T")[0];
+  });
   const [groupBy, setGroupBy] = useState("day");
   const [comparePrevious, setComparePrevious] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(true);
@@ -489,6 +447,42 @@ const Index = () => {
     updateWidgetLayout(defaults);
   };
 
+  // Date range derived values
+  const dateStart = new Date(startDate || "2000-01-01");
+  const dateEnd = new Date(endDate || "2100-01-01");
+  dateEnd.setHours(23, 59, 59, 999);
+
+  const prevDateRange = useMemo(() => {
+    const diff = dateEnd.getTime() - dateStart.getTime();
+    const prevEnd = new Date(dateStart.getTime() - 1);
+    const prevStart = new Date(prevEnd.getTime() - diff);
+    return { start: prevStart.toISOString().split('T')[0], end: prevEnd.toISOString().split('T')[0] };
+  }, [dateStart.getTime(), dateEnd.getTime()]);
+
+  const { data, loading, isLive, lastUpdate, refresh } = useDashboardData({
+    start: startDate, end: endDate, groupBy,
+    connection: selectedConnection, agent: agentFilter,
+    comparePrevious, prevStart: prevDateRange.start, prevEnd: prevDateRange.end,
+  });
+
+  // Convenience aliases — no computation, just naming
+  const agentData = data?.agentData ?? [];
+  const profiles = data?.profiles ?? [];
+  const connections = data?.connectionStats ?? [];
+  const timelineData = data?.timeline ?? [];
+  const hourlyData = data?.hourlyData ?? [];
+  const heatmapGrid = data?.heatmapGrid ?? Array.from({ length: 7 }, () => new Array(24).fill(0));
+  const totalTickets = data?.kpis.totalTickets ?? 0;
+  const resolvedTickets = data?.kpis.resolvedTickets ?? 0;
+  const resolutionRate = data?.kpis.resolutionRate ?? '0.0';
+  const avgResponseTime = data?.kpis.avgResponseMinutes ?? 0;
+  const avgResolutionTime = data?.kpis.avgResolutionHours ?? 0;
+  const slaCompliance = data?.kpis.slaCompliance ?? 0;
+  const openCount = data?.realtime.openCount ?? 0;
+  const pendingCount = data?.realtime.pendingCount ?? 0;
+  const closedCount = data?.realtime.closedCount ?? 0;
+  const prevKPIs = data?.prevKpis ?? { resolutionRate: 0, avgResponseMinutes: 0, slaCompliance: 0, totalTickets: 0 };
+
   // Extra widget data — deferred until after primary render
   const { topContacts } = useTopContacts(widgetsReady);
   const { activities } = useRecentActivity(widgetsReady);
@@ -529,160 +523,14 @@ const Index = () => {
     }
   };
 
-  // Subscription expiry
-  const nextExpiry = useMemo(() => {
-    const activeSub = subscriptions.find(s => s.user_id === user?.id && s.expires_at);
-    return activeSub?.expires_at ? new Date(activeSub.expires_at).toLocaleDateString("pt-BR") : null;
-  }, [subscriptions, user]);
-
   const userName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Usuário";
 
-  // Date range
   useEffect(() => {
+    if (!datePreset) return;
     const [s, e] = getDateRange(datePreset);
     setStartDate(s.toISOString().split("T")[0]);
     setEndDate(e.toISOString().split("T")[0]);
   }, [datePreset]);
-
-  const dateStart = new Date(startDate || "2000-01-01");
-  const dateEnd = new Date(endDate || "2100-01-01");
-  dateEnd.setHours(23, 59, 59, 999);
-
-  // Previous period for comparison
-  const prevDateRange = useMemo(() => {
-    const diff = dateEnd.getTime() - dateStart.getTime();
-    const prevEnd = new Date(dateStart.getTime() - 1);
-    const prevStart = new Date(prevEnd.getTime() - diff);
-    return { start: prevStart, end: prevEnd };
-  }, [dateStart.getTime(), dateEnd.getTime()]);
-
-  // Filter by connection
-  const filterByConnection = (items: any[], field = "instance_name") => {
-    if (selectedConnection === "all") return items;
-    return items.filter(item => item[field] === selectedConnection);
-  };
-
-  // Timestamps for fast comparisons (avoid new Date() inside memos)
-  const dateStartMs = dateStart.getTime();
-  const dateEndMs = dateEnd.getTime();
-
-  // Filtered data — use pre-parsed _ts timestamps
-  const filteredConvos = useMemo(() =>
-    filterByConnection(conversations.filter((c: any) => {
-      const ts = c._ts ?? Date.parse(c.created_at);
-      const inDate = ts >= dateStartMs && ts <= dateEndMs;
-      const inAgent = agentFilter === "all" || c.assigned_to === agentFilter;
-      return inDate && inAgent;
-    })), [conversations, dateStartMs, dateEndMs, selectedConnection, agentFilter]);
-
-  const filteredMessages = useMemo(() =>
-    messages.filter((m: any) => {
-      const ts = m._ts ?? Date.parse(m.created_at);
-      return ts >= dateStartMs && ts <= dateEndMs;
-    }), [messages, dateStartMs, dateEndMs]);
-
-  const filteredContacts = useMemo(() =>
-    contacts.filter((c: any) => {
-      const ts = c._ts ?? Date.parse(c.created_at);
-      return ts >= dateStartMs && ts <= dateEndMs;
-    }), [contacts, dateStartMs, dateEndMs]);
-
-  // Previous period data (for comparison)
-  const prevStartMs = prevDateRange.start.getTime();
-  const prevEndMs = prevDateRange.end.getTime();
-
-  const prevConvos = useMemo(() => {
-    if (!comparePrevious) return [];
-    return filterByConnection(conversations.filter((c: any) => {
-      const ts = c._ts ?? Date.parse(c.created_at);
-      return ts >= prevStartMs && ts <= prevEndMs;
-    }));
-  }, [conversations, prevStartMs, prevEndMs, comparePrevious, selectedConnection]);
-
-  const prevMessages = useMemo(() => {
-    if (!comparePrevious) return [];
-    return messages.filter((m: any) => {
-      const ts = m._ts ?? Date.parse(m.created_at);
-      return ts >= prevStartMs && ts <= prevEndMs;
-    });
-  }, [messages, prevStartMs, prevEndMs, comparePrevious]);
-
-  // Real-time stats
-  const openConvos = filterByConnection(conversations.filter(c => c.status === "open"));
-  const pendingConvos = filterByConnection(conversations.filter(c => c.status === "open" && c.unread_count > 0));
-  const closedConvos = filteredConvos.filter(c => c.status === "closed" || c.status === "resolved");
-
-  // KPIs
-  const totalTickets = filteredConvos.length;
-  const resolvedTickets = closedConvos.length;
-  const resolutionRate = totalTickets > 0 ? ((resolvedTickets / totalTickets) * 100).toFixed(1) : "0.0";
-
-  const avgResponseTime = useMemo(() => {
-    const convGroups: Record<string, { received?: string; replied?: string }> = {};
-    for (const m of filteredMessages.filter(m => !m.from_me)) {
-      if (!convGroups[m.conversation_id]) convGroups[m.conversation_id] = {};
-      if (!convGroups[m.conversation_id].received || m.created_at < convGroups[m.conversation_id].received!)
-        convGroups[m.conversation_id].received = m.created_at;
-    }
-    for (const m of filteredMessages.filter(m => m.from_me)) {
-      if (convGroups[m.conversation_id] && !convGroups[m.conversation_id].replied)
-        convGroups[m.conversation_id].replied = m.created_at;
-    }
-    const waits = Object.values(convGroups)
-      .filter(g => g.received && g.replied)
-      .map(g => (new Date(g.replied!).getTime() - new Date(g.received!).getTime()) / 1000 / 60);
-    return waits.length > 0 ? waits.reduce((a, b) => a + b, 0) / waits.length : 0;
-  }, [filteredMessages]);
-
-  const avgResolutionTime = useMemo(() => {
-    const times = closedConvos
-      .filter((c: any) => c._ts && c._uts)
-      .map((c: any) => (c._uts - c._ts) / 1000 / 3600);
-    return times.length > 0 ? times.reduce((a: number, b: number) => a + b, 0) / times.length : 0;
-  }, [closedConvos]);
-
-  const slaCompliance = useMemo(() => {
-    if (resolvedTickets === 0) return 0;
-    const within24h = closedConvos.filter((c: any) => {
-      const diff = ((c._uts ?? Date.parse(c.updated_at)) - (c._ts ?? Date.parse(c.created_at))) / 1000 / 3600;
-      return diff < 24;
-    }).length;
-    return Math.round((within24h / resolvedTickets) * 100);
-  }, [closedConvos, resolvedTickets]);
-
-  // Previous period KPIs for comparison
-  const prevKPIs = useMemo(() => {
-    if (!comparePrevious) return { resolutionRate: 0, avgResponseTime: 0, slaCompliance: 0, totalTickets: 0 };
-    const prevClosed = prevConvos.filter(c => c.status === "closed" || c.status === "resolved");
-    const prevTotal = prevConvos.length;
-    const prevResRate = prevTotal > 0 ? (prevClosed.length / prevTotal) * 100 : 0;
-
-    const convGroups: Record<string, { received?: string; replied?: string }> = {};
-    for (const m of prevMessages.filter(m => !m.from_me)) {
-      if (!convGroups[m.conversation_id]) convGroups[m.conversation_id] = {};
-      if (!convGroups[m.conversation_id].received || m.created_at < convGroups[m.conversation_id].received!)
-        convGroups[m.conversation_id].received = m.created_at;
-    }
-    for (const m of prevMessages.filter(m => m.from_me)) {
-      if (convGroups[m.conversation_id] && !convGroups[m.conversation_id].replied)
-        convGroups[m.conversation_id].replied = m.created_at;
-    }
-    const waits = Object.values(convGroups)
-      .filter(g => g.received && g.replied)
-      .map(g => (new Date(g.replied!).getTime() - new Date(g.received!).getTime()) / 1000 / 60);
-    const prevAvgResp = waits.length > 0 ? waits.reduce((a, b) => a + b, 0) / waits.length : 0;
-
-    let prevSla = 0;
-    if (prevClosed.length > 0) {
-      const within24h = prevClosed.filter(c => {
-        const diff = (new Date(c.updated_at).getTime() - new Date(c.created_at).getTime()) / 1000 / 3600;
-        return diff < 24;
-      }).length;
-      prevSla = Math.round((within24h / prevClosed.length) * 100);
-    }
-
-    return { resolutionRate: prevResRate, avgResponseTime: prevAvgResp, slaCompliance: prevSla, totalTickets: prevTotal };
-  }, [comparePrevious, prevConvos, prevMessages]);
 
   const getComparisonText = (current: number, previous: number) => {
     if (!comparePrevious) return "";
@@ -693,209 +541,38 @@ const Index = () => {
     return `→ ${sign}${diff}% vs anterior`;
   };
 
-  const sentMessages = filteredMessages.filter(m => m.from_me);
-  const receivedMessages = filteredMessages.filter(m => !m.from_me);
-
-  // Timeline chart data (respects groupBy)
-  const timelineData = useMemo(() => {
-    const buckets: Record<string, { created: number; resolved: number; pending: number }> = {};
-
-    if (groupBy === "day") {
-      const d = new Date(dateStart);
-      while (d <= dateEnd) {
-        const key = formatDateShort(d);
-        buckets[key] = { created: 0, resolved: 0, pending: 0 };
-        d.setDate(d.getDate() + 1);
-      }
-      for (const c of filteredConvos) {
-        const key = formatDateShort(new Date(c._ts ?? Date.parse(c.created_at)));
-        if (buckets[key]) buckets[key].created++;
-      }
-      for (const c of closedConvos) {
-        const key = formatDateShort(new Date(c._uts ?? Date.parse(c.updated_at)));
-        if (buckets[key]) buckets[key].resolved++;
-      }
-      for (const c of filteredConvos.filter((c: any) => c.status === "open" && c.unread_count > 0)) {
-        const key = formatDateShort(new Date(c._ts ?? Date.parse(c.created_at)));
-        if (buckets[key]) buckets[key].pending++;
-      }
-    } else if (groupBy === "week") {
-      const d = new Date(dateStart);
-      while (d <= dateEnd) {
-        const key = `Sem ${getWeekKey(d)}`;
-        if (!buckets[key]) buckets[key] = { created: 0, resolved: 0, pending: 0 };
-        d.setDate(d.getDate() + 7);
-      }
-      for (const c of filteredConvos) {
-        const key = `Sem ${getWeekKey(new Date(c._ts ?? Date.parse(c.created_at)))}`;
-        if (!buckets[key]) buckets[key] = { created: 0, resolved: 0, pending: 0 };
-        buckets[key].created++;
-      }
-      for (const c of closedConvos) {
-        const key = `Sem ${getWeekKey(new Date(c._uts ?? Date.parse(c.updated_at)))}`;
-        if (buckets[key]) buckets[key].resolved++;
-      }
-      for (const c of filteredConvos.filter((c: any) => c.status === "open" && c.unread_count > 0)) {
-        const key = `Sem ${getWeekKey(new Date(c._ts ?? Date.parse(c.created_at)))}`;
-        if (buckets[key]) buckets[key].pending++;
-      }
-    } else {
-      // month
-      const d = new Date(dateStart.getFullYear(), dateStart.getMonth(), 1);
-      while (d <= dateEnd) {
-        const key = getMonthKey(d);
-        if (!buckets[key]) buckets[key] = { created: 0, resolved: 0, pending: 0 };
-        d.setMonth(d.getMonth() + 1);
-      }
-      for (const c of filteredConvos) {
-        const key = getMonthKey(new Date(c._ts ?? Date.parse(c.created_at)));
-        if (!buckets[key]) buckets[key] = { created: 0, resolved: 0, pending: 0 };
-        buckets[key].created++;
-      }
-      for (const c of closedConvos) {
-        const key = getMonthKey(new Date(c._uts ?? Date.parse(c.updated_at)));
-        if (buckets[key]) buckets[key].resolved++;
-      }
-      for (const c of filteredConvos.filter((c: any) => c.status === "open" && c.unread_count > 0)) {
-        const key = getMonthKey(new Date(c._ts ?? Date.parse(c.created_at)));
-        if (buckets[key]) buckets[key].pending++;
-      }
-    }
-
-    return Object.entries(buckets).map(([name, v]) => ({
-      name,
-      Criados: v.created,
-      Resolvidos: v.resolved,
-      Pendentes: v.pending,
-    }));
-  }, [filteredConvos, closedConvos, dateStart, dateEnd, groupBy]);
-
-  // Contacts chart data
-  const contactsData = useMemo(() => {
-    const days: Record<string, number> = {};
-    const d = new Date(dateStart);
-    while (d <= dateEnd) {
-      days[d.toISOString().split("T")[0]] = 0;
-      d.setDate(d.getDate() + 1);
-    }
-    for (const c of filteredContacts) {
-      const key = c.created_at?.split("T")[0];
-      if (key && days[key] !== undefined) days[key]++;
-    }
-    let cumulative = contacts.filter((c: any) => (c._ts ?? Date.parse(c.created_at)) < dateStartMs).length;
-    return Object.entries(days).map(([date, v]) => {
-      cumulative += v;
-      return {
-        name: formatDateShort(new Date(date)),
-        "Novos Contatos": v,
-        "Total Acumulado": cumulative,
-      };
-    });
-  }, [filteredContacts, contacts, dateStart, dateEnd]);
-
-  // Hourly distribution
-  const hourlyData = useMemo(() => {
-    const hours: Record<number, number> = {};
-    for (let i = 0; i < 24; i++) hours[i] = 0;
-    for (const m of filteredMessages) {
-      const h = new Date(m._ts ?? Date.parse(m.created_at)).getHours();
-      hours[h]++;
-    }
-    return Object.entries(hours).map(([h, v]) => ({ name: `${h}h`, value: v }));
-  }, [filteredMessages]);
-
-  // Agent ranking — real per-agent stats from filtered conversations
-  const agentData = useMemo(() => {
-    return profiles.slice(0, 10).map((p) => {
-      const agentConvos = filteredConvos.filter(c => c.assigned_to === p.id);
-      const agentResolved = agentConvos.filter(c => c.status === "closed" || c.status === "resolved").length;
-      const agentTotal = agentConvos.length;
-      const agentRate = agentTotal > 0 ? ((agentResolved / agentTotal) * 100).toFixed(1) : "0.0";
-
-      // Avg response time for this agent's conversations
-      const agentConvoIds = new Set(agentConvos.map(c => c.id));
-      const agentMsgs = filteredMessages.filter(m => agentConvoIds.has(m.conversation_id));
-      const convGroups: Record<string, { received?: string; replied?: string }> = {};
-      for (const m of agentMsgs.filter(m => !m.from_me)) {
-        if (!convGroups[m.conversation_id]) convGroups[m.conversation_id] = {};
-        if (!convGroups[m.conversation_id].received || m.created_at < convGroups[m.conversation_id].received!)
-          convGroups[m.conversation_id].received = m.created_at;
-      }
-      for (const m of agentMsgs.filter(m => m.from_me)) {
-        if (convGroups[m.conversation_id] && !convGroups[m.conversation_id].replied)
-          convGroups[m.conversation_id].replied = m.created_at;
-      }
-      const waits = Object.values(convGroups)
-        .filter(g => g.received && g.replied)
-        .map(g => (new Date(g.replied!).getTime() - new Date(g.received!).getTime()) / 1000 / 60);
-      const agentAvgResp = waits.length > 0 ? waits.reduce((a, b) => a + b, 0) / waits.length : 0;
-
-      return {
-        id: p.id,
-        name: p.full_name || p.email || "Agente",
-        initials: (p.full_name || p.email || "A").substring(0, 2).toUpperCase(),
-        email: p.email || "",
-        total: agentTotal,
-        resolved: agentResolved,
-        avgTime: formatMinSec(agentAvgResp),
-        rating: 0,
-        rate: agentRate,
-        online: p.status === "online",
-      };
-    });
-  }, [profiles, filteredConvos, filteredMessages]);
-
-  // Selected operator data
   const selectedProfile = useMemo(() => {
     if (selectedOperator === "self") return profiles.find(p => p.id === user?.id) || profiles[0];
     return profiles.find(p => p.id === selectedOperator) || profiles[0];
   }, [selectedOperator, profiles, user]);
 
-  // Alerts
   const alerts = useMemo(() => {
     const list: { title: string; desc: string; severity: "warning" | "danger"; value: number; limit: number; action: string; time: string }[] = [];
-    if (pendingConvos.length > 0) {
-      list.push({ title: "SLA Próximo do Vencimento", desc: `${pendingConvos.length} ticket(s) próximos de vencer o SLA`, severity: "warning", value: pendingConvos.length, limit: 20, action: "Priorizar atendimento destes tickets", time: formatDistanceToNow(new Date(), { addSuffix: false, locale: ptBR }) });
+    if (pendingCount > 0) {
+      list.push({ title: "SLA Próximo do Vencimento", desc: `${pendingCount} ticket(s) próximos de vencer o SLA`, severity: "warning", value: pendingCount, limit: 20, action: "Priorizar atendimento destes tickets", time: formatDistanceToNow(new Date(), { addSuffix: false, locale: ptBR }) });
     }
-    const overloadedCount = profiles.filter(() => openConvos.length > 10).length;
+    const overloadedCount = profiles.filter(() => openCount > 10).length;
     if (overloadedCount > 0) {
       list.push({ title: "Atendentes Sobrecarregados", desc: `${overloadedCount} atendente(s) com mais de 10 tickets abertos`, severity: "warning", value: overloadedCount, limit: 10, action: "Redistribuir tickets ou adicionar mais atendentes", time: formatDistanceToNow(new Date(), { addSuffix: false, locale: ptBR }) });
     }
-    if (pendingConvos.length > 5) {
-      list.push({ title: "Tickets Sem Atendente", desc: `${pendingConvos.length} ticket(s) aguardando distribuição`, severity: "warning", value: pendingConvos.length, limit: 0, action: "Atribuir tickets aos atendentes disponíveis", time: formatDistanceToNow(new Date(), { addSuffix: false, locale: ptBR }) });
+    if (pendingCount > 5) {
+      list.push({ title: "Tickets Sem Atendente", desc: `${pendingCount} ticket(s) aguardando distribuição`, severity: "warning", value: pendingCount, limit: 0, action: "Atribuir tickets aos atendentes disponíveis", time: formatDistanceToNow(new Date(), { addSuffix: false, locale: ptBR }) });
     }
     return list;
-  }, [pendingConvos, profiles, openConvos]);
+  }, [pendingCount, openCount, profiles]);
 
-  // Per-connection message stats
-  const getConnectionStats = (conn: any) => {
-    const connConvos = conversations.filter(c => c.instance_name === (conn.instance_name || conn.label));
-    const connConvoIds = new Set(connConvos.map(c => c.id));
-    const connMsgs = messages.filter(m => connConvoIds.has(m.conversation_id));
-    const sent = connMsgs.filter(m => m.from_me).length;
-    const received = connMsgs.filter(m => !m.from_me).length;
-    const created = connConvos.filter(c => { const d = new Date(c.created_at); return d >= dateStart && d <= dateEnd; }).length;
-    const resolved = connConvos.filter(c => (c.status === "closed" || c.status === "resolved") && new Date(c.updated_at) >= dateStart && new Date(c.updated_at) <= dateEnd).length;
-    const lastActivity = conn.updated_at ? formatDistanceToNow(new Date(conn.updated_at), { addSuffix: false, locale: ptBR }) : null;
-    return { sent, received, created, resolved, lastActivity };
-  };
-
-  const now = new Date();
-  const updatedAt = `Dashboard atualizado em ${formatDate(now)} ${now.toLocaleTimeString("pt-BR")}`;
-
-  // Operator report data
   const operatorReportData = useMemo(() => {
-    if (!selectedProfile) return { convos: 0, msgs: 0, totalResTime: "0h", avgWait: "0min" };
-    const convos = filteredConvos.length;
-    const msgs = sentMessages.length;
     const totalResHours = avgResolutionTime * resolvedTickets;
     return {
-      convos,
-      msgs,
+      convos: totalTickets,
+      msgs: data?.kpis.sentMessages ?? 0,
       totalResTime: formatHoursMin(totalResHours),
       avgWait: formatMinSec(avgResponseTime),
     };
-  }, [selectedProfile, filteredConvos, sentMessages, avgResolutionTime, resolvedTickets, avgResponseTime]);
+  }, [data, avgResolutionTime, resolvedTickets, totalTickets, avgResponseTime]);
+
+  const now = new Date();
+  const updatedAt = `Dashboard atualizado em ${formatDate(now)} ${now.toLocaleTimeString("pt-BR")}`;
 
   // ── Export functions ──
   const handleExportDashboard = useCallback(() => {
@@ -905,15 +582,14 @@ const Index = () => {
       "Tickets Resolvidos": d.Resolvidos,
       "Tickets Pendentes": d.Pendentes,
     }));
-    // Add summary row
     rows.push({
       Período: "TOTAL",
       "Tickets Criados": totalTickets,
       "Tickets Resolvidos": resolvedTickets,
-      "Tickets Pendentes": pendingConvos.length,
+      "Tickets Pendentes": pendingCount,
     });
     downloadCSV(rows, `dashboard_${startDate}_${endDate}`);
-  }, [timelineData, totalTickets, resolvedTickets, pendingConvos, startDate, endDate]);
+  }, [timelineData, totalTickets, resolvedTickets, pendingCount, startDate, endDate]);
 
   const handleExportOperatorReport = useCallback(() => {
     const opName = selectedProfile?.full_name || selectedProfile?.email || userName;
@@ -934,8 +610,7 @@ const Index = () => {
     const generatedAt = new Date().toLocaleString("pt-BR");
 
     const channelRows = connections.map(conn => {
-      const s = getConnectionStats(conn);
-      return `<tr><td>${conn.label || conn.instance_name}</td><td>${s.created}</td><td>${s.resolved}</td><td>${s.sent}</td><td>${s.received}</td></tr>`;
+      return `<tr><td>${conn.label || conn.instance_name}</td><td>${conn.created}</td><td>${conn.resolved}</td><td>${conn.sent}</td><td>${conn.received}</td></tr>`;
     }).join("") || `<tr><td colspan="5" style="text-align:center;color:#999;">Nenhuma conexão</td></tr>`;
 
     const agentRows = agentData.map(a =>
@@ -1288,7 +963,7 @@ const Index = () => {
                 <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
                 <span className="text-xs font-bold text-muted-foreground tracking-wider uppercase">Atendendo</span>
               </div>
-              <p className="text-5xl font-bold text-foreground mb-2">{openConvos.length - pendingConvos.length}</p>
+              <p className="text-5xl font-bold text-foreground mb-2">{openCount - pendingCount}</p>
               <p className="text-sm text-muted-foreground">Tickets em atendimento ativo (status: open)</p>
             </div>
             {/* Aguardando */}
@@ -1300,7 +975,7 @@ const Index = () => {
                 <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
                 <span className="text-xs font-bold text-muted-foreground tracking-wider uppercase">Aguardando</span>
               </div>
-              <p className="text-5xl font-bold text-foreground mb-2">{pendingConvos.length}</p>
+              <p className="text-5xl font-bold text-foreground mb-2">{pendingCount}</p>
               <p className="text-sm text-muted-foreground">Tickets aguardando atendimento (status: pending)</p>
             </div>
             {/* Fechados */}
@@ -1312,7 +987,7 @@ const Index = () => {
                 <span className="w-2.5 h-2.5 rounded-full bg-muted-foreground/40" />
                 <span className="text-xs font-bold text-muted-foreground tracking-wider uppercase">Fechados</span>
               </div>
-              <p className="text-5xl font-bold text-foreground mb-2">{closedConvos.length}</p>
+              <p className="text-5xl font-bold text-foreground mb-2">{closedCount}</p>
               <p className="text-sm text-muted-foreground">Tickets finalizados (status: closed)</p>
             </div>
           </div>
@@ -1327,9 +1002,9 @@ const Index = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               { label: "TAXA DE RESOLUÇÃO", value: resolutionRate, unit: "%", sub: "Tickets resolvidos vs total", bgClass: "bg-green-50/60 dark:bg-green-950/20 border-green-200 dark:border-green-800", iconBg: "bg-green-100 dark:bg-green-900/40", iconColor: "text-green-500", icon: CheckCircle2, comparison: getComparisonText(parseFloat(resolutionRate), prevKPIs.resolutionRate) },
-              { label: "TEMPO MÉDIO DE RESPOSTA", value: avgResponseTime.toFixed(1), unit: " min", sub: "Primeira mensagem do agente", bgClass: "bg-blue-50/60 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800", iconBg: "bg-blue-100 dark:bg-blue-900/40", iconColor: "text-blue-500", icon: Timer, comparison: getComparisonText(avgResponseTime, prevKPIs.avgResponseTime) },
+              { label: "TEMPO MÉDIO DE RESPOSTA", value: avgResponseTime.toFixed(1), unit: " min", sub: "Primeira mensagem do agente", bgClass: "bg-blue-50/60 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800", iconBg: "bg-blue-100 dark:bg-blue-900/40", iconColor: "text-blue-500", icon: Timer, comparison: getComparisonText(avgResponseTime, prevKPIs.avgResponseMinutes ?? 0) },
               { label: "NPS SCORE", value: "0.0", unit: " /100", sub: "Satisfação do cliente", bgClass: "bg-amber-50/60 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800", iconBg: "bg-amber-100 dark:bg-amber-900/40", iconColor: "text-amber-500", icon: Star, comparison: comparePrevious ? "→ Sem dados anteriores" : "" },
-              { label: "CONFORMIDADE SLA", value: slaCompliance, unit: " %", sub: "Tickets resolvidos em <24h", bgClass: "bg-purple-50/60 dark:bg-purple-950/20 border-purple-200 dark:border-purple-800", iconBg: "bg-purple-100 dark:bg-purple-900/40", iconColor: "text-purple-500", icon: TrendingUp, comparison: getComparisonText(slaCompliance, prevKPIs.slaCompliance) },
+              { label: "CONFORMIDADE SLA", value: slaCompliance, unit: " %", sub: "Tickets resolvidos em <24h", bgClass: "bg-purple-50/60 dark:bg-purple-950/20 border-purple-200 dark:border-purple-800", iconBg: "bg-purple-100 dark:bg-purple-900/40", iconColor: "text-purple-500", icon: TrendingUp, comparison: getComparisonText(slaCompliance, prevKPIs.slaCompliance ?? 0) },
             ].map((kpi) => (
               <div key={kpi.label} className={`rounded-xl border ${kpi.bgClass} px-5 py-6 relative`}>
                 <div className={`absolute top-5 right-5 p-2.5 rounded-xl ${kpi.iconBg}`}>
@@ -1347,7 +1022,7 @@ const Index = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
             {[
-              { label: "TOTAL DE TICKETS", value: String(totalTickets), unit: "", sub: "Criados no período", bgClass: "bg-indigo-50/60 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800", iconBg: "bg-indigo-100 dark:bg-indigo-900/40", iconColor: "text-indigo-500", icon: BarChart3, comparison: getComparisonText(totalTickets, prevKPIs.totalTickets) },
+              { label: "TOTAL DE TICKETS", value: String(totalTickets), unit: "", sub: "Criados no período", bgClass: "bg-indigo-50/60 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800", iconBg: "bg-indigo-100 dark:bg-indigo-900/40", iconColor: "text-indigo-500", icon: BarChart3, comparison: getComparisonText(totalTickets, prevKPIs.totalTickets ?? 0) },
               { label: "PROTOCOLOS RESOLVIDOS", value: String(resolvedTickets), unit: "", sub: "Fechados com sucesso", bgClass: "bg-green-50/60 dark:bg-green-950/20 border-green-200 dark:border-green-800", iconBg: "bg-green-100 dark:bg-green-900/40", iconColor: "text-green-500", icon: CheckCircle2 },
               { label: "TEMPO DE RESOLUÇÃO", value: avgResolutionTime.toFixed(1), unit: " h", sub: "Média de resolução", bgClass: "bg-orange-50/60 dark:bg-orange-950/20 border-orange-200 dark:border-orange-800", iconBg: "bg-orange-100 dark:bg-orange-900/40", iconColor: "text-orange-500", icon: Clock },
               { label: "PRIMEIRA RESPOSTA", value: String(avgResponseTime.toFixed(0)), unit: " min", sub: "Tempo médio inicial", bgClass: "bg-teal-50/60 dark:bg-teal-950/20 border-teal-200 dark:border-teal-800", iconBg: "bg-teal-100 dark:bg-teal-900/40", iconColor: "text-teal-500", icon: MessageCircle },
@@ -1372,7 +1047,7 @@ const Index = () => {
                 <FileText className="h-5 w-5 text-slate-500" />
               </div>
               <p className="text-[10px] font-bold text-muted-foreground tracking-wider uppercase mb-3">TOTAL DE CONTATOS</p>
-              <p className="text-4xl font-bold text-foreground">{contacts.length}</p>
+              <p className="text-4xl font-bold text-foreground">{data?.kpis.totalContacts ?? 0}</p>
               <p className="text-[10px] text-muted-foreground mt-2">Contatos na plataforma</p>
             </div>
           </div>
@@ -1442,18 +1117,7 @@ const Index = () => {
         ); // end conversations_chart
 
         if (wl.id === 'heatmap') {
-          const heatmapData = (() => {
-            const grid: number[][] = Array.from({ length: 7 }, () => new Array(24).fill(0));
-            filteredMessages.forEach(m => {
-              const d = new Date(m.created_at);
-              const day = d.getDay();
-              const hour = d.getHours();
-              const mondayFirst = (day + 6) % 7;
-              grid[mondayFirst][hour]++;
-            });
-            return grid;
-          })();
-          const heatmapMax = Math.max(1, ...heatmapData.flat());
+          const heatmapMax = Math.max(1, ...heatmapGrid.flat());
           const dayLabels = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
           const getCellClass = (count: number) => {
             if (count === 0) return "bg-muted";
@@ -1483,7 +1147,7 @@ const Index = () => {
                   {dayLabels.map((day, di) => (
                     <div key={day} className="flex items-center gap-1">
                       <span className="w-9 text-[10px] text-right text-muted-foreground shrink-0 pr-1">{day}</span>
-                      {heatmapData[di].map((count, h) => (
+                      {heatmapGrid[di].map((count, h) => (
                         <div
                           key={h}
                           className={`w-5 h-5 rounded-sm shrink-0 cursor-default transition-opacity hover:opacity-80 ${getCellClass(count)}`}
@@ -1772,7 +1436,6 @@ const Index = () => {
               </div>
             ) : (
               connections.map((conn: any) => {
-                const stats = getConnectionStats(conn);
                 const isConnected = conn.status === "open" || conn.connected;
                 return (
                   <div key={conn.id} className="rounded-xl border bg-card p-5 hover:shadow-md transition-shadow">
@@ -1797,28 +1460,28 @@ const Index = () => {
                           <ArrowUpFromLine className="h-3 w-3 text-green-500" />
                           <span className="text-muted-foreground text-[10px]">Enviadas</span>
                         </div>
-                        <p className="font-bold text-foreground text-lg">{stats.sent}</p>
+                        <p className="font-bold text-foreground text-lg">{conn.sent}</p>
                       </div>
                       <div className="rounded-lg bg-green-50/60 dark:bg-green-950/20 p-2.5">
                         <div className="flex items-center gap-1.5 mb-1">
                           <ArrowDownToLine className="h-3 w-3 text-blue-500" />
                           <span className="text-muted-foreground text-[10px]">Recebidas</span>
                         </div>
-                        <p className="font-bold text-foreground text-lg">{stats.received}</p>
+                        <p className="font-bold text-foreground text-lg">{conn.received}</p>
                       </div>
                       <div className="rounded-lg bg-indigo-50/60 dark:bg-indigo-950/20 p-2.5">
                         <div className="flex items-center gap-1.5 mb-1">
                           <MessageSquare className="h-3 w-3 text-indigo-500" />
                           <span className="text-muted-foreground text-[10px]">Criados</span>
                         </div>
-                        <p className="font-bold text-foreground text-lg">{stats.created}</p>
+                        <p className="font-bold text-foreground text-lg">{conn.created}</p>
                       </div>
                       <div className="rounded-lg bg-amber-50/60 dark:bg-amber-950/20 p-2.5">
                         <div className="flex items-center gap-1.5 mb-1">
                           <TrendingUp className="h-3 w-3 text-green-500" />
                           <span className="text-muted-foreground text-[10px]">Resolvidos</span>
                         </div>
-                        <p className="font-bold text-foreground text-lg">{stats.resolved}</p>
+                        <p className="font-bold text-foreground text-lg">{conn.resolved}</p>
                       </div>
                     </div>
                     <div>
@@ -1827,9 +1490,6 @@ const Index = () => {
                       </div>
                       <Progress value={100} className="h-2 rounded-full" />
                     </div>
-                    {stats.lastActivity && (
-                      <p className="text-[10px] text-muted-foreground mt-2.5">Última conexão: há {stats.lastActivity}</p>
-                    )}
                   </div>
                 );
               })
@@ -1993,7 +1653,7 @@ const Index = () => {
                   <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5 mb-3">
                     <Clock className="h-4 w-4 text-primary" /> Tempo Médio de Resolução
                   </h4>
-                  <p className="text-4xl font-bold text-primary">{formatHoursMin(avgResolutionTime)}</p>
+                  <p className="text-4xl font-bold text-primary">{formatHoursMin(data?.kpis.avgResolutionHours ?? 0)}</p>
                   <p className="text-xs text-muted-foreground mt-2">Tempo médio para finalizar um protocolo</p>
                 </div>
                 <div className="rounded-xl border bg-amber-50/40 dark:bg-amber-950/10 border-amber-200 dark:border-amber-800 p-5">
