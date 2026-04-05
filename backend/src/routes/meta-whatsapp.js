@@ -82,32 +82,44 @@ export default async function metaWhatsAppRoutes(fastify) {
       } catch {}
     }
 
-    // Busca WABAs vinculadas ao usuário
-    const wabaRes = await fetch(`${GRAPH_URL}/me/whatsapp_business_accounts?access_token=${longToken}&fields=id,name`);
-    const wabaData = await wabaRes.json();
-    if (wabaData.error) return reply.status(400).send({ error: wabaData.error.message });
+    // 1. Busca os negócios do usuário
+    const bizRes = await fetch(`${GRAPH_URL}/me/businesses?access_token=${longToken}&fields=id,name`);
+    const bizData = await bizRes.json();
+    if (bizData.error) return reply.status(400).send({ error: bizData.error.message });
 
     const phones = [];
-    for (const waba of wabaData.data || []) {
-      const phoneRes = await fetch(
-        `${GRAPH_URL}/${waba.id}/phone_numbers?access_token=${longToken}&fields=id,display_phone_number,verified_name,status,quality_rating`
-      );
-      const phoneData = await phoneRes.json();
-      for (const phone of phoneData.data || []) {
-        phones.push({
-          waba_id: waba.id,
-          waba_name: waba.name,
-          phone_number_id: phone.id,
-          display_phone_number: phone.display_phone_number,
-          verified_name: phone.verified_name,
-          status: phone.status,
-          access_token: longToken,
-        });
+    const businesses = bizData.data || [];
+
+    // 2. Para cada negócio, busca WABAs (owned + client)
+    for (const biz of businesses) {
+      for (const wabaType of ['owned_whatsapp_business_accounts', 'client_whatsapp_business_accounts']) {
+        const wabaRes = await fetch(
+          `${GRAPH_URL}/${biz.id}/${wabaType}?access_token=${longToken}&fields=id,name`
+        );
+        const wabaData = await wabaRes.json();
+        for (const waba of wabaData.data || []) {
+          // 3. Para cada WABA, busca números
+          const phoneRes = await fetch(
+            `${GRAPH_URL}/${waba.id}/phone_numbers?access_token=${longToken}&fields=id,display_phone_number,verified_name,status,quality_rating`
+          );
+          const phoneData = await phoneRes.json();
+          for (const phone of phoneData.data || []) {
+            phones.push({
+              waba_id: waba.id,
+              waba_name: waba.name || biz.name,
+              phone_number_id: phone.id,
+              display_phone_number: phone.display_phone_number,
+              verified_name: phone.verified_name,
+              status: phone.status,
+              access_token: longToken,
+            });
+          }
+        }
       }
     }
 
     if (phones.length === 0) {
-      return reply.status(400).send({ error: 'Nenhum número encontrado. Verifique se o WABA tem números registrados.' });
+      return reply.status(400).send({ error: 'Nenhum número encontrado. Verifique se a conta Meta Business tem um WABA com números registrados.' });
     }
     return { phones };
   });
