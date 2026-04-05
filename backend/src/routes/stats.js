@@ -57,7 +57,7 @@ export default async function statsRoutes(fastify) {
 
     // Build optional filter conditions
     const filterParams = [start, end];
-    const connCond = connection !== 'all' ? `AND instance_name = $${filterParams.push(connection)}` : '';
+    const connCond = connection !== 'all' ? `AND connection_name = $${filterParams.push(connection)}` : '';
     const agentCond = agent !== 'all' ? `AND assigned_to = $${filterParams.push(agent)}` : '';
 
     const truncUnit = groupBy === 'month' ? 'month' : groupBy === 'week' ? 'week' : 'day';
@@ -190,19 +190,19 @@ export default async function statsRoutes(fastify) {
       // 8. Per-connection stats
       query(`
         WITH msg_stats AS (
-          SELECT c.instance_name,
+          SELECT c.connection_name,
             COUNT(*) FILTER (WHERE m.direction = 'outbound') AS sent,
             COUNT(*) FILTER (WHERE m.direction = 'inbound') AS received
           FROM messages m
           JOIN conversations c ON c.id = m.conversation_id
           WHERE m.created_at >= $1 AND m.created_at <= $2
-          GROUP BY c.instance_name
+          GROUP BY c.connection_name
         ),
         conv_stats AS (
-          SELECT instance_name,
+          SELECT connection_name,
             COUNT(*) FILTER (WHERE created_at >= $1 AND created_at <= $2) AS created,
-            COUNT(*) FILTER (WHERE status IN ('closed','resolved') AND updated_at >= $1 AND updated_at <= $2) AS resolved
-          FROM conversations GROUP BY instance_name
+            COUNT(*) FILTER (WHERE status = 'closed' AND updated_at >= $1 AND updated_at <= $2) AS resolved
+          FROM conversations GROUP BY connection_name
         )
         SELECT
           ec.id, ec.instance_name, ec.status,
@@ -211,8 +211,8 @@ export default async function statsRoutes(fastify) {
           COALESCE(cs.created, 0) AS created,
           COALESCE(cs.resolved, 0) AS resolved
         FROM evolution_connections ec
-        LEFT JOIN msg_stats ms ON ms.instance_name = ec.instance_name
-        LEFT JOIN conv_stats cs ON cs.instance_name = ec.instance_name
+        LEFT JOIN msg_stats ms ON ms.connection_name = ec.instance_name
+        LEFT JOIN conv_stats cs ON cs.connection_name = ec.instance_name
       `, [start, end]),
 
       // 9. Profiles list for selectors
