@@ -348,8 +348,10 @@ const Connections = () => {
     handleShowEvolutionQR(qrInstance);
   };
 
-  const connectedCount = instances.filter((i) => i.status === "open" || i.status === "connected").length;
-  const disconnectedCount = instances.filter((i) => i.status !== "open" && i.status !== "connected").length;
+  const connectedCount = instances.filter((i) => i.status === "open" || i.status === "connected").length
+    + metaConnections.filter((m) => m.status === "active").length;
+  const disconnectedCount = instances.filter((i) => i.status !== "open" && i.status !== "connected").length
+    + metaConnections.filter((m) => m.status !== "active").length;
 
   const filtered = instances.filter((i) =>
     i.instanceName?.toLowerCase().includes(search.toLowerCase())
@@ -406,7 +408,7 @@ const Connections = () => {
               <Smartphone className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-foreground">{instances.length}</p>
+              <p className="text-2xl font-bold text-foreground">{instances.length + metaConnections.length}</p>
               <p className="text-xs text-muted-foreground">Total de conexões</p>
             </div>
           </Card>
