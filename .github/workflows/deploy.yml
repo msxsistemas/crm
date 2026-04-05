@@ -8,33 +8,51 @@ jobs:
   build:
     name: Build Frontend
     runs-on: ubuntu-latest
+    outputs:
+      has-vps: ${{ steps.check.outputs.has-vps }}
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+
       - run: npm ci
+
       - run: npm run build
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL || 'https://api.msxzap.pro' }}
           VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
           path: dist/
           retention-days: 1
 
+      - id: check
+        name: Check if VPS secrets are set
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          if [ -n "$VPS_HOST" ]; then
+            echo "has-vps=true" >> $GITHUB_OUTPUT
+          else
+            echo "has-vps=false" >> $GITHUB_OUTPUT
+          fi
+
   deploy-frontend:
     name: Deploy Frontend
     runs-on: ubuntu-latest
     needs: build
-    if: ${{ secrets.VPS_HOST != '' }}
+    if: needs.build.outputs.has-vps == 'true'
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: frontend-dist
           path: dist/
+
       - name: Upload to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -44,6 +62,7 @@ jobs:
           source: dist/
           target: /var/www/msxcrm/frontend
           strip_components: 1
+
       - name: Reload nginx
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -55,10 +74,11 @@ jobs:
   deploy-backend:
     name: Deploy Backend
     runs-on: ubuntu-latest
-    needs: deploy-frontend
-    if: ${{ secrets.VPS_HOST != '' && contains(toJson(github.event.head_commit.modified), 'backend/') }}
+    needs: [build, deploy-frontend]
+    if: needs.build.outputs.has-vps == 'true' && contains(toJson(github.event.head_commit.modified), 'backend/')
     steps:
       - uses: actions/checkout@v4
+
       - name: Upload backend source
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -68,6 +88,7 @@ jobs:
           source: backend/src/,backend/package.json,backend/package-lock.json
           target: /var/www/msxcrm/backend
           strip_components: 1
+
       - name: Restart backend
         uses: appleboy/ssh-action@v1.0.3
         with:
