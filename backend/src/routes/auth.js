@@ -176,8 +176,9 @@ export default async function authRoutes(fastify) {
 
   // Logout — clear httpOnly cookies
   fastify.post('/auth/logout', async (req, reply) => {
-    reply.clearCookie('access_token', { path: '/' });
-    reply.clearCookie('refresh_token', { path: '/' });
+    const secure = process.env.NODE_ENV === 'production';
+    reply.clearCookie('access_token', { path: '/', httpOnly: true, secure, sameSite: 'lax' });
+    reply.clearCookie('refresh_token', { path: '/auth/refresh', httpOnly: true, secure, sameSite: 'lax' });
     return { ok: true };
   });
 
