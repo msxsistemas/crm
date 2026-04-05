@@ -2,7 +2,7 @@ import { createHmac } from 'crypto';
 import { query } from '../database.js';
 import { uploadToMinio, ensureBucket } from '../minio.js';
 
-const GRAPH_URL = 'https://graph.facebook.com/v19.0';
+const GRAPH_URL = 'https://graph.facebook.com/v21.0';
 const VERIFY_TOKEN = process.env.META_WEBHOOK_VERIFY_TOKEN || 'msxcrm_meta_webhook_2026';
 const APP_SECRET = process.env.META_APP_SECRET || '';
 
