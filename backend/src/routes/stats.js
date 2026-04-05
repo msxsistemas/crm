@@ -108,11 +108,11 @@ export default async function statsRoutes(fastify) {
           FROM conversations c
           JOIN LATERAL (
             SELECT MIN(m.created_at) AS t FROM messages m
-            WHERE m.conversation_id = c.id AND m.from_me = false
+            WHERE m.conversation_id = c.id AND m.direction = 'inbound'
           ) fi ON fi.t IS NOT NULL
           JOIN LATERAL (
             SELECT MIN(m.created_at) AS t FROM messages m
-            WHERE m.conversation_id = c.id AND m.from_me = true AND m.created_at > fi.t
+            WHERE m.conversation_id = c.id AND m.direction = 'outbound' AND m.created_at > fi.t
           ) fr ON fr.t IS NOT NULL
           WHERE c.created_at >= $1 AND c.created_at <= $2 ${connCond} ${agentCond}
         ) sub WHERE resp_mins > 0 AND resp_mins < 1440
@@ -143,11 +143,11 @@ export default async function statsRoutes(fastify) {
           FROM conversations c
           JOIN LATERAL (
             SELECT MIN(m.created_at) AS t FROM messages m
-            WHERE m.conversation_id = c.id AND m.from_me = false
+            WHERE m.conversation_id = c.id AND m.direction = 'inbound'
           ) fi ON fi.t IS NOT NULL
           JOIN LATERAL (
             SELECT MIN(m.created_at) AS t FROM messages m
-            WHERE m.conversation_id = c.id AND m.from_me = true AND m.created_at > fi.t
+            WHERE m.conversation_id = c.id AND m.direction = 'outbound' AND m.created_at > fi.t
           ) fr ON fr.t IS NOT NULL
           WHERE c.created_at >= $1 AND c.created_at <= $2
           GROUP BY c.assigned_to
@@ -191,8 +191,8 @@ export default async function statsRoutes(fastify) {
       query(`
         WITH msg_stats AS (
           SELECT c.instance_name,
-            COUNT(*) FILTER (WHERE m.from_me = true) AS sent,
-            COUNT(*) FILTER (WHERE m.from_me = false) AS received
+            COUNT(*) FILTER (WHERE m.direction = 'outbound') AS sent,
+            COUNT(*) FILTER (WHERE m.direction = 'inbound') AS received
           FROM messages m
           JOIN conversations c ON c.id = m.conversation_id
           WHERE m.created_at >= $1 AND m.created_at <= $2
@@ -221,8 +221,8 @@ export default async function statsRoutes(fastify) {
       // 10. Total sent/received messages in period
       query(`
         SELECT
-          COUNT(*) FILTER (WHERE from_me = true) AS sent,
-          COUNT(*) FILTER (WHERE from_me = false) AS received
+          COUNT(*) FILTER (WHERE direction = 'outbound') AS sent,
+          COUNT(*) FILTER (WHERE direction = 'inbound') AS received
         FROM messages WHERE created_at >= $1 AND created_at <= $2
       `, [start, end]),
 
@@ -326,8 +326,8 @@ export default async function statsRoutes(fastify) {
           FROM (
             SELECT EXTRACT(EPOCH FROM (fr.t - fi.t))/60 AS resp_mins
             FROM conversations c
-            JOIN LATERAL (SELECT MIN(m.created_at) AS t FROM messages m WHERE m.conversation_id = c.id AND m.from_me = false) fi ON fi.t IS NOT NULL
-            JOIN LATERAL (SELECT MIN(m.created_at) AS t FROM messages m WHERE m.conversation_id = c.id AND m.from_me = true AND m.created_at > fi.t) fr ON fr.t IS NOT NULL
+            JOIN LATERAL (SELECT MIN(m.created_at) AS t FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'inbound') fi ON fi.t IS NOT NULL
+            JOIN LATERAL (SELECT MIN(m.created_at) AS t FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'outbound' AND m.created_at > fi.t) fr ON fr.t IS NOT NULL
             WHERE c.created_at >= $1 AND c.created_at <= $2
           ) sub WHERE resp_mins > 0 AND resp_mins < 1440
         `, [prevStart, prevEnd]),
