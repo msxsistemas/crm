@@ -69,7 +69,10 @@ function getDefaultWidgetLayout(): WidgetLayout[] {
 function loadWidgetLayout(): WidgetLayout[] {
   try {
     const saved = localStorage.getItem('dashboard_widget_layout');
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed;
+    }
   } catch { /* ignore */ }
   return getDefaultWidgetLayout();
 }

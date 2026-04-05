@@ -155,7 +155,7 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(20);
-    setNotifications((data as AppNotification[]) || []);
+    setNotifications(Array.isArray(data) ? (data as AppNotification[]) : []);
     setNotifLoading(false);
   }, [user]);
 
