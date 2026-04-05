@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Smartphone, Plus, QrCode, RefreshCw, Trash2, CheckCircle, XCircle,
   Loader2, Wifi, WifiOff, Search, Key, Globe, Pencil, Signal, X, MessageSquare
@@ -162,6 +162,12 @@ const Connections = () => {
     }
   };
 
+  // New instance dialog step: 'form' | 'qr' | 'connected'
+  const [newStep, setNewStep] = useState<'form' | 'qr' | 'connected'>('form');
+  const [newQr, setNewQr] = useState<string | null>(null);
+  const [newQrLoading, setNewQrLoading] = useState(false);
+  const newQrIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Status check state
   const [checkingInstance, setCheckingInstance] = useState<string | null>(null);
 
@@ -274,46 +280,58 @@ const Connections = () => {
   }, [fetchInstances]);
 
 
-  const handleCreateEvolution = async () => {
-    if (!newName.trim()) {
-      toast.error("Digite um nome para a instância");
-      return;
+  const stopNewQrPolling = () => {
+    if (newQrIntervalRef.current) {
+      clearInterval(newQrIntervalRef.current);
+      newQrIntervalRef.current = null;
     }
+  };
+
+  const startNewQrPolling = (name: string) => {
+    const loadQr = async () => {
+      setNewQrLoading(true);
+      try {
+        const result = await getQRCode(name);
+        const qr = result?.qrcode?.base64 || result?.base64 || null;
+        if (qr) setNewQr(qr);
+        // Check if connected
+        const status = await getInstanceStatus(name);
+        const state = status?.instance?.state || status?.state;
+        if (state === 'open' || state === 'connected') {
+          stopNewQrPolling();
+          setNewStep('connected');
+          fetchInstances();
+        }
+      } catch {}
+      setNewQrLoading(false);
+    };
+    loadQr();
+    newQrIntervalRef.current = setInterval(loadQr, 30000);
+  };
+
+  const handleCreateEvolution = async () => {
+    if (!newName.trim()) { toast.error("Digite um nome para a instância"); return; }
     setCreating(true);
+    const name = newName.trim();
     try {
-      const { data: { user } } = await db.auth.getUser();
-      if (!user) { toast.error("Faça login primeiro"); setCreating(false); return; }
-      
-      // Save to DB first (upsert to avoid duplicate errors)
-      await db.from("evolution_connections" as any).upsert({
-        user_id: user.id,
-        instance_name: newName.trim(),
-      } as any, { onConflict: "user_id,instance_name" });
-
-      // Create instance on Evolution API (ignore if already exists)
-      try {
-        await createInstance(newName.trim());
-      } catch (e: any) {
-        // Instance might already exist, continue to QR
-        console.warn("Create instance:", e.message);
-      }
-
-      try {
-        await setupWebhook(newName.trim());
-      } catch (e: any) {
-        console.warn("Setup webhook:", e.message);
-      }
-
-      toast.success("Instância criada com sucesso!");
-      setNewOpen(false);
-      const name = newName.trim();
-      setNewName("");
-      handleShowEvolutionQR(name);
-      fetchInstances();
+      await api.post('/evolution-connections', { instance_name: name });
+      try { await createInstance(name); } catch {}
+      try { await setupWebhook(name); } catch {}
+      setNewStep('qr');
+      startNewQrPolling(name);
     } catch (err: any) {
       toast.error(err.message || "Erro ao criar instância");
     }
     setCreating(false);
+  };
+
+  const handleCloseNewDialog = () => {
+    stopNewQrPolling();
+    setNewOpen(false);
+    setNewStep('form');
+    setNewName('');
+    setNewQr(null);
+    if (newStep === 'connected') fetchInstances();
   };
 
   const handleRemoveEvolution = async (instanceName: string) => {
@@ -868,41 +886,91 @@ const Connections = () => {
       </Dialog>
 
       {/* Evolution - New Instance Dialog */}
-      <Dialog open={newOpen} onOpenChange={setNewOpen}>
+      <Dialog open={newOpen} onOpenChange={handleCloseNewDialog}>
         <DialogContent className="sm:max-w-md p-0 overflow-hidden gap-0 [&>button.absolute]:hidden">
+          {/* Header */}
           <div className="bg-blue-600 px-6 py-5 flex items-center gap-3">
             <div className="h-10 w-10 rounded-full bg-white/20 flex items-center justify-center">
-              <Globe className="h-5 w-5 text-white" />
+              {newStep === 'connected' ? <CheckCircle className="h-5 w-5 text-white" /> : <Globe className="h-5 w-5 text-white" />}
             </div>
             <div className="flex-1">
-              <h2 className="text-lg font-bold text-white">Nova Instância — Evolution API</h2>
-              <p className="text-sm text-white/70">Crie uma nova instância para conectar</p>
-            </div>
-            <button onClick={() => setNewOpen(false)} className="text-white/70 hover:text-white">
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-          <div className="px-6 py-5 space-y-4 max-h-[60vh] overflow-y-auto">
-            <div>
-              <label className="text-sm font-medium text-foreground">Nome da instância</label>
-              <Input
-                placeholder="Ex: principal, vendas, suporte"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                maxLength={50}
-              />
-              <p className="text-xs text-muted-foreground mt-1">
-                Use apenas letras, números e hífens. Sem espaços.
+              <h2 className="text-lg font-bold text-white">
+                {newStep === 'form' && 'Nova Instância'}
+                {newStep === 'qr' && 'Escanear QR Code'}
+                {newStep === 'connected' && 'Conectado!'}
+              </h2>
+              <p className="text-sm text-white/70">
+                {newStep === 'form' && 'Evolution API — WhatsApp Web'}
+                {newStep === 'qr' && `Instância: ${newName}`}
+                {newStep === 'connected' && `${newName} está online`}
               </p>
             </div>
+            <button onClick={handleCloseNewDialog} className="text-white/70 hover:text-white"><X className="h-5 w-5" /></button>
           </div>
-          <div className="flex justify-end gap-3 px-6 py-4 border-t border-border">
-            <Button variant="outline" onClick={() => setNewOpen(false)}>Cancelar</Button>
-            <Button onClick={handleCreateEvolution} disabled={creating} className="bg-blue-600 hover:bg-blue-700 text-white gap-2">
-              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              Criar e Conectar
-            </Button>
-          </div>
+
+          {/* Step 1 — Form */}
+          {newStep === 'form' && (
+            <>
+              <div className="px-6 py-5 space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-foreground">Nome da instância</label>
+                  <Input
+                    placeholder="Ex: principal, vendas, suporte"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value.replace(/\s+/g, '-').toLowerCase())}
+                    maxLength={50}
+                    className="mt-1.5"
+                    autoFocus
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateEvolution()}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Apenas letras, números e hífens.</p>
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 px-6 py-4 border-t border-border">
+                <Button variant="outline" onClick={handleCloseNewDialog}>Cancelar</Button>
+                <Button onClick={handleCreateEvolution} disabled={creating || !newName.trim()} className="bg-blue-600 hover:bg-blue-700 text-white gap-2">
+                  {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+                  {creating ? 'Criando...' : 'Criar e Gerar QR'}
+                </Button>
+              </div>
+            </>
+          )}
+
+          {/* Step 2 — QR Code */}
+          {newStep === 'qr' && (
+            <div className="px-6 py-6 flex flex-col items-center gap-4">
+              <p className="text-sm text-muted-foreground text-center">
+                Abra o WhatsApp → <strong>Dispositivos Vinculados</strong> → <strong>Vincular Dispositivo</strong>
+              </p>
+              <div className="relative w-56 h-56 flex items-center justify-center bg-white rounded-xl border border-border shadow-sm">
+                {newQr ? (
+                  <img src={newQr} alt="QR Code" className="w-52 h-52 object-contain rounded-lg" />
+                ) : (
+                  <Loader2 className="h-10 w-10 animate-spin text-muted-foreground" />
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <RefreshCw className="h-3 w-3" /> QR atualiza automaticamente a cada 30s
+              </p>
+              <Button variant="outline" size="sm" className="gap-2" onClick={() => startNewQrPolling(newName)}>
+                <RefreshCw className="h-3.5 w-3.5" /> Atualizar agora
+              </Button>
+            </div>
+          )}
+
+          {/* Step 3 — Connected */}
+          {newStep === 'connected' && (
+            <div className="px-6 py-8 flex flex-col items-center gap-4 text-center">
+              <div className="h-16 w-16 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                <CheckCircle className="h-8 w-8 text-emerald-500" />
+              </div>
+              <div>
+                <p className="font-semibold text-foreground">WhatsApp conectado!</p>
+                <p className="text-sm text-muted-foreground mt-1">A instância <strong>{newName}</strong> está online e pronta para uso.</p>
+              </div>
+              <Button onClick={handleCloseNewDialog} className="bg-emerald-600 hover:bg-emerald-700 text-white">Fechar</Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
