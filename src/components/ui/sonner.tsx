@@ -9,21 +9,22 @@ const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
       theme={theme as ToasterProps["theme"]}
-      className="toaster group [&_.sonner-toast]:flex-row-reverse [&_.sonner-close-button]:!left-auto [&_.sonner-close-button]:!right-0"
-      position="top-right"
+      className="toaster group"
+      position="bottom-right"
       closeButton
-      duration={3000}
+      duration={4000}
       toastOptions={{
         classNames: {
           toast:
-            "group toast group-[.toaster]:bg-card group-[.toaster]:text-foreground group-[.toaster]:border-border/50 group-[.toaster]:shadow-lg group-[.toaster]:shadow-black/10 group-[.toaster]:rounded-xl group-[.toaster]:backdrop-blur-sm",
-          description: "group-[.toast]:text-muted-foreground",
+            "group toast group-[.toaster]:bg-card group-[.toaster]:text-foreground group-[.toaster]:border group-[.toaster]:border-border/60 group-[.toaster]:shadow-xl group-[.toaster]:shadow-black/15 group-[.toaster]:rounded-xl",
+          description: "group-[.toast]:text-muted-foreground group-[.toast]:text-sm",
           actionButton: "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
           cancelButton: "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground",
-          closeButton: "group-[.toast]:!bg-muted group-[.toast]:!text-foreground group-[.toast]:!border-border/50",
-          success: "group-[.toaster]:!bg-card group-[.toaster]:!text-success group-[.toaster]:border-success/20",
-          error: "group-[.toaster]:!bg-card group-[.toaster]:!text-destructive group-[.toaster]:border-destructive/20",
-          info: "group-[.toaster]:!bg-card group-[.toaster]:!text-primary group-[.toaster]:border-primary/20",
+          closeButton: "group-[.toast]:!bg-card group-[.toast]:!text-muted-foreground group-[.toast]:!border-border/50 group-[.toast]:hover:!bg-muted",
+          success: "group-[.toaster]:!border-l-4 group-[.toaster]:!border-l-green-500",
+          error: "group-[.toaster]:!border-l-4 group-[.toaster]:!border-l-red-500",
+          warning: "group-[.toaster]:!border-l-4 group-[.toaster]:!border-l-amber-500",
+          info: "group-[.toaster]:!border-l-4 group-[.toaster]:!border-l-blue-500",
         },
       }}
       {...props}
