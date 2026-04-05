@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/hooks/useAuth";
 import ProtectedRoute from "@/components/ProtectedRoute";
@@ -11,6 +11,13 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import InstallPWA from "@/components/InstallPWA";
 import OfflineBanner from "@/components/OfflineBanner";
 import { Loader2 } from "lucide-react";
+
+// Reseta o ErrorBoundary ao mudar de rota (sem isso, um erro numa página
+// deixa o app inteiro preso na tela de erro até o F5)
+const RouteErrorBoundary = ({ children }: { children: React.ReactNode }) => {
+  const { pathname } = useLocation();
+  return <ErrorBoundary key={pathname}>{children}</ErrorBoundary>;
+};
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -112,16 +119,16 @@ const PageLoader = () => (
 );
 
 const App = () => (
-  <ErrorBoundary>
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <InstallPWA />
-          <OfflineBanner />
-          <BrowserRouter>
-            <AuthProvider>
+  <QueryClientProvider client={queryClient}>
+    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <InstallPWA />
+        <OfflineBanner />
+        <BrowserRouter>
+          <AuthProvider>
+            <RouteErrorBoundary>
               <Suspense fallback={<PageLoader />}>
                 <Routes>
                   <Route path="/login" element={<Login />} />
@@ -224,12 +231,12 @@ const App = () => (
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
-            </AuthProvider>
-          </BrowserRouter>
-        </TooltipProvider>
-      </ThemeProvider>
-    </QueryClientProvider>
-  </ErrorBoundary>
+            </RouteErrorBoundary>
+          </AuthProvider>
+        </BrowserRouter>
+      </TooltipProvider>
+    </ThemeProvider>
+  </QueryClientProvider>
 );
 
 export default App;
