@@ -486,6 +486,54 @@ export default async function contactRoutes(fastify) {
     return csv;
   });
 
+  // ── Contact Documents ────────────────────────────────────────────────────
+  fastify.get('/contacts/:id/documents', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query(
+      'SELECT d.*, p.full_name as uploaded_by_name FROM contact_documents d LEFT JOIN profiles p ON p.id=d.uploaded_by WHERE d.contact_id=$1 ORDER BY d.created_at DESC',
+      [req.params.id]
+    );
+    return rows;
+  });
+
+  fastify.post('/contacts/:id/documents', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const data = await req.file();
+    if (!data) return reply.status(400).send({ error: 'Arquivo não enviado' });
+
+    const buffer = await data.toBuffer();
+    const filename = data.filename || 'documento';
+    const mimetype = data.mimetype || 'application/octet-stream';
+    const size = buffer.length;
+
+    const { minioClient, BUCKET } = await import('../minio.js');
+    const objectName = `contacts/${req.params.id}/${Date.now()}-${filename}`;
+    await minioClient.putObject(BUCKET, objectName, buffer, size, { 'Content-Type': mimetype });
+
+    const { rows } = await query(
+      'INSERT INTO contact_documents (contact_id, filename, object_name, mimetype, size, uploaded_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [req.params.id, filename, objectName, mimetype, size, req.user.id]
+    );
+    return rows[0];
+  });
+
+  fastify.get('/contacts/:id/documents/:docId/download', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query('SELECT * FROM contact_documents WHERE id=$1 AND contact_id=$2', [req.params.docId, req.params.id]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Documento não encontrado' });
+
+    const { minioClient, BUCKET } = await import('../minio.js');
+    const url = await minioClient.presignedGetObject(BUCKET, rows[0].object_name, 3600);
+    return reply.redirect(url);
+  });
+
+  fastify.delete('/contacts/:id/documents/:docId', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query('SELECT * FROM contact_documents WHERE id=$1 AND contact_id=$2', [req.params.docId, req.params.id]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Documento não encontrado' });
+
+    const { minioClient, BUCKET } = await import('../minio.js');
+    await minioClient.removeObject(BUCKET, rows[0].object_name).catch(() => {});
+    await query('DELETE FROM contact_documents WHERE id=$1', [req.params.docId]);
+    return { success: true };
+  });
+
   // Import contacts via vCard (.vcf)
   fastify.post('/contacts/import-vcf', auth, async (req, reply) => {
     const { vcf } = req.body;

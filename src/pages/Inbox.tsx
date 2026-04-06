@@ -8,7 +8,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   Search, Phone, MessageCircle, Send, Smile, Paperclip, QrCode, RefreshCw,
   Wifi, WifiOff, Plus, Filter, Bell, BellOff, RotateCw, ArrowRight, User,
-  Shuffle, CheckCircle, X, Image, FileText, Mic, Folder, ChevronDown, Smartphone, Star,
+  Shuffle, CheckCircle, X, Image, FileText, Mic, MicOff, Folder, ChevronDown, Smartphone, Star,
   Trash2, Copy, Forward, Reply, Pencil, Check, AlertCircle, Bot, Clock, Target, Sparkles,
   LayoutTemplate, Tag, History, Ban, LayoutList, List, GitMerge, ShoppingBag, Download,
   CheckSquare, Users, Languages, UserCheck, Archive, LayoutGrid, AlignJustify, CreditCard,
@@ -508,6 +508,17 @@ const Inbox = () => {
   >({});
   const [reactionPickerMsgId, setReactionPickerMsgId] = useState<string | null>(null);
 
+  // Voice dictation states
+  const [isDictating, setIsDictating] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const dictationRecorderRef = useRef<MediaRecorder | null>(null);
+
+  // AI Copilot states
+  const [copilotOpen, setCopilotOpen] = useState(false);
+  const [copilotMessages, setCopilotMessages] = useState<{role: 'user'|'ai', text: string}[]>([]);
+  const [copilotInput, setCopilotInput] = useState('');
+  const [copilotLoading, setCopilotLoading] = useState(false);
+
   const handleAvatarError = useCallback((contactId: string) => {
     setAvatarErrorContacts((prev) => {
       if (prev.has(contactId)) return prev;
@@ -734,6 +745,70 @@ const Inbox = () => {
     mediaRecorderRef.current?.stop();
     if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
     setIsRecording(false);
+  };
+
+  // Voice dictation (speech-to-text via Whisper)
+  const startDictation = async () => {
+    if (isDictating) {
+      // Stop recording
+      dictationRecorderRef.current?.stop();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const formData = new FormData();
+        formData.append('file', blob, 'dictation.webm');
+        setTranscribing(true);
+        try {
+          const base = import.meta.env.VITE_API_URL || 'https://api.msxzap.pro';
+          const res = await fetch(base + '/voice/transcribe', {
+            method: 'POST',
+            credentials: 'include',
+            body: formData
+          });
+          const data = await res.json();
+          if (data.text) setMessageInput(prev => prev + (prev ? ' ' : '') + data.text);
+          else if (data.error) toast.error('Erro na transcrição: ' + data.error);
+        } catch {
+          toast.error('Erro ao transcrever áudio');
+        } finally {
+          setTranscribing(false);
+          setIsDictating(false);
+        }
+      };
+      recorder.start();
+      dictationRecorderRef.current = recorder;
+      setIsDictating(true);
+    } catch {
+      toast.error('Erro ao acessar microfone');
+    }
+  };
+
+  // AI Copilot ask
+  const handleCopilotAsk = async (question: string) => {
+    if (!question.trim() || copilotLoading) return;
+    const q = question.trim();
+    setCopilotMessages(prev => [...prev, { role: 'user', text: q }]);
+    setCopilotInput('');
+    setCopilotLoading(true);
+    try {
+      const data = await api.post<{ answer: string }>('/ai/copilot', {
+        question: q,
+        conversation_id: selected || undefined,
+        context_messages: 10
+      });
+      setCopilotMessages(prev => [...prev, { role: 'ai', text: data.answer }]);
+    } catch {
+      setCopilotMessages(prev => [...prev, { role: 'ai', text: 'Erro ao consultar o assistente.' }]);
+    } finally {
+      setCopilotLoading(false);
+    }
   };
 
   const cancelRecording = () => {
@@ -3787,6 +3862,16 @@ const Inbox = () => {
                 }}>
                   <Users className="h-4 w-4" />
                 </Button>
+                {/* Copiloto IA toggle button */}
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className={cn("h-8 w-8", copilotOpen ? "text-purple-500 bg-purple-500/10" : "text-muted-foreground hover:text-purple-500")}
+                  title="Copiloto IA"
+                  onClick={() => setCopilotOpen(v => !v)}
+                >
+                  <Bot className="h-4 w-4" />
+                </Button>
               </div>
             </div>
 
@@ -4700,6 +4785,20 @@ const Inbox = () => {
                       >
                         <Mic className="h-5 w-5" />
                       </Button>
+                      {/* Voice dictation button */}
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className={cn(
+                          "shrink-0 h-10 w-10 rounded-full hover:bg-transparent",
+                          isDictating ? "text-red-500 animate-pulse" : transcribing ? "text-orange-500 animate-spin" : "text-muted-foreground hover:text-blue-500"
+                        )}
+                        disabled={uploading || transcribing}
+                        title={isDictating ? "Parar ditado" : "Ditado por voz (transcrever)"}
+                        onClick={startDictation}
+                      >
+                        {isDictating ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -4716,6 +4815,89 @@ const Inbox = () => {
           </div>
         )}
       </div>
+
+      {/* AI Copilot Panel */}
+      {copilotOpen && selected && (
+        <div className="w-80 flex flex-col border-l border-border bg-background shrink-0 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
+            <div className="flex items-center gap-2">
+              <Bot className="h-4 w-4 text-purple-500" />
+              <span className="font-semibold text-sm">Copiloto IA</span>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-purple-300 text-purple-600">
+                Com contexto
+              </Badge>
+            </div>
+            <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => setCopilotOpen(false)}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          {/* Prompt buttons */}
+          <div className="flex flex-wrap gap-1 px-3 py-2 border-b border-border">
+            {['Sugerir resposta', 'Resumir problema', 'Resposta formal', 'Resposta empática'].map(p => (
+              <button
+                key={p}
+                onClick={() => handleCopilotAsk(p)}
+                className="text-[11px] px-2 py-1 rounded-full bg-muted hover:bg-muted/80 text-foreground border border-border transition-colors"
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+          {/* Messages area */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            {copilotMessages.length === 0 && (
+              <div className="text-center text-muted-foreground text-xs py-8">
+                <Bot className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                <p>Pergunte ao assistente ou use um atalho acima</p>
+              </div>
+            )}
+            {copilotMessages.map((msg, i) => (
+              <div key={i} className={cn("flex flex-col gap-1", msg.role === 'user' ? "items-end" : "items-start")}>
+                <div className={cn(
+                  "rounded-xl px-3 py-2 text-xs max-w-[95%] whitespace-pre-wrap",
+                  msg.role === 'user' ? "bg-purple-500 text-white" : "bg-muted text-foreground"
+                )}>
+                  {msg.text}
+                </div>
+                {msg.role === 'ai' && (
+                  <button
+                    onClick={() => setMessageInput(prev => prev + (prev ? ' ' : '') + msg.text)}
+                    className="text-[10px] text-purple-500 hover:text-purple-700 px-1"
+                  >
+                    Inserir na conversa
+                  </button>
+                )}
+              </div>
+            ))}
+            {copilotLoading && (
+              <div className="flex items-start gap-2">
+                <div className="bg-muted rounded-xl px-3 py-2 text-xs text-muted-foreground animate-pulse">Pensando...</div>
+              </div>
+            )}
+          </div>
+          {/* Input area */}
+          <div className="p-3 border-t border-border">
+            <div className="flex gap-2">
+              <input
+                value={copilotInput}
+                onChange={e => setCopilotInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleCopilotAsk(copilotInput); } }}
+                placeholder="Perguntar ao assistente..."
+                className="flex-1 text-xs bg-muted border border-border rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-purple-400"
+                disabled={copilotLoading}
+              />
+              <Button
+                size="icon"
+                className="h-8 w-8 bg-purple-500 hover:bg-purple-600 text-white rounded-lg shrink-0"
+                onClick={() => handleCopilotAsk(copilotInput)}
+                disabled={copilotLoading || !copilotInput.trim()}
+              >
+                <Send className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Contact Details Sidebar */}
       {showDetails && selectedConvo && (

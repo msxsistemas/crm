@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clock, TrendingUp, Send, ChevronDown, ChevronUp, Cake, Star, CheckSquare, Trash2, CreditCard, MapPin, ShieldOff, Shield, RefreshCw, Sliders } from "lucide-react";
+import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clock, TrendingUp, Send, ChevronDown, ChevronUp, Cake, Star, CheckSquare, Trash2, CreditCard, MapPin, ShieldOff, Shield, RefreshCw, Sliders, FolderOpen, FileText, Image, File, Download } from "lucide-react";
 import TagSelector from "@/components/shared/TagSelector";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -175,6 +175,80 @@ const ContactDetailsSidebar = ({
   const [customFieldsOpen, setCustomFieldsOpen] = useState(false);
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, string>>({});
   const [savingCustomField, setSavingCustomField] = useState<Record<string, boolean>>({});
+
+  // Documents state
+  interface ContactDocument {
+    id: string;
+    filename: string;
+    mimetype: string | null;
+    size: number | null;
+    uploaded_by_name: string | null;
+    created_at: string;
+  }
+  const [documents, setDocuments] = useState<ContactDocument[]>([]);
+  const [documentsOpen, setDocumentsOpen] = useState(false);
+  const [documentsLoaded, setDocumentsLoaded] = useState(false);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const docInputRef = useRef<HTMLInputElement>(null);
+
+  const loadDocuments = async () => {
+    try {
+      const data = await api.get<ContactDocument[]>(`/contacts/${contactId}/documents`);
+      setDocuments(data || []);
+      setDocumentsLoaded(true);
+    } catch { setDocumentsLoaded(true); }
+  };
+
+  const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Arquivo muito grande. Limite: 10MB');
+      return;
+    }
+    setUploadingDoc(true);
+    try {
+      const base = import.meta.env.VITE_API_URL || 'https://api.msxzap.pro';
+      const formData = new FormData();
+      formData.append('file', file, file.name);
+      const res = await fetch(`${base}/contacts/${contactId}/documents`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData
+      });
+      if (res.ok) {
+        await loadDocuments();
+      } else {
+        alert('Erro ao enviar documento');
+      }
+    } catch { alert('Erro ao enviar documento'); }
+    finally {
+      setUploadingDoc(false);
+      if (docInputRef.current) docInputRef.current.value = '';
+    }
+  };
+
+  const handleDocDelete = async (docId: string) => {
+    if (!confirm('Excluir este documento?')) return;
+    try {
+      await api.delete(`/contacts/${contactId}/documents/${docId}`);
+      setDocuments(prev => prev.filter(d => d.id !== docId));
+    } catch { alert('Erro ao excluir documento'); }
+  };
+
+  const formatDocSize = (bytes: number | null) => {
+    if (!bytes) return '';
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${bytes} B`;
+  };
+
+  const getDocIcon = (mimetype: string | null) => {
+    if (!mimetype) return <File className="h-4 w-4 text-gray-400" />;
+    if (mimetype === 'application/pdf') return <FileText className="h-4 w-4 text-red-500" />;
+    if (mimetype.startsWith('image/')) return <Image className="h-4 w-4 text-blue-500" />;
+    return <File className="h-4 w-4 text-gray-400" />;
+  };
 
   // Co-atendentes (collaborators)
   const [collaborators, setCollaborators] = useState<{ agent_id: string; name: string | null; full_name: string | null; avatar_url: string | null }[]>([]);
@@ -1717,6 +1791,89 @@ const ContactDetailsSidebar = ({
                   )}
                 </div>
               ))
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Documents Section */}
+      <div className="border-t border-border">
+        <button
+          type="button"
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors"
+          onClick={() => {
+            setDocumentsOpen(v => !v);
+            if (!documentsLoaded) loadDocuments();
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <FolderOpen className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Documentos</span>
+            {documents.length > 0 && (
+              <span className="text-[11px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">{documents.length}</span>
+            )}
+          </div>
+          {documentsOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </button>
+
+        {documentsOpen && (
+          <div className="px-4 pb-4 space-y-2">
+            <input
+              ref={docInputRef}
+              type="file"
+              className="hidden"
+              accept="*/*"
+              onChange={handleDocUpload}
+            />
+            <button
+              type="button"
+              onClick={() => docInputRef.current?.click()}
+              disabled={uploadingDoc}
+              className="w-full flex items-center justify-center gap-2 text-xs border border-dashed border-border rounded-lg py-2 text-muted-foreground hover:text-foreground hover:border-primary transition-colors disabled:opacity-50"
+            >
+              <FolderOpen className="h-3.5 w-3.5" />
+              {uploadingDoc ? 'Enviando...' : 'Enviar documento (máx. 10MB)'}
+            </button>
+
+            {!documentsLoaded ? (
+              <p className="text-xs text-muted-foreground text-center py-2">Carregando...</p>
+            ) : documents.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-3">Sem documentos</p>
+            ) : (
+              <div className="space-y-1.5">
+                {documents.map(doc => {
+                  const base = import.meta.env.VITE_API_URL || 'https://api.msxzap.pro';
+                  return (
+                    <div key={doc.id} className="flex items-center gap-2 p-2 rounded-lg bg-muted/50 hover:bg-muted/80 group">
+                      {getDocIcon(doc.mimetype)}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate">{doc.filename}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {formatDocSize(doc.size)}
+                          {doc.uploaded_by_name ? ` · ${doc.uploaded_by_name}` : ''}
+                        </p>
+                      </div>
+                      <a
+                        href={`${base}/contacts/${contactId}/documents/${doc.id}/download`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                        title="Baixar"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => handleDocDelete(doc.id)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-500 dark:hover:bg-red-950"
+                        title="Excluir"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         )}
