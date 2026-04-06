@@ -1,36 +1,19 @@
-import { db } from "@/lib/db";
-
-const API_URL = import.meta.env.VITE_API_URL || 'https://api.msxzap.pro';
-
-async function callEvolutionApi(action: string, instanceName?: string, data?: Record<string, unknown>) {
-  try {
-    const { data: result, error } = await db.functions.invoke("evolution-api", {
-      body: { action, instanceName, data },
-    });
-
-    if (error) throw new Error(error.message);
-    if (result?.error) throw new Error(result.error);
-    return result;
-  } catch (err) {
-    console.warn(`Evolution API (${action}):`, (err as Error).message);
-    throw err;
-  }
-}
+import { api } from "@/lib/api";
 
 export async function createInstance(instanceName: string) {
-  return callEvolutionApi("create_instance", undefined, { instanceName });
+  return api.post('/evolution/instance/create', { instanceName });
 }
 
 export async function getQRCode(instanceName: string) {
-  return callEvolutionApi("get_qrcode", instanceName);
+  return api.get(`/evolution/instance/qr/${instanceName}`);
 }
 
 export async function getInstanceStatus(instanceName: string) {
-  return callEvolutionApi("instance_status", instanceName);
+  return api.get(`/evolution/instance/status/${instanceName}`);
 }
 
 export async function sendMessage(instanceName: string, phone: string, message: string) {
-  return callEvolutionApi("send_message", instanceName, { phone, message });
+  return api.post('/evolution-proxy', { action: 'message/sendText', instanceName, data: { number: phone, text: message } });
 }
 
 export async function sendMedia(
@@ -40,14 +23,17 @@ export async function sendMedia(
   mediaType: string,
   caption?: string
 ) {
-  return callEvolutionApi("send_media", instanceName, { phone, mediaUrl, mediaType, caption });
+  return api.post('/evolution-proxy', { action: 'message/sendMedia', instanceName, data: { number: phone, mediaUrl, mediaType, caption } });
 }
 
 export async function listInstances() {
-  return callEvolutionApi("list_instances");
+  return api.get('/evolution/instance/list');
 }
 
 export async function setupWebhook(instanceName: string) {
-  const webhookUrl = `${API_URL}/webhook/evolution`;
-  return callEvolutionApi("set_webhook", instanceName, { webhookUrl });
+  return api.post(`/evolution/instance/webhook/${instanceName}`, {});
+}
+
+export async function deleteInstance(instanceName: string) {
+  return api.delete(`/evolution/instance/${instanceName}`);
 }

@@ -338,23 +338,56 @@ interface StoredListener {
 }
 
 class ChannelProxy {
+  private _channelName: string;
   private _listeners: StoredListener[] = [];
+  private _presenceListeners: Array<{ event: string; callback: () => void }> = [];
   private _socketHandlers: Array<{ event: string; handler: (...args: unknown[]) => void }> = [];
+  private _isTypingChannel: boolean;
+  private _conversationId: string | null;
+  private _typingState: Map<string, { user_id: string; user_name: string }> = new Map();
+
+  constructor(name: string) {
+    this._channelName = name;
+    const typingMatch = name.match(/^typing:(.+)$/);
+    this._isTypingChannel = !!typingMatch;
+    this._conversationId = typingMatch ? typingMatch[1] : null;
+  }
 
   on(event: string, filter: unknown, callback?: unknown) {
     if (event === 'postgres_changes' && typeof callback === 'function') {
       this._listeners.push({ event, filter: (filter as PgChangesFilter) || {}, callback: callback as PgChangesCallback });
+    } else if (event === 'presence' && typeof callback === 'function') {
+      const filterObj = filter as { event?: string } | null;
+      this._presenceListeners.push({ event: filterObj?.event || '*', callback: callback as () => void });
     }
     return this;
   }
 
   subscribe(cb?: (status: string) => void) {
-    try {
-      // Dynamic import to avoid circular deps at module load time
-      import('./socket').then(({ getSocket }) => {
-        try {
-          const s = getSocket();
+    import('./socket').then(({ getSocket }) => {
+      try {
+        const s = getSocket();
 
+        if (this._isTypingChannel && this._conversationId) {
+          // Join conversation room
+          s.emit('join:conversation', this._conversationId);
+
+          // Listen for typing updates from other users
+          const typingHandler = (data: { userId: string; userName?: string; typing: boolean }) => {
+            if (data.typing) {
+              this._typingState.set(data.userId, { user_id: data.userId, user_name: data.userName || 'Agente' });
+            } else {
+              this._typingState.delete(data.userId);
+            }
+            // Trigger presence sync listeners
+            for (const l of this._presenceListeners) {
+              if (l.event === 'sync' || l.event === '*') l.callback();
+            }
+          };
+
+          this._socketHandlers.push({ event: 'typing:update', handler: typingHandler as (...args: unknown[]) => void });
+          s.on('typing:update', typingHandler as (...args: unknown[]) => void);
+        } else {
           for (const listener of this._listeners) {
             const table = listener.filter?.table || '';
             let socketEvent: string | null = null;
@@ -363,6 +396,7 @@ class ChannelProxy {
             else if (table === 'messages') socketEvent = 'message:new';
             else if (table === 'notifications') socketEvent = 'notification:new';
             else if (table === 'kanban_cards') socketEvent = 'kanban:updated';
+            else if (table === 'contact_tags') socketEvent = 'contact_tags:updated';
 
             if (!socketEvent) continue;
 
@@ -374,43 +408,63 @@ class ChannelProxy {
             this._socketHandlers.push({ event: socketEvent, handler });
             s.on(socketEvent, handler);
           }
-
-          if (cb) {
-            if (s.connected) {
-              cb('SUBSCRIBED');
-            } else {
-              s.once('connect', () => cb('SUBSCRIBED'));
-            }
-          }
-        } catch {
-          if (cb) setTimeout(() => cb('SUBSCRIBED'), 100);
         }
-      }).catch(() => {
+
+        if (cb) {
+          if (s.connected) cb('SUBSCRIBED');
+          else s.once('connect', () => cb('SUBSCRIBED'));
+        }
+      } catch {
         if (cb) setTimeout(() => cb('SUBSCRIBED'), 100);
-      });
-    } catch {
+      }
+    }).catch(() => {
       if (cb) setTimeout(() => cb('SUBSCRIBED'), 100);
-    }
+    });
     return this;
   }
 
   unsubscribe() {
-    try {
-      import('./socket').then(({ getSocket }) => {
-        try {
-          const s = getSocket();
-          for (const { event, handler } of this._socketHandlers) {
-            s.off(event, handler);
-          }
-        } catch { /* ignore */ }
-      }).catch(() => { /* ignore */ });
-    } catch { /* ignore */ }
+    import('./socket').then(({ getSocket }) => {
+      try {
+        const s = getSocket();
+        if (this._isTypingChannel && this._conversationId) {
+          s.emit('leave:conversation', this._conversationId);
+        }
+        for (const { event, handler } of this._socketHandlers) {
+          s.off(event, handler);
+        }
+      } catch { /* ignore */ }
+    }).catch(() => { /* ignore */ });
     this._socketHandlers = [];
     this._listeners = [];
+    this._presenceListeners = [];
+    this._typingState.clear();
   }
 
-  async track(_payload: unknown) { return 'ok'; }
-  presenceState<T = unknown>(): Record<string, T[]> { return {}; }
+  async track(payload: Record<string, unknown>) {
+    if (!this._isTypingChannel || !this._conversationId) return 'ok';
+    try {
+      const { getSocket } = await import('./socket');
+      const s = getSocket();
+      if (payload.typing) {
+        s.emit('typing:start', { conversationId: this._conversationId, userName: payload.user_name });
+      } else {
+        s.emit('typing:stop', { conversationId: this._conversationId });
+      }
+    } catch { /* ignore */ }
+    return 'ok';
+  }
+
+  presenceState<T = unknown>(): Record<string, T[]> {
+    if (this._isTypingChannel) {
+      const state: Record<string, unknown[]> = {};
+      for (const [userId, data] of this._typingState.entries()) {
+        state[userId] = [{ ...data, typing: true }];
+      }
+      return state as Record<string, T[]>;
+    }
+    return {};
+  }
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -530,7 +584,7 @@ export const db = {
   auth: authShim,
   storage: { from: (bucket: string) => new StorageBucketProxy(bucket) },
   functions: functionsShim,
-  channel: (_name: string) => new ChannelProxy(),
+  channel: (name: string) => new ChannelProxy(name),
   removeChannel: (_ch: unknown) => {},
   removeAllChannels: () => {},
   rpc: async (fn: string, args?: unknown) => {

@@ -6,6 +6,7 @@ import TopBar from "./TopBar";
 import { useAuth } from "@/hooks/useAuth";
 import { usePresence } from "@/hooks/usePresence";
 import { useOnboardingTour } from "@/hooks/useOnboardingTour";
+import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import OnboardingTour from "@/components/onboarding/OnboardingTour";
 
 const AppLayout = () => {
@@ -14,6 +15,7 @@ const AppLayout = () => {
   const { updateStatus } = usePresence(user?.id, userName);
   const { tourActive, currentStep, totalSteps, startTour, endTour, nextStep, prevStep } =
     useOnboardingTour();
+  useGlobalKeyboardShortcuts();
 
   // Set offline on tab/window close
   useEffect(() => {

@@ -10,7 +10,7 @@ import {
   Wifi, WifiOff, Plus, Filter, Bell, BellOff, RotateCw, ArrowRight, User,
   Shuffle, CheckCircle, X, Image, FileText, Mic, Folder, ChevronDown, Smartphone, Star,
   Trash2, Copy, Forward, Reply, Pencil, Check, AlertCircle, Bot, Clock, Target, Sparkles,
-  LayoutTemplate, Tag, History, Ban, LayoutList, List, GitMerge, ShoppingBag,
+  LayoutTemplate, Tag, History, Ban, LayoutList, List, GitMerge, ShoppingBag, Download,
 } from "lucide-react";
 import { useFollowupReminders } from "@/hooks/useFollowupReminders";
 import FollowupDialog from "@/components/followup/FollowupDialog";
@@ -233,6 +233,9 @@ const Inbox = () => {
   const [messages, setMessages] = useState<DBMessage[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("inbox_search_history") || "[]"); } catch { return []; }
+  });
   const [messageInput, setMessageInput] = useState("");
   const [signing, setSigning] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -241,7 +244,7 @@ const Inbox = () => {
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [showQR, setShowQR] = useState(false);
   const [connecting, setConnecting] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabFilter>("atendendo");
+  const [activeTab, setActiveTab] = useState<TabFilter>("aguardando");
   const [instanceName, setInstanceName] = useState<string>("");
   const [showTransfer, setShowTransfer] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
@@ -837,15 +840,15 @@ const Inbox = () => {
         const ids = convos.map((c) => c.id);
         const { data: msgs } = await db
           .from("messages")
-          .select("conversation_id, body, created_at")
+          .select("conversation_id, content, created_at")
           .in("conversation_id", ids)
           .order("created_at", { ascending: false });
-        
+
         if (msgs) {
           const lastMsgMap = new Map<string, string>();
           for (const m of msgs) {
             if (!lastMsgMap.has(m.conversation_id)) {
-              lastMsgMap.set(m.conversation_id, m.body);
+              lastMsgMap.set(m.conversation_id, m.content);
             }
           }
           convos.forEach((c) => {
@@ -1898,6 +1901,27 @@ const Inbox = () => {
     }
   };
 
+  // Export conversation as CSV
+  function handleExportConversation() {
+    if (!selectedConvo || messages.length === 0) return;
+    const contactName = selectedConvo.contacts?.name || selectedConvo.contacts?.phone || "contato";
+    const rows = [["Data", "Remetente", "Mensagem"]];
+    for (const m of messages) {
+      const date = new Date(m.created_at).toLocaleString("pt-BR");
+      const sender = m.sender_type === "contact" ? contactName : (m.sender_name || "Agente");
+      const content = (m.content || "").replace(/"/g, '""');
+      rows.push([date, sender, `"${content}"`]);
+    }
+    const csv = rows.map(r => r.join(",")).join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `conversa_${contactName.replace(/\s+/g, "_")}_${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   // AI Conversation Summary handler
   async function handleSummarizeConversation() {
     if (!selected || messages.length === 0) return;
@@ -2390,9 +2414,41 @@ const Inbox = () => {
               placeholder="Buscar conversas..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && search.trim()) {
+                  const term = search.trim();
+                  setSearchHistory(prev => {
+                    const next = [term, ...prev.filter(h => h !== term)].slice(0, 8);
+                    localStorage.setItem("inbox_search_history", JSON.stringify(next));
+                    return next;
+                  });
+                }
+                if (e.key === "Escape") setSearch("");
+              }}
               className="pl-9 bg-muted/50 border-border"
             />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
+          {!search && searchHistory.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {searchHistory.map(h => (
+                <button
+                  key={h}
+                  onClick={() => setSearch(h)}
+                  className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground hover:bg-muted/80 transition-colors"
+                >
+                  {h}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Status counters bar */}
@@ -3076,6 +3132,9 @@ const Inbox = () => {
                 </Button>
                 <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-purple-500" onClick={handleSummarizeConversation} title="Resumir conversa">
                   <FileText className="h-4 w-4" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={handleExportConversation} title="Exportar conversa (CSV)">
+                  <Download className="h-4 w-4" />
                 </Button>
                 <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => { setShowMsgSearch(v => !v); if (showMsgSearch) setMsgSearch(""); }} title="Buscar mensagem">
                   <Search className="h-4 w-4" />

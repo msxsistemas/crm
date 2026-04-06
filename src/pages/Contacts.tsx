@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useDebounce } from "@/hooks/useDebounce";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/lib/api";
 import { formatPhoneBR, unformatPhone } from "@/lib/phone-mask";
@@ -157,6 +158,7 @@ const Contacts = () => {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 350);
   const csvInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
 
@@ -406,8 +408,8 @@ const Contacts = () => {
 
   const filtered = useMemo(() => {
     const base = contacts.filter((c) => {
-      if (search) {
-        const s = search.toLowerCase();
+      if (debouncedSearch) {
+        const s = debouncedSearch.toLowerCase();
         if (
           !(c.name || "").toLowerCase().includes(s) &&
           !c.phone.toLowerCase().includes(s)
@@ -434,13 +436,13 @@ const Contacts = () => {
       if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [contacts, search, filterState, filterCity, filterPeriod, sortField, sortDir]);
+  }, [contacts, debouncedSearch, filterState, filterCity, filterPeriod, sortField, sortDir]);
 
   const paginated = useMemo(() => filtered.slice(0, page * PAGE_SIZE), [filtered, page]);
 
   useEffect(() => {
     setPage(1);
-  }, [search, filterState, filterCity, filterPeriod]);
+  }, [debouncedSearch, filterState, filterCity, filterPeriod]);
 
   const stats = useMemo(() => {
     const today = contacts.filter((c) => isToday(new Date(c.created_at))).length;

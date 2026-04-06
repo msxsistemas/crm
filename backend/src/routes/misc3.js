@@ -261,10 +261,112 @@ export default async function misc3Routes(fastify) {
   });
 
   // ── Evolution Proxy ───────────────────────────────────────────────────────
+  // Helper: get evolution settings
+  async function getEvoSettings() {
+    const { rows } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
+    return rows[0] || null;
+  }
+  async function evoFetch(s, method, path, body) {
+    const res = await fetch(`${s.evolution_url}${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'apikey': s.evolution_key },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || err.error || `Evolution API ${res.status}`);
+    }
+    return res.json();
+  }
+
+  // Create instance
+  fastify.post('/evolution/instance/create', auth, async (req, reply) => {
+    const s = await getEvoSettings();
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'Evolution API não configurada nas Configurações' });
+    const { instanceName } = req.body;
+    try {
+      const data = await evoFetch(s, 'POST', '/instance/create', {
+        instanceName,
+        qrcode: true,
+        integration: 'WHATSAPP-BAILEYS',
+      });
+      return data;
+    } catch (e) {
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  // List all instances
+  fastify.get('/evolution/instance/list', auth, async (req, reply) => {
+    const s = await getEvoSettings();
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'Evolution API não configurada' });
+    try {
+      const data = await evoFetch(s, 'GET', '/instance/fetchInstances');
+      return Array.isArray(data) ? data : [];
+    } catch (e) {
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  // Get QR code
+  fastify.get('/evolution/instance/qr/:instanceName', auth, async (req, reply) => {
+    const s = await getEvoSettings();
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'Evolution API não configurada' });
+    try {
+      const data = await evoFetch(s, 'GET', `/instance/connect/${req.params.instanceName}`);
+      return data;
+    } catch (e) {
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  // Get instance status
+  fastify.get('/evolution/instance/status/:instanceName', auth, async (req, reply) => {
+    const s = await getEvoSettings();
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'Evolution API não configurada' });
+    try {
+      const data = await evoFetch(s, 'GET', `/instance/fetchInstances?instanceName=${req.params.instanceName}`);
+      const instance = Array.isArray(data) ? data[0] : data;
+      return instance || {};
+    } catch (e) {
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  // Set webhook
+  fastify.post('/evolution/instance/webhook/:instanceName', auth, async (req, reply) => {
+    const s = await getEvoSettings();
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'Evolution API não configurada' });
+    const webhookUrl = req.body?.webhookUrl || `${process.env.BACKEND_URL || 'https://api.msxzap.pro'}/webhook/evolution`;
+    try {
+      const data = await evoFetch(s, 'POST', `/webhook/set/${req.params.instanceName}`, {
+        url: webhookUrl,
+        webhook_by_events: false,
+        webhook_base64: true,
+        events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE', 'QRCODE_UPDATED'],
+      });
+      return data;
+    } catch (e) {
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  // Delete instance
+  fastify.delete('/evolution/instance/:instanceName', auth, async (req, reply) => {
+    const s = await getEvoSettings();
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'Evolution API não configurada' });
+    try {
+      const data = await evoFetch(s, 'DELETE', `/instance/delete/${req.params.instanceName}`);
+      return data;
+    } catch (e) {
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  // Legacy proxy (kept for backward compat)
   fastify.post('/evolution-proxy', auth, async (req, reply) => {
     const { action, instanceName, data: body } = req.body || {};
-    const { rows: settings } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
-    const s = settings[0];
+    const s = await getEvoSettings();
     if (!s?.evolution_url) return { data: null, error: { message: 'Evolution API não configurada' } };
     try {
       const url = `${s.evolution_url}/${action || 'message/sendText'}/${instanceName}`;

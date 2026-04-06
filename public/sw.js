@@ -1,4 +1,4 @@
-const CACHE_NAME = 'msx-crm-v6'
+const CACHE_NAME = 'msx-crm-v7'
 
 self.addEventListener('install', e => {
   self.skipWaiting()

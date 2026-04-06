@@ -136,6 +136,17 @@ export default async function messageRoutes(fastify) {
 
   // Webhook receiver from Evolution API
   fastify.post('/webhook/evolution', async (req, reply) => {
+    // Validate apikey header matches configured Evolution key
+    const incomingKey = req.headers['apikey'] || req.headers['x-api-key'];
+    if (incomingKey) {
+      try {
+        const { rows } = await query('SELECT evolution_key FROM settings WHERE id=1');
+        const configuredKey = rows[0]?.evolution_key;
+        if (configuredKey && incomingKey !== configuredKey) {
+          return reply.status(401).send({ error: 'Unauthorized' });
+        }
+      } catch { /* if DB fails, allow through */ }
+    }
     const payload = req.body;
     try {
       await handleEvolutionWebhook(payload, fastify);

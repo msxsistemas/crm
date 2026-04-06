@@ -104,7 +104,7 @@ const CustomReports = lazy(() => import("./pages/CustomReports"));
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      retry: 2,
       staleTime: 60_000,       // 1 min before considering data stale
       gcTime: 5 * 60_000,      // 5 min cache retention
       refetchOnWindowFocus: false,

@@ -167,6 +167,7 @@ const Connections = () => {
   const [newQr, setNewQr] = useState<string | null>(null);
   const [newQrLoading, setNewQrLoading] = useState(false);
   const newQrIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const qrAutoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Status check state
   const [checkingInstance, setCheckingInstance] = useState<string | null>(null);
@@ -315,9 +316,14 @@ const Connections = () => {
     const name = newName.trim();
     try {
       await api.post('/evolution-connections', { instance_name: name });
-      try { await createInstance(name); } catch {}
+      let initialQr: string | null = null;
+      try {
+        const created = await createInstance(name) as any;
+        initialQr = created?.qrcode?.base64 || created?.base64 || null;
+      } catch {}
       try { await setupWebhook(name); } catch {}
       setNewStep('qr');
+      if (initialQr) setNewQr(initialQr);
       startNewQrPolling(name);
     } catch (err: any) {
       toast.error(err.message || "Erro ao criar instância");
@@ -432,43 +438,59 @@ const Connections = () => {
     setCheckingInstance(null);
   };
 
+  const stopQrAutoRefresh = () => {
+    if (qrAutoRefreshRef.current) {
+      clearInterval(qrAutoRefreshRef.current);
+      qrAutoRefreshRef.current = null;
+    }
+  };
+
   const handleShowEvolutionQR = async (instanceName: string) => {
-    setQrProvider("evolution");
+    stopQrAutoRefresh();
     setQrInstance(instanceName);
-    setQrZapiConn(null);
     setQrOpen(true);
     setQrLoading(true);
     setQrData(null);
 
-    try {
-      const result = await getQRCode(instanceName);
-
-      if (result?.notFound || result?.exists === false) {
-        const { data: { user } } = await db.auth.getUser();
-        if (user) {
-          await db
-            .from("evolution_connections" as any)
-            .delete()
-            .eq("user_id", user.id)
-            .eq("instance_name", instanceName);
+    const fetchQrAndStatus = async () => {
+      try {
+        // Check if already connected
+        const status = await getInstanceStatus(instanceName) as any;
+        const state = status?.instance?.state || status?.state || status?.connectionStatus;
+        if (state === 'open' || state === 'connected') {
+          stopQrAutoRefresh();
+          setQrOpen(false);
+          fetchInstances();
+          toast.success(`${instanceName} conectado com sucesso!`);
+          return;
         }
-        setInstances((prev) => prev.filter((item) => item.instanceName !== instanceName));
-        setQrOpen(false);
-        toast.error(`Instância ${instanceName} não existe mais e foi removida da lista`);
-        return;
+
+        const result = await getQRCode(instanceName) as any;
+        if (result?.notFound || result?.exists === false) {
+          stopQrAutoRefresh();
+          setInstances((prev) => prev.filter((item) => item.instanceName !== instanceName));
+          setQrOpen(false);
+          toast.error(`Instância ${instanceName} não existe mais`);
+          return;
+        }
+        const qr = result?.qrcode?.base64 || result?.base64 || result?.code || null;
+        if (qr) setQrData(qr);
+      } catch {
+        // silently ignore errors during polling
+      } finally {
+        setQrLoading(false);
       }
+    };
 
-      setQrData(result?.qrcode?.base64 || result?.base64 || result?.code || null);
-    } catch {
-      toast.error("Erro ao gerar QR Code");
-    } finally {
-      setQrLoading(false);
-    }
+    await fetchQrAndStatus();
+    // Auto-refresh QR every 20s and check status
+    qrAutoRefreshRef.current = setInterval(fetchQrAndStatus, 20000);
   };
 
-  const refreshQR = () => {
-    handleShowEvolutionQR(qrInstance);
-  };
+  // Stop polling when modal closes
+  useEffect(() => {
+    if (!qrOpen) stopQrAutoRefresh();
+  }, [qrOpen]);
 
   const connectedCount = instances.filter((i) => i.status === "open" || i.status === "connected").length
     + metaConnections.filter((m) => m.status === "active").length;
@@ -944,7 +966,7 @@ const Connections = () => {
               </p>
               <div className="relative w-56 h-56 flex items-center justify-center bg-white rounded-xl border border-border shadow-sm">
                 {newQr ? (
-                  <img src={newQr} alt="QR Code" className="w-52 h-52 object-contain rounded-lg" />
+                  <img src={newQr!.startsWith("data:") ? newQr! : `data:image/png;base64,${newQr}`} alt="QR Code" className="w-52 h-52 object-contain rounded-lg" />
                 ) : (
                   <Loader2 className="h-10 w-10 animate-spin text-muted-foreground" />
                 )}
@@ -1049,9 +1071,9 @@ const Connections = () => {
                 </div>
               )}
             </div>
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={refreshQR}>
-              <RefreshCw className="h-3.5 w-3.5" /> Atualizar QR Code
-            </Button>
+            <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+              <RefreshCw className="h-3 w-3" /> QR atualiza automaticamente a cada 20s
+            </p>
           </div>
         </DialogContent>
       </Dialog>
