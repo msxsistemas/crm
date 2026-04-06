@@ -901,4 +901,186 @@ export default async function misc3Routes(fastify) {
     );
     return { ok: true };
   });
+
+  // ── Flow Builder (chatbot_flows) ─────────────────────────────────────────────
+  fastify.get('/flow-builder/flows', auth, async () => {
+    const { rows } = await query('SELECT * FROM chatbot_flows ORDER BY created_at DESC');
+    return rows;
+  });
+
+  fastify.post('/flow-builder/flows', auth, async (req, reply) => {
+    const { name, nodes, edges } = req.body;
+    const { rows } = await query(
+      'INSERT INTO chatbot_flows (name, nodes, edges) VALUES ($1,$2,$3) RETURNING *',
+      [name || 'Novo Fluxo', JSON.stringify(nodes || []), JSON.stringify(edges || [])]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.get('/flow-builder/flows/:id', auth, async (req, reply) => {
+    const { rows } = await query('SELECT * FROM chatbot_flows WHERE id=$1', [req.params.id]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Fluxo não encontrado' });
+    return rows[0];
+  });
+
+  fastify.patch('/flow-builder/flows/:id', auth, async (req) => {
+    const { name, nodes, edges, is_active } = req.body;
+    const sets = []; const vals = []; let p = 1;
+    if (name !== undefined) { sets.push(`name=$${p}`); vals.push(name); p++; }
+    if (nodes !== undefined) { sets.push(`nodes=$${p}`); vals.push(JSON.stringify(nodes)); p++; }
+    if (edges !== undefined) { sets.push(`edges=$${p}`); vals.push(JSON.stringify(edges)); p++; }
+    if (is_active !== undefined) {
+      // Deactivate all others first if activating
+      if (is_active) await query('UPDATE chatbot_flows SET is_active=false').catch(() => {});
+      sets.push(`is_active=$${p}`); vals.push(is_active); p++;
+    }
+    if (!sets.length) return {};
+    vals.push(req.params.id);
+    const { rows } = await query(`UPDATE chatbot_flows SET ${sets.join(',')} WHERE id=$${p} RETURNING *`, vals);
+    return rows[0] || {};
+  });
+
+  fastify.delete('/flow-builder/flows/:id', auth, async (req) => {
+    await query('DELETE FROM chatbot_flows WHERE id=$1', [req.params.id]);
+    return { ok: true };
+  });
+
+  // ── Global Search ─────────────────────────────────────────────────────────────
+  fastify.get('/search/global', auth, async (req) => {
+    const q = `%${req.query.q || ''}%`;
+    const [contacts, conversations, messages] = await Promise.all([
+      query('SELECT id, name, phone, email FROM contacts WHERE name ILIKE $1 OR phone ILIKE $1 OR email ILIKE $1 LIMIT 5', [q]),
+      query('SELECT c.id, ct.name as contact_name, c.status, c.created_at FROM conversations c JOIN contacts ct ON ct.id=c.contact_id WHERE ct.name ILIKE $1 LIMIT 5', [q]),
+      query('SELECT m.id, m.content, m.conversation_id, ct.name as contact_name FROM messages m JOIN conversations c ON c.id=m.conversation_id JOIN contacts ct ON ct.id=c.contact_id WHERE m.content ILIKE $1 LIMIT 5', [q]),
+    ]);
+    return { contacts: contacts.rows, conversations: conversations.rows, messages: messages.rows };
+  });
+
+  // ── Quick Replies Preview (template variables) ────────────────────────────────
+  fastify.post('/quick-replies/preview', auth, async (req) => {
+    const { text, contact_id, conversation_id } = req.body;
+    let rendered = text || '';
+    if (contact_id) {
+      const { rows } = await query('SELECT name, phone, email FROM contacts WHERE id=$1', [contact_id]);
+      if (rows[0]) {
+        rendered = rendered.replace(/\{\{nome\}\}/gi, rows[0].name || '');
+        rendered = rendered.replace(/\{\{telefone\}\}/gi, rows[0].phone || '');
+        rendered = rendered.replace(/\{\{email\}\}/gi, rows[0].email || '');
+      }
+    }
+    if (conversation_id) {
+      const { rows } = await query('SELECT id FROM conversations WHERE id=$1', [conversation_id]);
+      if (rows[0]) {
+        rendered = rendered.replace(/\{\{protocolo\}\}/gi, rows[0].id.split('-')[0].toUpperCase());
+      }
+    }
+    rendered = rendered.replace(/\{\{data\}\}/gi, new Date().toLocaleDateString('pt-BR'));
+    rendered = rendered.replace(/\{\{hora\}\}/gi, new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
+    return { rendered };
+  });
+
+  // ── Interactive WhatsApp Messages (Buttons & Lists) ────────────────────────
+  fastify.post('/conversations/:id/send-interactive', auth, async (req, reply) => {
+    const { type, body_text, buttons, sections, header_text, footer_text } = req.body;
+    const { rows } = await query(
+      'SELECT c.name as connection_name, ct.phone FROM conversations cv JOIN contacts ct ON ct.id=cv.contact_id JOIN connections c ON c.name=cv.connection_name WHERE cv.id=$1',
+      [req.params.id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Conversa não encontrada' });
+    const { connection_name, phone } = rows[0];
+
+    let payload;
+    if (type === 'button') {
+      payload = {
+        number: phone,
+        buttonMessage: {
+          text: body_text,
+          buttons: (buttons || []).map((b, i) => ({ buttonId: `btn${i}`, buttonText: { displayText: b }, type: 1 })),
+          headerType: 1
+        }
+      };
+      await fetch(`${process.env.EVOLUTION_API_URL}/message/sendButtons/${connection_name}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+        body: JSON.stringify(payload)
+      });
+    } else if (type === 'list') {
+      payload = {
+        number: phone,
+        listMessage: {
+          title: header_text || '',
+          description: body_text,
+          buttonText: 'Ver opções',
+          footerText: footer_text || '',
+          sections: sections || []
+        }
+      };
+      await fetch(`${process.env.EVOLUTION_API_URL}/message/sendList/${connection_name}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+        body: JSON.stringify(payload)
+      });
+    }
+
+    await query(
+      "INSERT INTO messages (conversation_id, content, sender_type, metadata, created_at) VALUES ($1,$2,'agent',$3,NOW())",
+      [req.params.id, body_text, JSON.stringify({ interactive: true, type, buttons, sections })]
+    );
+
+    return { success: true };
+  });
+
+  // ── Appointments ──────────────────────────────────────────────────────────────
+  fastify.get('/appointments', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { contact_id, agent_id } = req.query;
+    let q = 'SELECT a.*, ct.name as contact_name, ct.phone as contact_phone, p.full_name as agent_name FROM appointments a LEFT JOIN contacts ct ON ct.id=a.contact_id LEFT JOIN profiles p ON p.id=a.created_by WHERE 1=1';
+    const params = [];
+    if (contact_id) { params.push(contact_id); q += ` AND a.contact_id=$${params.length}`; }
+    if (agent_id) { params.push(agent_id); q += ` AND a.created_by=$${params.length}`; }
+    q += ' ORDER BY a.scheduled_at ASC';
+    const { rows } = await query(q, params);
+    return rows;
+  });
+
+  fastify.post('/appointments', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { contact_id, title, description, scheduled_at, notify_via_whatsapp } = req.body;
+    if (!title) return reply.status(400).send({ error: 'title é obrigatório' });
+    if (!scheduled_at) return reply.status(400).send({ error: 'scheduled_at é obrigatório' });
+    const { rows } = await query(
+      'INSERT INTO appointments (contact_id, title, description, scheduled_at, notify_via_whatsapp, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [contact_id || null, title, description || null, scheduled_at, notify_via_whatsapp || false, req.user.id]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.patch('/appointments/:id', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { title, description, scheduled_at, notify_via_whatsapp, notified } = req.body;
+    const sets = []; const vals = []; let p = 1;
+    if (title !== undefined) { sets.push(`title=$${p}`); vals.push(title); p++; }
+    if (description !== undefined) { sets.push(`description=$${p}`); vals.push(description); p++; }
+    if (scheduled_at !== undefined) { sets.push(`scheduled_at=$${p}`); vals.push(scheduled_at); p++; }
+    if (notify_via_whatsapp !== undefined) { sets.push(`notify_via_whatsapp=$${p}`); vals.push(notify_via_whatsapp); p++; }
+    if (notified !== undefined) { sets.push(`notified=$${p}`); vals.push(notified); p++; }
+    if (!sets.length) return reply.status(400).send({ error: 'Nada para atualizar' });
+    vals.push(req.params.id);
+    const { rows } = await query(`UPDATE appointments SET ${sets.join(',')} WHERE id=$${p} RETURNING *`, vals);
+    return rows[0] || {};
+  });
+
+  fastify.delete('/appointments/:id', { onRequest: [fastify.authenticate] }, async (req) => {
+    await query('DELETE FROM appointments WHERE id=$1', [req.params.id]);
+    return { ok: true };
+  });
+
+  // ── Audit Log ─────────────────────────────────────────────────────────────────
+  fastify.get('/admin/audit-log', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    if (!['admin', 'supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
+    const { rows } = await query(
+      'SELECT al.*, p.full_name as actor_name FROM audit_log al LEFT JOIN profiles p ON p.id=al.actor_id ORDER BY al.created_at DESC LIMIT $1 OFFSET $2',
+      [limit, offset]
+    );
+    return rows;
+  });
 }

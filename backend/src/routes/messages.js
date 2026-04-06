@@ -550,6 +550,38 @@ async function handleEvolutionWebhook(payload, fastify) {
       }
     }
 
+    // ── Flow builder execution ────────────────────────────────────────────
+    try {
+      const { rows: activeFlows } = await pool.query("SELECT * FROM chatbot_flows WHERE is_active=true LIMIT 1");
+      if (activeFlows[0]) {
+        const flow = activeFlows[0];
+        const nodes = flow.nodes || [];
+        const triggerNode = nodes.find(n => n.type === 'trigger');
+        if (triggerNode) {
+          const edges = flow.edges || [];
+          let currentNodeId = triggerNode.id;
+          for (let i = 0; i < 10; i++) {
+            const edge = edges.find(e => e.source === currentNodeId);
+            if (!edge) break;
+            const nextNode = nodes.find(n => n.id === edge.target);
+            if (!nextNode) break;
+            if (nextNode.type === 'send_message' && nextNode.data && nextNode.data.text) {
+              await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${instance}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+                body: JSON.stringify({ number: phone, text: nextNode.data.text })
+              });
+              await pool.query("INSERT INTO messages (conversation_id, content, sender_type, created_at) VALUES ($1,$2,'bot',NOW())", [conv.id, nextNode.data.text]);
+            } else if (nextNode.type === 'condition' && nextNode.data && nextNode.data.keyword) {
+              const msgLowerFlow = (content || '').toLowerCase();
+              if (!msgLowerFlow.includes(nextNode.data.keyword.toLowerCase())) break;
+            }
+            currentNodeId = nextNode.id;
+          }
+        }
+      }
+    } catch(e) { /* flow error — silent */ }
+
     // ── FAQ Bot check — auto-reply if keyword matches ─────────────────────
     try {
       const msgLower = (content || '').toLowerCase().trim();

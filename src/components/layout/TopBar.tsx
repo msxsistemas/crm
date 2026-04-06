@@ -25,6 +25,7 @@ import {
   Info,
   Loader2,
   HelpCircle,
+  Search,
 } from "lucide-react";
 import { useFollowupReminders } from "@/hooks/useFollowupReminders";
 import { FollowupPanel } from "@/components/followup/FollowupPanel";
@@ -75,9 +76,10 @@ const notifTypeIcon = (type: string) => {
 
 interface TopBarProps {
   onStartTour?: () => void;
+  onOpenSearch?: () => void;
 }
 
-const TopBar = ({ onStartTour }: TopBarProps) => {
+const TopBar = ({ onStartTour, onOpenSearch }: TopBarProps) => {
   const { user } = useAuth();
   const { platformName } = usePlatformName();
   const navigate = useNavigate();
@@ -412,6 +414,19 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
             </div>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <div className="w-px h-5 bg-white/20" />
+
+        {/* Global Search */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button onClick={onOpenSearch} className="hover:text-white/80 transition-colors p-1 flex items-center gap-1.5 bg-white/10 rounded-md px-2.5 py-1">
+              <Search className="h-[15px] w-[15px]" />
+              <span className="text-[11px] hidden sm:inline">Ctrl+K</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Pesquisa Global (Ctrl+K)</TooltipContent>
+        </Tooltip>
 
         <div className="w-px h-5 bg-white/20" />
 

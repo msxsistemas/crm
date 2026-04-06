@@ -11,7 +11,7 @@ import {
   Shuffle, CheckCircle, X, Image, FileText, Mic, Folder, ChevronDown, Smartphone, Star,
   Trash2, Copy, Forward, Reply, Pencil, Check, AlertCircle, Bot, Clock, Target, Sparkles,
   LayoutTemplate, Tag, History, Ban, LayoutList, List, GitMerge, ShoppingBag, Download,
-  CheckSquare, Users, Languages,
+  CheckSquare, Users, Languages, UserCheck, Archive, LayoutGrid, AlignJustify,
 } from "lucide-react";
 import { useFollowupReminders } from "@/hooks/useFollowupReminders";
 import FollowupDialog from "@/components/followup/FollowupDialog";
@@ -420,8 +420,15 @@ const Inbox = () => {
   // Focus Mode state
   const [focusMode, setFocusMode] = useState(() => localStorage.getItem("inbox_focus_mode") === "true");
 
-  // Compact Mode state
-  const [compactMode, setCompactMode] = useState(() => localStorage.getItem("inbox_compact_mode") === "true");
+  // View Mode state: list | compact | kanban
+  const [viewMode, setViewMode] = useState<'list' | 'compact' | 'kanban'>(() => {
+    const stored = localStorage.getItem("inbox_view_mode");
+    if (stored === 'compact' || stored === 'kanban') return stored;
+    // Backward compat: legacy compact_mode flag
+    if (localStorage.getItem("inbox_compact_mode") === "true") return 'compact';
+    return 'list';
+  });
+  const compactMode = viewMode === 'compact';
 
   // AI Suggested Replies state
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
@@ -456,6 +463,16 @@ const Inbox = () => {
   const [selectedGroup, setSelectedGroup] = useState<any>(null);
   const [groupsLoading, setGroupsLoading] = useState(false);
   const [groupSending, setGroupSending] = useState(false);
+
+  // Interactive message modal state
+  const [interactiveOpen, setInteractiveOpen] = useState(false);
+  const [interactiveType, setInteractiveType] = useState<'button' | 'list'>('button');
+  const [interactiveBody, setInteractiveBody] = useState('');
+  const [interactiveButtons, setInteractiveButtons] = useState<string[]>(['', '']);
+  const [interactiveHeaderText, setInteractiveHeaderText] = useState('');
+  const [interactiveFooterText, setInteractiveFooterText] = useState('');
+  const [interactiveSections, setInteractiveSections] = useState<{ title: string; rows: { id: string; title: string }[] }[]>([{ title: '', rows: [{ id: '1', title: '' }] }]);
+  const [interactiveSending, setInteractiveSending] = useState(false);
 
   // Sentiment override dropdown
   const [sentimentDropdownOpen, setSentimentDropdownOpen] = useState(false);
@@ -1377,6 +1394,33 @@ const Inbox = () => {
     }
   };
 
+  const handleSendInteractive = async () => {
+    if (!selected || !interactiveBody.trim()) return;
+    setInteractiveSending(true);
+    try {
+      await api.post(`/conversations/${selected}/send-interactive`, {
+        type: interactiveType,
+        body_text: interactiveBody,
+        buttons: interactiveType === 'button' ? interactiveButtons.filter(b => b.trim()) : undefined,
+        header_text: interactiveHeaderText || undefined,
+        footer_text: interactiveFooterText || undefined,
+        sections: interactiveType === 'list' ? interactiveSections : undefined,
+      });
+      toast.success("Mensagem interativa enviada!");
+      setInteractiveOpen(false);
+      setInteractiveBody('');
+      setInteractiveButtons(['', '']);
+      setInteractiveHeaderText('');
+      setInteractiveFooterText('');
+      setInteractiveSections([{ title: '', rows: [{ id: '1', title: '' }] }]);
+      loadMessages(selected);
+    } catch {
+      toast.error("Erro ao enviar mensagem interativa");
+    } finally {
+      setInteractiveSending(false);
+    }
+  };
+
   const handleSendHSM = async () => {
     if (!hsmSelected || !selected) return;
     const convo = conversations.find((c) => c.id === selected);
@@ -1764,6 +1808,30 @@ const Inbox = () => {
     }
   };
 
+  const handleInlineAssignToMe = async (id: string) => {
+    if (!user) return;
+    try {
+      const { api } = await import("@/lib/api");
+      await api.patch(`/conversations/${id}`, { assigned_to: user.id });
+      toast.success("Conversa atribuída a você");
+      loadConversations();
+    } catch {
+      toast.error("Erro ao atribuir conversa");
+    }
+  };
+
+  const handleInlineClose = async (id: string) => {
+    try {
+      const { api } = await import("@/lib/api");
+      await api.patch(`/conversations/${id}`, { status: 'closed' });
+      if (selected === id) setSelected(null);
+      toast.success("Conversa encerrada");
+      loadConversations();
+    } catch {
+      toast.error("Erro ao encerrar conversa");
+    }
+  };
+
   const handleBulkArchiveSelected = async () => {
     const ids = Array.from(bulkSelected);
     if (ids.length === 0) return;
@@ -2127,14 +2195,28 @@ const Inbox = () => {
     return filtered.slice(0, 8);
   }, [slashQuery, quickRepliesForSlash]);
 
-  const handleSlashSelect = (reply: { shortcut: string; message: string }) => {
+  const handleSlashSelect = async (reply: { shortcut: string; message: string }) => {
     const lastSlashIdx = messageInput.lastIndexOf("/");
-    const contactName = selectedConvo?.contacts?.name ?? null;
-    const contactPhone = selectedConvo?.contacts?.phone ?? "";
-    const substituted = substituteQuickReplyVars(reply.message, contactName, contactPhone);
-    const newText = messageInput.slice(0, lastSlashIdx) + substituted;
-    setMessageInput(newText);
     setSlashQuery(null);
+    // Try server-side variable rendering
+    try {
+      const convo = conversations.find((c) => c.id === selected);
+      const contactId = (convo as any)?.contact_id || convo?.contacts?.id;
+      const result = await api.post<{ rendered: string }>("/quick-replies/preview", {
+        text: reply.message,
+        contact_id: contactId || null,
+        conversation_id: selected || null,
+      });
+      const rendered = result?.rendered ?? reply.message;
+      setMessageInput(messageInput.slice(0, lastSlashIdx) + rendered);
+    } catch {
+      // Fallback to client-side substitution
+      const convo = conversations.find((c) => c.id === selected);
+      const contactName = convo?.contacts?.name ?? null;
+      const contactPhone = convo?.contacts?.phone ?? "";
+      const substituted = substituteQuickReplyVars(reply.message, contactName, contactPhone);
+      setMessageInput(messageInput.slice(0, lastSlashIdx) + substituted);
+    }
   };
 
   // Filter conversations
@@ -2519,11 +2601,29 @@ const Inbox = () => {
             <Button
               size="icon"
               variant="ghost"
-              className={cn("h-8 w-8", compactMode ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground")}
-              onClick={() => setCompactMode((v) => { localStorage.setItem("inbox_compact_mode", String(!v)); return !v; })}
-              title={compactMode ? "Modo normal" : "Modo compacto"}
+              className={cn("h-8 w-8", viewMode === 'list' ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground")}
+              onClick={() => { setViewMode('list'); localStorage.setItem("inbox_view_mode", "list"); }}
+              title="Modo lista"
             >
-              {compactMode ? <List className="h-4 w-4" /> : <LayoutList className="h-4 w-4" />}
+              <AlignJustify className="h-4 w-4" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className={cn("h-8 w-8", viewMode === 'compact' ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground")}
+              onClick={() => { setViewMode('compact'); localStorage.setItem("inbox_view_mode", "compact"); }}
+              title="Modo compacto"
+            >
+              <List className="h-4 w-4" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className={cn("h-8 w-8", viewMode === 'kanban' ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground")}
+              onClick={() => { setViewMode('kanban'); localStorage.setItem("inbox_view_mode", "kanban"); }}
+              title="Modo kanban"
+            >
+              <LayoutGrid className="h-4 w-4" />
             </Button>
             <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => setShowShortcutsModal(true)} title="Atalhos de teclado (Ctrl+/)">
               <span className="text-xs font-bold">?</span>
@@ -2862,7 +2962,7 @@ const Inbox = () => {
                   key={convo.id}
                   onClick={() => { if (activeTab === "aguardando") return; handleSelectConvo(convo.id); }}
                   className={cn(
-                    "relative flex w-full items-start gap-3 px-4 py-3 text-left transition-all duration-200 border-b border-border/30 cursor-pointer active:scale-[0.98] active:opacity-80",
+                    "group relative flex w-full items-start gap-3 px-4 py-3 text-left transition-all duration-200 border-b border-border/30 cursor-pointer active:scale-[0.98] active:opacity-80",
                     selected === convo.id
                       ? "bg-accent conversation-selected"
                       : "hover:bg-muted/50"
@@ -3025,6 +3125,34 @@ const Inbox = () => {
                       </button>
                     )}
                   </div>
+                  {/* Inline hover actions */}
+                  {activeTab !== "aguardando" && (
+                    <div className="absolute right-2 bottom-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-background/90 backdrop-blur-sm rounded-lg border border-border shadow-sm px-1 py-0.5 z-10">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleInlineAssignToMe(convo.id); }}
+                        title="Atribuir a mim"
+                        className="flex items-center justify-center w-6 h-6 rounded text-muted-foreground hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors"
+                      >
+                        <UserCheck className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleInlineClose(convo.id); }}
+                        title="Fechar conversa"
+                        className="flex items-center justify-center w-6 h-6 rounded text-muted-foreground hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-950/40 transition-colors"
+                      >
+                        <CheckCircle className="h-3.5 w-3.5" />
+                      </button>
+                      {convo.status !== "archived" && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleArchiveConversation(convo.id); }}
+                          title="Arquivar conversa"
+                          className="flex items-center justify-center w-6 h-6 rounded text-muted-foreground hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-950/40 transition-colors"
+                        >
+                          <Archive className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -4062,7 +4190,14 @@ const Inbox = () => {
                             onMouseDown={(e) => { e.preventDefault(); handleSlashSelect(reply); }}
                           >
                             <span className="text-primary font-semibold text-xs shrink-0 mt-0.5">/{reply.shortcut}</span>
-                            <span className="text-xs text-muted-foreground truncate">{reply.message.slice(0, 60)}</span>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs text-muted-foreground truncate block">{reply.message.slice(0, 60)}</span>
+                              {reply.message.includes("{{") && (
+                                <span className="text-[10px] text-blue-500 mt-0.5 block">
+                                  Vars: {"{{"+"nome}}"} {"{{"+"telefone}}"} {"{{"+"protocolo}}"} {"{{"+"data}}"} {"{{"+"hora}}"}
+                                </span>
+                              )}
+                            </div>
                           </button>
                         ))}
                       </div>
@@ -4139,6 +4274,17 @@ const Inbox = () => {
                       }}
                       disabled={uploading}
                     />
+                    {/* Interactive message button */}
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="shrink-0 h-9 w-9 text-muted-foreground hover:text-indigo-500 hover:bg-transparent"
+                      onClick={() => setInteractiveOpen(true)}
+                      disabled={uploading}
+                      title="Mensagem Interativa (Botões/Lista)"
+                    >
+                      <LayoutList className="h-5 w-5" />
+                    </Button>
                     {/* HSM Templates button – shown when convo is >24h or always for convenience */}
                     {(() => {
                       const lastMsg = selectedConvo?.last_message_at;

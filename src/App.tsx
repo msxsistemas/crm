@@ -77,6 +77,7 @@ const Reviews = lazy(() => import("./pages/Reviews"));
 const QueuesChatbot = lazy(() => import("./pages/QueuesChatbot"));
 const ActivityLog = lazy(() => import("./pages/ActivityLog"));
 const FlowBuilder = lazy(() => import("./pages/FlowBuilder"));
+const FlowBuilderVisual = lazy(() => import("./pages/FlowBuilderVisual"));
 const FileManager = lazy(() => import("./pages/FileManager"));
 const Reports = lazy(() => import("./pages/Reports"));
 const WebhookLogs = lazy(() => import("./pages/WebhookLogs"));
@@ -106,6 +107,8 @@ const CustomReports = lazy(() => import("./pages/CustomReports"));
 const KanbanConversas = lazy(() => import("./pages/Kanban"));
 const ContactProfile = lazy(() => import("./pages/ContactProfile"));
 const TagsAnalytics = lazy(() => import("./pages/TagsAnalytics"));
+const CampaignsDashboard = lazy(() => import("./pages/CampaignsDashboard"));
+const AppointmentsPage = lazy(() => import("./pages/Appointments"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -159,6 +162,7 @@ const App = () => (
                     <Route path="/kanban/filas" element={<KanbanQueues />} />
                     <Route path="/contatos" element={<Contacts />} />
                     <Route path="/tarefas" element={<Tasks />} />
+                    <Route path="/compromissos" element={<AppointmentsPage />} />
                     <Route path="/agendamentos" element={<Schedules />} />
                     <Route path="/conexoes" element={<Connections />} />
                     <Route path="/campanhas" element={<Campaigns />} />
@@ -180,6 +184,7 @@ const App = () => (
                     <Route path="/filas-chatbot" element={<QueuesChatbot />} />
                     <Route path="/registro-atividades" element={<ActivityLog />} />
                     <Route path="/flowbuilder" element={<FlowBuilder />} />
+                    <Route path="/flow-builder" element={<FlowBuilderVisual />} />
                     <Route path="/gerenciador-arquivos" element={<FileManager />} />
                     <Route path="/relatorios" element={<Reports />} />
                     <Route path="/logs-webhook" element={<WebhookLogs />} />
@@ -206,6 +211,7 @@ const App = () => (
                     <Route path="/bots" element={<Bots />} />
                     <Route path="/contatos/:id/profile" element={<ContactProfile />} />
                     <Route path="/tags-analytics" element={<TagsAnalytics />} />
+                    <Route path="/campaigns-dashboard" element={<CampaignsDashboard />} />
                     <Route path="/capture-forms" element={<CaptureFormBuilder />} />
                     <Route path="/agent-report" element={<AgentReport />} />
                   </Route>

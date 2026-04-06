@@ -110,6 +110,7 @@ const userNavSections: NavSection[] = [
       { to: "/grupos-contatos", icon: UsersRound, label: "Grupos de Contatos" },
       { to: "/tarefas", icon: ListTodo, label: "Tarefas" },
       { to: "/agendamentos", icon: CalendarDays, label: "Agendamentos" },
+      { to: "/compromissos", icon: CalendarDays, label: "Agenda" },
     ],
   },
   {
@@ -170,6 +171,7 @@ const userNavSections: NavSection[] = [
   {
     title: "AUTOMAÇÃO",
     items: [
+      { to: "/flow-builder", icon: GitBranch, label: "Flow Builder Visual" },
       { to: "/flowbuilder", icon: Workflow, label: "FlowBuilder Nativo" },
       { to: "/flow-templates", icon: LayoutTemplate, label: "Templates de Atendimento" },
       { to: "/agente-ia", icon: Brain, label: "Agente IA" },
@@ -184,6 +186,7 @@ const userNavSections: NavSection[] = [
       { to: "/relatorios-customizados", icon: PieChart, label: "Builder de Relatórios" },
       { to: "/tags-analytics", icon: Tag, label: "Analytics de Tags" },
       { to: "/agent-report", icon: FileText, label: "Relatório Agente" },
+      { to: "/campaigns-dashboard", icon: BarChart3, label: "Métricas de Campanha" },
     ],
   },
   {

@@ -1,5 +1,5 @@
 import { Outlet } from "react-router-dom";
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import AppSidebar from "./AppSidebar";
 import TopBar from "./TopBar";
@@ -8,6 +8,7 @@ import { usePresence } from "@/hooks/usePresence";
 import { useOnboardingTour } from "@/hooks/useOnboardingTour";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import OnboardingTour from "@/components/onboarding/OnboardingTour";
+import GlobalSearch from "@/components/GlobalSearch";
 
 const AppLayout = () => {
   const { user } = useAuth();
@@ -16,6 +17,18 @@ const AppLayout = () => {
   const { tourActive, currentStep, totalSteps, startTour, endTour, nextStep, prevStep } =
     useOnboardingTour();
   useGlobalKeyboardShortcuts();
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen((prev) => !prev);
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
 
   // Set offline on tab/window close
   useEffect(() => {
@@ -42,7 +55,7 @@ const AppLayout = () => {
     <div className="flex h-screen overflow-hidden">
       <AppSidebar onStartTour={startTour} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <TopBar onStartTour={startTour} />
+        <TopBar onStartTour={startTour} onOpenSearch={() => setSearchOpen(true)} />
         <main className="flex-1 overflow-hidden flex flex-col">
           <Suspense fallback={
             <div className="flex h-full items-center justify-center">
@@ -61,6 +74,7 @@ const AppLayout = () => {
         onPrev={prevStep}
         onEnd={endTour}
       />
+      <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
     </div>
   );
 };
