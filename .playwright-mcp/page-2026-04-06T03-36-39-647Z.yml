@@ -1,0 +1,817 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - region "Notifications (F8)":
+      - list
+    - region "Notifications alt+T"
+    - generic [ref=e43]:
+      - complementary [ref=e44]:
+        - generic [ref=e45]:
+          - generic [ref=e46]:
+            - img [ref=e48]
+            - generic [ref=e50]: MSX CRM
+          - button [ref=e51] [cursor=pointer]:
+            - img [ref=e52]
+        - navigation [ref=e54]:
+          - generic [ref=e55]:
+            - paragraph [ref=e56]: PRINCIPAL
+            - generic [ref=e57]:
+              - link "Dashboard" [ref=e58] [cursor=pointer]:
+                - /url: /
+                - img [ref=e59]
+                - generic [ref=e61]: Dashboard
+              - link "Dashboard (legado)" [ref=e62] [cursor=pointer]:
+                - /url: /dashboard-legado
+                - img [ref=e63]
+                - generic [ref=e65]: Dashboard (legado)
+          - generic [ref=e66]:
+            - paragraph [ref=e68]: CHATS
+            - generic [ref=e69]:
+              - link "Chats" [ref=e70] [cursor=pointer]:
+                - /url: /inbox
+                - img [ref=e71]
+                - generic [ref=e73]: Chats
+              - link "Pesquisar" [ref=e74] [cursor=pointer]:
+                - /url: /pesquisar
+                - img [ref=e75]
+                - generic [ref=e78]: Pesquisar
+              - link "Contatos" [ref=e79] [cursor=pointer]:
+                - /url: /contatos
+                - img [ref=e80]
+                - generic [ref=e84]: Contatos
+              - link "Grupos de Contatos" [ref=e85] [cursor=pointer]:
+                - /url: /grupos-contatos
+                - img [ref=e86]
+                - generic [ref=e90]: Grupos de Contatos
+              - link "Tarefas" [ref=e91] [cursor=pointer]:
+                - /url: /tarefas
+                - img [ref=e92]
+                - generic [ref=e95]: Tarefas
+              - link "Agendamentos" [ref=e96] [cursor=pointer]:
+                - /url: /agendamentos
+                - img [ref=e97]
+                - generic [ref=e99]: Agendamentos
+          - generic [ref=e102]:
+            - button "Kanban" [ref=e104] [cursor=pointer]:
+              - img [ref=e105]
+              - generic [ref=e107]: Kanban
+              - img [ref=e108]
+            - button "CRM" [ref=e111] [cursor=pointer]:
+              - img [ref=e112]
+              - generic [ref=e122]: CRM
+              - img [ref=e123]
+          - generic [ref=e125]:
+            - paragraph [ref=e127]: FERRAMENTAS
+            - generic [ref=e128]:
+              - link "Tags" [ref=e129] [cursor=pointer]:
+                - /url: /tags
+                - img [ref=e130]
+                - generic [ref=e133]: Tags
+              - link "Segmentos" [ref=e134] [cursor=pointer]:
+                - /url: /segmentos
+                - img [ref=e135]
+                - generic [ref=e136]: Segmentos
+              - link "Respostas Rápidas" [ref=e137] [cursor=pointer]:
+                - /url: /respostas-rapidas
+                - img [ref=e138]
+                - generic [ref=e140]: Respostas Rápidas
+              - link "Chat Interno" [ref=e141] [cursor=pointer]:
+                - /url: /chat-interno
+                - img [ref=e142]
+                - generic [ref=e145]: Chat Interno
+              - link "Central de Ajuda" [ref=e146] [cursor=pointer]:
+                - /url: /central-ajuda
+                - img [ref=e147]
+                - generic [ref=e150]: Central de Ajuda
+              - link "Deduplicação" [ref=e151] [cursor=pointer]:
+                - /url: /deduplicacao
+                - img [ref=e152]
+                - generic [ref=e156]: Deduplicação
+              - link "Formulários de Captação" [ref=e157] [cursor=pointer]:
+                - /url: /formularios-captacao
+                - img [ref=e158]
+                - generic [ref=e164]: Formulários de Captação
+          - generic [ref=e165]:
+            - paragraph [ref=e167]: ADMINISTRAÇÃO
+            - generic [ref=e168]:
+              - link "Avaliações" [ref=e169] [cursor=pointer]:
+                - /url: /avaliacoes
+                - img [ref=e170]
+                - generic [ref=e172]: Avaliações
+              - link "Conexões" [ref=e173] [cursor=pointer]:
+                - /url: /conexoes
+                - img [ref=e174]
+                - generic [ref=e176]: Conexões
+              - link "Filas & Chatbot" [ref=e177] [cursor=pointer]:
+                - /url: /filas-chatbot
+                - img [ref=e178]
+                - generic [ref=e179]: Filas & Chatbot
+              - link "Categorias" [ref=e180] [cursor=pointer]:
+                - /url: /categorias
+                - img [ref=e181]
+                - generic [ref=e184]: Categorias
+              - link "Equipe" [ref=e185] [cursor=pointer]:
+                - /url: /usuarios
+                - img [ref=e186]
+                - generic [ref=e190]: Equipe
+              - link "Registro de Atividades" [ref=e191] [cursor=pointer]:
+                - /url: /registro-atividades
+                - img [ref=e192]
+                - generic [ref=e195]: Registro de Atividades
+              - link "Central do Supervisor" [ref=e196] [cursor=pointer]:
+                - /url: /supervisor
+                - img [ref=e197]
+                - generic [ref=e200]: Central do Supervisor
+              - link "Configuração de SLA" [ref=e201] [cursor=pointer]:
+                - /url: /sla
+                - img [ref=e202]
+                - generic [ref=e204]: Configuração de SLA
+              - link "Lista Negra (Blacklist)" [ref=e205] [cursor=pointer]:
+                - /url: /blacklist
+                - img [ref=e206]
+                - generic [ref=e209]: Lista Negra (Blacklist)
+              - link "Horários dos Agentes" [ref=e210] [cursor=pointer]:
+                - /url: /horarios-agentes
+                - img [ref=e211]
+                - generic [ref=e214]: Horários dos Agentes
+          - generic [ref=e215]:
+            - paragraph [ref=e217]: AUTOMAÇÃO
+            - generic [ref=e218]:
+              - link "FlowBuilder Nativo" [ref=e219] [cursor=pointer]:
+                - /url: /flowbuilder
+                - img [ref=e220]
+                - generic [ref=e224]: FlowBuilder Nativo
+              - link "Templates de Atendimento" [ref=e225] [cursor=pointer]:
+                - /url: /flow-templates
+                - img [ref=e226]
+                - generic [ref=e230]: Templates de Atendimento
+              - link "Agente IA" [ref=e231] [cursor=pointer]:
+                - /url: /agente-ia
+                - img [ref=e232]
+                - generic [ref=e242]: Agente IA
+              - link "Gerenciador de Arquivos" [ref=e243] [cursor=pointer]:
+                - /url: /gerenciador-arquivos
+                - img [ref=e244]
+                - generic [ref=e246]: Gerenciador de Arquivos
+              - link "Templates HSM" [ref=e247] [cursor=pointer]:
+                - /url: /hsm-templates
+                - img [ref=e248]
+                - generic [ref=e252]: Templates HSM
+              - link "Distribuição Automática" [ref=e253] [cursor=pointer]:
+                - /url: /distribuicao-automatica
+                - img [ref=e254]
+                - generic [ref=e260]: Distribuição Automática
+          - generic [ref=e261]:
+            - paragraph [ref=e263]: RELATÓRIOS
+            - link "Builder de Relatórios" [ref=e265] [cursor=pointer]:
+              - /url: /relatorios-customizados
+              - img [ref=e266]
+              - generic [ref=e269]: Builder de Relatórios
+          - generic [ref=e270]:
+            - paragraph [ref=e272]: WHATSAPP
+            - link "Status do WhatsApp" [ref=e274] [cursor=pointer]:
+              - /url: /status-whatsapp
+              - img [ref=e275]
+              - generic [ref=e281]: Status do WhatsApp
+          - generic [ref=e282]:
+            - paragraph [ref=e284]: SISTEMA
+            - generic [ref=e285]:
+              - link "Relatórios Agendados" [ref=e286] [cursor=pointer]:
+                - /url: /relatorios-agendados
+                - img [ref=e287]
+                - generic [ref=e290]: Relatórios Agendados
+              - link "Configurações" [ref=e291] [cursor=pointer]:
+                - /url: /configuracoes
+                - img [ref=e292]
+                - generic [ref=e295]: Configurações
+              - link "Minha Assinatura" [ref=e296] [cursor=pointer]:
+                - /url: /assinatura
+                - img [ref=e297]
+                - generic [ref=e299]: Minha Assinatura
+        - generic [ref=e301]:
+          - generic [ref=e302]: P
+          - generic [ref=e303]:
+            - paragraph [ref=e304]: planostreaming25
+            - paragraph [ref=e305]: planostreaming25@gmail.com
+          - generic [ref=e306]:
+            - button [ref=e307] [cursor=pointer]:
+              - img [ref=e308]
+            - button [ref=e310] [cursor=pointer]:
+              - img [ref=e311]
+            - button [ref=e314] [cursor=pointer]:
+              - img [ref=e315]
+      - generic [ref=e318]:
+        - generic [ref=e319]:
+          - generic [ref=e320]: Olá MICHAEL COSME SILVA EDVALDO DE OLIVEIRA, Seja bem vindo(a) a plataforma MSX CRM!
+          - generic [ref=e321]:
+            - button [ref=e322] [cursor=pointer]:
+              - img [ref=e323]
+            - button [ref=e331] [cursor=pointer]:
+              - img [ref=e332]
+            - button [ref=e334] [cursor=pointer]:
+              - img [ref=e335]
+            - button [ref=e339] [cursor=pointer]:
+              - img [ref=e340]
+            - button [ref=e345] [cursor=pointer]:
+              - img [ref=e346]
+            - button "🔔" [ref=e348] [cursor=pointer]:
+              - generic [ref=e349]: 🔔
+            - button [ref=e350] [cursor=pointer]:
+              - img [ref=e351]
+            - button [ref=e354] [cursor=pointer]:
+              - img [ref=e355]
+            - button [ref=e358] [cursor=pointer]:
+              - img [ref=e359]
+            - button [ref=e362] [cursor=pointer]:
+              - img [ref=e363]
+            - button [ref=e366] [cursor=pointer]:
+              - img [ref=e367]
+            - button [ref=e371] [cursor=pointer]
+        - main [ref=e373]:
+          - generic [ref=e374]:
+            - generic [ref=e375]:
+              - generic [ref=e376]:
+                - heading "Estatísticas e Informações Ao vivo" [level=1] [ref=e377]:
+                  - img [ref=e378]
+                  - text: Estatísticas e Informações
+                  - generic [ref=e380]: Ao vivo
+                - paragraph [ref=e383]: Análise completa de performance e atendimento
+              - generic [ref=e384]:
+                - button "Personalizar Dashboard" [ref=e385] [cursor=pointer]:
+                  - img
+                  - text: Personalizar Dashboard
+                - button "ATUALIZAR" [ref=e386] [cursor=pointer]:
+                  - img
+                  - text: ATUALIZAR
+            - generic [ref=e387]:
+              - generic [ref=e389]:
+                - button "Filtros Avançados" [ref=e390] [cursor=pointer]:
+                  - heading "Filtros Avançados" [level=3] [ref=e391]:
+                    - img [ref=e392]
+                    - text: Filtros Avançados
+                  - img [ref=e394]
+                - generic [ref=e396]:
+                  - generic [ref=e397]:
+                    - button "Hoje" [ref=e398] [cursor=pointer]:
+                      - img
+                      - text: Hoje
+                    - button "Ontem" [ref=e399] [cursor=pointer]:
+                      - img
+                      - text: Ontem
+                    - button "Últimos 7 dias" [ref=e400] [cursor=pointer]:
+                      - img
+                      - text: Últimos 7 dias
+                    - button "Últimos 30 dias" [ref=e401] [cursor=pointer]:
+                      - img
+                      - text: Últimos 30 dias
+                    - button "Este mês" [ref=e402] [cursor=pointer]:
+                      - img
+                      - text: Este mês
+                    - button "Mês passado" [ref=e403] [cursor=pointer]:
+                      - img
+                      - text: Mês passado
+                  - generic [ref=e404]:
+                    - generic [ref=e405]:
+                      - textbox [ref=e406]:
+                        - /placeholder: Data Inicial
+                        - text: 2026-03-30
+                      - generic: Data Inicial
+                    - generic [ref=e407]:
+                      - textbox [ref=e408]:
+                        - /placeholder: Data Final
+                        - text: 2026-04-06
+                      - generic: Data Final
+                    - generic [ref=e409]:
+                      - combobox [ref=e410] [cursor=pointer]:
+                        - generic: Dia
+                        - img [ref=e411]
+                      - generic: Agrupar por
+                  - generic [ref=e413]:
+                    - generic [ref=e414]:
+                      - switch [ref=e415] [cursor=pointer]
+                      - generic [ref=e416]:
+                        - img [ref=e417]
+                        - text: Comparar com período anterior
+                    - generic [ref=e420]:
+                      - button "Limpar" [ref=e421] [cursor=pointer]:
+                        - img
+                        - text: Limpar
+                      - button "Aplicar Filtros" [ref=e422] [cursor=pointer]:
+                        - img
+                        - text: Aplicar Filtros
+              - generic [ref=e423]:
+                - heading "Indicadores Chave de Performance" [level=2] [ref=e424]:
+                  - img [ref=e425]
+                  - text: Indicadores Chave de Performance
+                - generic [ref=e427]:
+                  - generic [ref=e428]:
+                    - img [ref=e430]
+                    - paragraph [ref=e433]: TAXA DE RESOLUÇÃO
+                    - paragraph [ref=e434]: 100.0%
+                    - paragraph [ref=e435]: Tickets resolvidos vs total
+                  - generic [ref=e436]:
+                    - img [ref=e438]
+                    - paragraph [ref=e441]: TEMPO MÉDIO DE RESPOSTA
+                    - paragraph [ref=e442]: 1.4 min
+                    - paragraph [ref=e443]: Primeira mensagem do agente
+                  - generic [ref=e444]:
+                    - img [ref=e446]
+                    - paragraph [ref=e448]: NPS SCORE
+                    - paragraph [ref=e449]: 0.0 /100
+                    - paragraph [ref=e450]: Satisfação do cliente
+                  - generic [ref=e451]:
+                    - img [ref=e453]
+                    - paragraph [ref=e456]: CONFORMIDADE SLA
+                    - paragraph [ref=e457]: 100 %
+                    - paragraph [ref=e458]: Tickets resolvidos em <24h
+                - generic [ref=e459]:
+                  - generic [ref=e460]:
+                    - img [ref=e462]
+                    - paragraph [ref=e464]: TOTAL DE TICKETS
+                    - paragraph [ref=e465]: "1"
+                    - paragraph [ref=e466]: Criados no período
+                  - generic [ref=e467]:
+                    - img [ref=e469]
+                    - paragraph [ref=e472]: PROTOCOLOS RESOLVIDOS
+                    - paragraph [ref=e473]: "1"
+                    - paragraph [ref=e474]: Fechados com sucesso
+                  - generic [ref=e475]:
+                    - img [ref=e477]
+                    - paragraph [ref=e480]: TEMPO DE RESOLUÇÃO
+                    - paragraph [ref=e481]: 0.1 h
+                    - paragraph [ref=e482]: Média de resolução
+                  - generic [ref=e483]:
+                    - img [ref=e485]
+                    - paragraph [ref=e487]: PRIMEIRA RESPOSTA
+                    - paragraph [ref=e488]: 1 min
+                    - paragraph [ref=e489]: Tempo médio inicial
+                - generic [ref=e491]:
+                  - img [ref=e493]
+                  - paragraph [ref=e496]: TOTAL DE CONTATOS
+                  - paragraph [ref=e497]: "2"
+                  - paragraph [ref=e498]: Contatos na plataforma
+              - generic [ref=e499]:
+                - generic [ref=e500]:
+                  - heading "Status dos Atendimentos em Tempo Real" [level=2] [ref=e501]:
+                    - img [ref=e502]
+                    - text: Status dos Atendimentos em Tempo Real
+                  - generic [ref=e505]:
+                    - generic [ref=e506]:
+                      - combobox [ref=e507] [cursor=pointer]:
+                        - generic: Todos os agentes
+                        - img [ref=e508]
+                      - generic: Filtrar por Agente
+                    - generic [ref=e510]:
+                      - combobox [ref=e511] [cursor=pointer]:
+                        - generic: Todas as Conexões
+                        - img [ref=e512]
+                      - generic: Filtrar por Conexão
+                - generic [ref=e514]:
+                  - generic [ref=e515]:
+                    - img [ref=e517]
+                    - generic [ref=e521]: Atendendo
+                    - paragraph [ref=e522]: "0"
+                    - paragraph [ref=e523]: "Tickets em atendimento ativo (status: open)"
+                  - generic [ref=e524]:
+                    - img [ref=e526]
+                    - generic [ref=e531]: Aguardando
+                    - paragraph [ref=e532]: "0"
+                    - paragraph [ref=e533]: "Tickets aguardando atendimento (status: pending)"
+                  - generic [ref=e534]:
+                    - img [ref=e536]
+                    - generic [ref=e541]: Fechados
+                    - paragraph [ref=e542]: "1"
+                    - paragraph [ref=e543]: "Tickets finalizados (status: closed)"
+              - generic [ref=e544]:
+                - generic [ref=e545]:
+                  - heading "Linha do Tempo de Tickets" [level=3] [ref=e546]
+                  - generic [ref=e547]: "Agrupado por: Dia"
+                - generic [ref=e549]:
+                  - img [ref=e550]:
+                    - generic [ref=e557]: 05/04/26
+                    - generic [ref=e559]:
+                      - generic [ref=e561]: "0"
+                      - generic [ref=e563]: "1"
+                      - generic [ref=e565]: "2"
+                      - generic [ref=e567]: "3"
+                      - generic [ref=e569]: "4"
+                  - list [ref=e580]:
+                    - listitem [ref=e581]:
+                      - img [ref=e582]
+                      - text: Criados
+                    - listitem [ref=e584]:
+                      - img [ref=e585]
+                      - text: Resolvidos
+                    - listitem [ref=e587]:
+                      - img [ref=e588]
+                      - text: Pendentes
+              - generic [ref=e590]:
+                - generic [ref=e591]:
+                  - heading "Alertas Ativos" [level=3] [ref=e592]:
+                    - img [ref=e593]
+                    - text: Alertas Ativos
+                  - generic [ref=e595]:
+                    - img [ref=e597]
+                    - paragraph [ref=e600]: Tudo certo!
+                    - paragraph [ref=e601]: Nenhum alerta ativo no momento
+                - generic [ref=e602]:
+                  - heading "Ranking de Agentes" [level=3] [ref=e603]:
+                    - img [ref=e604]
+                    - text: Ranking de Agentes
+                  - table [ref=e608]:
+                    - rowgroup [ref=e609]:
+                      - row "# Agente Conversas Resolvidas TMA Taxa Status" [ref=e610]:
+                        - columnheader "#" [ref=e611]
+                        - columnheader "Agente" [ref=e612]
+                        - columnheader "Conversas" [ref=e613]
+                        - columnheader "Resolvidas" [ref=e614]
+                        - columnheader "TMA" [ref=e615]
+                        - columnheader "Taxa" [ref=e616]
+                        - columnheader "Status" [ref=e617]
+                    - rowgroup [ref=e618]:
+                      - row "1 AD Administrador admin@msxzap.pro 0 0 0s 0.0% Offline" [ref=e619]:
+                        - cell "1" [ref=e620]
+                        - cell "AD Administrador admin@msxzap.pro" [ref=e621]:
+                          - generic [ref=e622]:
+                            - generic [ref=e624]: AD
+                            - generic [ref=e625]:
+                              - generic [ref=e626]: Administrador
+                              - text: admin@msxzap.pro
+                        - cell "0" [ref=e627]
+                        - cell "0" [ref=e628]
+                        - cell "0s" [ref=e629]
+                        - cell "0.0%" [ref=e630]:
+                          - generic [ref=e631]: 0.0%
+                        - cell "Offline" [ref=e632]:
+                          - generic [ref=e635]: Offline
+                      - row "2 US Usuario Teste teste@msxzap.pro 0 0 0s 0.0% Offline" [ref=e636]:
+                        - cell "2" [ref=e637]
+                        - cell "US Usuario Teste teste@msxzap.pro" [ref=e638]:
+                          - generic [ref=e639]:
+                            - generic [ref=e641]: US
+                            - generic [ref=e642]:
+                              - generic [ref=e643]: Usuario Teste
+                              - text: teste@msxzap.pro
+                        - cell "0" [ref=e644]
+                        - cell "0" [ref=e645]
+                        - cell "0s" [ref=e646]
+                        - cell "0.0%" [ref=e647]:
+                          - generic [ref=e648]: 0.0%
+                        - cell "Offline" [ref=e649]:
+                          - generic [ref=e652]: Offline
+                      - row "3 MI MICHAEL COSME SILVA EDVALDO DE OLIVEIRA planostreaming25@gmail.com 0 0 0s 0.0% Online" [ref=e653]:
+                        - cell "3" [ref=e654]
+                        - cell "MI MICHAEL COSME SILVA EDVALDO DE OLIVEIRA planostreaming25@gmail.com" [ref=e655]:
+                          - generic [ref=e656]:
+                            - generic [ref=e658]: MI
+                            - generic [ref=e659]:
+                              - generic [ref=e660]: MICHAEL COSME SILVA EDVALDO DE OLIVEIRA
+                              - text: planostreaming25@gmail.com
+                        - cell "0" [ref=e661]
+                        - cell "0" [ref=e662]
+                        - cell "0s" [ref=e663]
+                        - cell "0.0%" [ref=e664]:
+                          - generic [ref=e665]: 0.0%
+                        - cell "Online" [ref=e666]:
+                          - generic [ref=e669]: Online
+              - generic [ref=e671]:
+                - heading "Heatmap de Atividade" [level=3] [ref=e673]:
+                  - img [ref=e674]
+                  - text: Heatmap de Atividade
+                - paragraph [ref=e676]: Mensagens por hora e dia da semana
+                - generic [ref=e677]:
+                  - generic [ref=e678]: "0"
+                  - generic [ref=e681]: "3"
+                  - generic [ref=e684]: "6"
+                  - generic [ref=e687]: "9"
+                  - generic [ref=e690]: "12"
+                  - generic [ref=e693]: "15"
+                  - generic [ref=e696]: "18"
+                  - generic [ref=e699]: "21"
+                - generic [ref=e702]:
+                  - generic [ref=e703]:
+                    - generic [ref=e704]: Seg
+                    - 'generic "Seg 0h: 0 mensagems" [ref=e705]'
+                    - 'generic "Seg 1h: 0 mensagems" [ref=e706]'
+                    - 'generic "Seg 2h: 0 mensagems" [ref=e707]'
+                    - 'generic "Seg 3h: 0 mensagems" [ref=e708]'
+                    - 'generic "Seg 4h: 0 mensagems" [ref=e709]'
+                    - 'generic "Seg 5h: 0 mensagems" [ref=e710]'
+                    - 'generic "Seg 6h: 0 mensagems" [ref=e711]'
+                    - 'generic "Seg 7h: 0 mensagems" [ref=e712]'
+                    - 'generic "Seg 8h: 0 mensagems" [ref=e713]'
+                    - 'generic "Seg 9h: 0 mensagems" [ref=e714]'
+                    - 'generic "Seg 10h: 0 mensagems" [ref=e715]'
+                    - 'generic "Seg 11h: 0 mensagems" [ref=e716]'
+                    - 'generic "Seg 12h: 0 mensagems" [ref=e717]'
+                    - 'generic "Seg 13h: 0 mensagems" [ref=e718]'
+                    - 'generic "Seg 14h: 0 mensagems" [ref=e719]'
+                    - 'generic "Seg 15h: 0 mensagems" [ref=e720]'
+                    - 'generic "Seg 16h: 0 mensagems" [ref=e721]'
+                    - 'generic "Seg 17h: 0 mensagems" [ref=e722]'
+                    - 'generic "Seg 18h: 0 mensagems" [ref=e723]'
+                    - 'generic "Seg 19h: 0 mensagems" [ref=e724]'
+                    - 'generic "Seg 20h: 0 mensagems" [ref=e725]'
+                    - 'generic "Seg 21h: 0 mensagems" [ref=e726]'
+                    - 'generic "Seg 22h: 0 mensagems" [ref=e727]'
+                    - 'generic "Seg 23h: 0 mensagems" [ref=e728]'
+                  - generic [ref=e729]:
+                    - generic [ref=e730]: Ter
+                    - 'generic "Ter 0h: 0 mensagems" [ref=e731]'
+                    - 'generic "Ter 1h: 0 mensagems" [ref=e732]'
+                    - 'generic "Ter 2h: 0 mensagems" [ref=e733]'
+                    - 'generic "Ter 3h: 0 mensagems" [ref=e734]'
+                    - 'generic "Ter 4h: 0 mensagems" [ref=e735]'
+                    - 'generic "Ter 5h: 0 mensagems" [ref=e736]'
+                    - 'generic "Ter 6h: 0 mensagems" [ref=e737]'
+                    - 'generic "Ter 7h: 0 mensagems" [ref=e738]'
+                    - 'generic "Ter 8h: 0 mensagems" [ref=e739]'
+                    - 'generic "Ter 9h: 0 mensagems" [ref=e740]'
+                    - 'generic "Ter 10h: 0 mensagems" [ref=e741]'
+                    - 'generic "Ter 11h: 0 mensagems" [ref=e742]'
+                    - 'generic "Ter 12h: 0 mensagems" [ref=e743]'
+                    - 'generic "Ter 13h: 0 mensagems" [ref=e744]'
+                    - 'generic "Ter 14h: 0 mensagems" [ref=e745]'
+                    - 'generic "Ter 15h: 0 mensagems" [ref=e746]'
+                    - 'generic "Ter 16h: 0 mensagems" [ref=e747]'
+                    - 'generic "Ter 17h: 0 mensagems" [ref=e748]'
+                    - 'generic "Ter 18h: 0 mensagems" [ref=e749]'
+                    - 'generic "Ter 19h: 0 mensagems" [ref=e750]'
+                    - 'generic "Ter 20h: 0 mensagems" [ref=e751]'
+                    - 'generic "Ter 21h: 0 mensagems" [ref=e752]'
+                    - 'generic "Ter 22h: 0 mensagems" [ref=e753]'
+                    - 'generic "Ter 23h: 0 mensagems" [ref=e754]'
+                  - generic [ref=e755]:
+                    - generic [ref=e756]: Qua
+                    - 'generic "Qua 0h: 0 mensagems" [ref=e757]'
+                    - 'generic "Qua 1h: 0 mensagems" [ref=e758]'
+                    - 'generic "Qua 2h: 0 mensagems" [ref=e759]'
+                    - 'generic "Qua 3h: 0 mensagems" [ref=e760]'
+                    - 'generic "Qua 4h: 0 mensagems" [ref=e761]'
+                    - 'generic "Qua 5h: 0 mensagems" [ref=e762]'
+                    - 'generic "Qua 6h: 0 mensagems" [ref=e763]'
+                    - 'generic "Qua 7h: 0 mensagems" [ref=e764]'
+                    - 'generic "Qua 8h: 0 mensagems" [ref=e765]'
+                    - 'generic "Qua 9h: 0 mensagems" [ref=e766]'
+                    - 'generic "Qua 10h: 0 mensagems" [ref=e767]'
+                    - 'generic "Qua 11h: 0 mensagems" [ref=e768]'
+                    - 'generic "Qua 12h: 0 mensagems" [ref=e769]'
+                    - 'generic "Qua 13h: 0 mensagems" [ref=e770]'
+                    - 'generic "Qua 14h: 0 mensagems" [ref=e771]'
+                    - 'generic "Qua 15h: 0 mensagems" [ref=e772]'
+                    - 'generic "Qua 16h: 0 mensagems" [ref=e773]'
+                    - 'generic "Qua 17h: 0 mensagems" [ref=e774]'
+                    - 'generic "Qua 18h: 0 mensagems" [ref=e775]'
+                    - 'generic "Qua 19h: 0 mensagems" [ref=e776]'
+                    - 'generic "Qua 20h: 0 mensagems" [ref=e777]'
+                    - 'generic "Qua 21h: 0 mensagems" [ref=e778]'
+                    - 'generic "Qua 22h: 0 mensagems" [ref=e779]'
+                    - 'generic "Qua 23h: 0 mensagems" [ref=e780]'
+                  - generic [ref=e781]:
+                    - generic [ref=e782]: Qui
+                    - 'generic "Qui 0h: 0 mensagems" [ref=e783]'
+                    - 'generic "Qui 1h: 0 mensagems" [ref=e784]'
+                    - 'generic "Qui 2h: 0 mensagems" [ref=e785]'
+                    - 'generic "Qui 3h: 0 mensagems" [ref=e786]'
+                    - 'generic "Qui 4h: 0 mensagems" [ref=e787]'
+                    - 'generic "Qui 5h: 0 mensagems" [ref=e788]'
+                    - 'generic "Qui 6h: 0 mensagems" [ref=e789]'
+                    - 'generic "Qui 7h: 0 mensagems" [ref=e790]'
+                    - 'generic "Qui 8h: 0 mensagems" [ref=e791]'
+                    - 'generic "Qui 9h: 0 mensagems" [ref=e792]'
+                    - 'generic "Qui 10h: 0 mensagems" [ref=e793]'
+                    - 'generic "Qui 11h: 0 mensagems" [ref=e794]'
+                    - 'generic "Qui 12h: 0 mensagems" [ref=e795]'
+                    - 'generic "Qui 13h: 0 mensagems" [ref=e796]'
+                    - 'generic "Qui 14h: 0 mensagems" [ref=e797]'
+                    - 'generic "Qui 15h: 0 mensagems" [ref=e798]'
+                    - 'generic "Qui 16h: 0 mensagems" [ref=e799]'
+                    - 'generic "Qui 17h: 0 mensagems" [ref=e800]'
+                    - 'generic "Qui 18h: 0 mensagems" [ref=e801]'
+                    - 'generic "Qui 19h: 0 mensagems" [ref=e802]'
+                    - 'generic "Qui 20h: 0 mensagems" [ref=e803]'
+                    - 'generic "Qui 21h: 0 mensagems" [ref=e804]'
+                    - 'generic "Qui 22h: 0 mensagems" [ref=e805]'
+                    - 'generic "Qui 23h: 0 mensagems" [ref=e806]'
+                  - generic [ref=e807]:
+                    - generic [ref=e808]: Sex
+                    - 'generic "Sex 0h: 0 mensagems" [ref=e809]'
+                    - 'generic "Sex 1h: 0 mensagems" [ref=e810]'
+                    - 'generic "Sex 2h: 0 mensagems" [ref=e811]'
+                    - 'generic "Sex 3h: 0 mensagems" [ref=e812]'
+                    - 'generic "Sex 4h: 0 mensagems" [ref=e813]'
+                    - 'generic "Sex 5h: 0 mensagems" [ref=e814]'
+                    - 'generic "Sex 6h: 0 mensagems" [ref=e815]'
+                    - 'generic "Sex 7h: 0 mensagems" [ref=e816]'
+                    - 'generic "Sex 8h: 0 mensagems" [ref=e817]'
+                    - 'generic "Sex 9h: 0 mensagems" [ref=e818]'
+                    - 'generic "Sex 10h: 0 mensagems" [ref=e819]'
+                    - 'generic "Sex 11h: 0 mensagems" [ref=e820]'
+                    - 'generic "Sex 12h: 0 mensagems" [ref=e821]'
+                    - 'generic "Sex 13h: 0 mensagems" [ref=e822]'
+                    - 'generic "Sex 14h: 0 mensagems" [ref=e823]'
+                    - 'generic "Sex 15h: 0 mensagems" [ref=e824]'
+                    - 'generic "Sex 16h: 0 mensagems" [ref=e825]'
+                    - 'generic "Sex 17h: 0 mensagems" [ref=e826]'
+                    - 'generic "Sex 18h: 0 mensagems" [ref=e827]'
+                    - 'generic "Sex 19h: 0 mensagems" [ref=e828]'
+                    - 'generic "Sex 20h: 0 mensagems" [ref=e829]'
+                    - 'generic "Sex 21h: 0 mensagems" [ref=e830]'
+                    - 'generic "Sex 22h: 0 mensagems" [ref=e831]'
+                    - 'generic "Sex 23h: 0 mensagems" [ref=e832]'
+                  - generic [ref=e833]:
+                    - generic [ref=e834]: Sáb
+                    - 'generic "Sáb 0h: 0 mensagems" [ref=e835]'
+                    - 'generic "Sáb 1h: 0 mensagems" [ref=e836]'
+                    - 'generic "Sáb 2h: 0 mensagems" [ref=e837]'
+                    - 'generic "Sáb 3h: 0 mensagems" [ref=e838]'
+                    - 'generic "Sáb 4h: 0 mensagems" [ref=e839]'
+                    - 'generic "Sáb 5h: 0 mensagems" [ref=e840]'
+                    - 'generic "Sáb 6h: 0 mensagems" [ref=e841]'
+                    - 'generic "Sáb 7h: 0 mensagems" [ref=e842]'
+                    - 'generic "Sáb 8h: 0 mensagems" [ref=e843]'
+                    - 'generic "Sáb 9h: 0 mensagems" [ref=e844]'
+                    - 'generic "Sáb 10h: 0 mensagems" [ref=e845]'
+                    - 'generic "Sáb 11h: 0 mensagems" [ref=e846]'
+                    - 'generic "Sáb 12h: 0 mensagems" [ref=e847]'
+                    - 'generic "Sáb 13h: 0 mensagems" [ref=e848]'
+                    - 'generic "Sáb 14h: 0 mensagems" [ref=e849]'
+                    - 'generic "Sáb 15h: 0 mensagems" [ref=e850]'
+                    - 'generic "Sáb 16h: 0 mensagems" [ref=e851]'
+                    - 'generic "Sáb 17h: 0 mensagems" [ref=e852]'
+                    - 'generic "Sáb 18h: 0 mensagems" [ref=e853]'
+                    - 'generic "Sáb 19h: 0 mensagems" [ref=e854]'
+                    - 'generic "Sáb 20h: 0 mensagems" [ref=e855]'
+                    - 'generic "Sáb 21h: 0 mensagems" [ref=e856]'
+                    - 'generic "Sáb 22h: 0 mensagems" [ref=e857]'
+                    - 'generic "Sáb 23h: 0 mensagems" [ref=e858]'
+                  - generic [ref=e859]:
+                    - generic [ref=e860]: Dom
+                    - 'generic "Dom 0h: 0 mensagems" [ref=e861]'
+                    - 'generic "Dom 1h: 0 mensagems" [ref=e862]'
+                    - 'generic "Dom 2h: 0 mensagems" [ref=e863]'
+                    - 'generic "Dom 3h: 0 mensagems" [ref=e864]'
+                    - 'generic "Dom 4h: 0 mensagems" [ref=e865]'
+                    - 'generic "Dom 5h: 0 mensagems" [ref=e866]'
+                    - 'generic "Dom 6h: 0 mensagems" [ref=e867]'
+                    - 'generic "Dom 7h: 0 mensagems" [ref=e868]'
+                    - 'generic "Dom 8h: 3 mensagems" [ref=e869]'
+                    - 'generic "Dom 9h: 0 mensagems" [ref=e870]'
+                    - 'generic "Dom 10h: 0 mensagems" [ref=e871]'
+                    - 'generic "Dom 11h: 0 mensagems" [ref=e872]'
+                    - 'generic "Dom 12h: 0 mensagems" [ref=e873]'
+                    - 'generic "Dom 13h: 0 mensagems" [ref=e874]'
+                    - 'generic "Dom 14h: 0 mensagems" [ref=e875]'
+                    - 'generic "Dom 15h: 0 mensagems" [ref=e876]'
+                    - 'generic "Dom 16h: 0 mensagems" [ref=e877]'
+                    - 'generic "Dom 17h: 0 mensagems" [ref=e878]'
+                    - 'generic "Dom 18h: 0 mensagems" [ref=e879]'
+                    - 'generic "Dom 19h: 0 mensagems" [ref=e880]'
+                    - 'generic "Dom 20h: 0 mensagems" [ref=e881]'
+                    - 'generic "Dom 21h: 0 mensagems" [ref=e882]'
+                    - 'generic "Dom 22h: 0 mensagems" [ref=e883]'
+                    - 'generic "Dom 23h: 0 mensagems" [ref=e884]'
+                - generic [ref=e885]:
+                  - generic [ref=e886]: Baixo
+                  - generic [ref=e892]: Alto
+              - generic [ref=e893]:
+                - heading "🎂 Aniversários (próximos 7 dias)" [level=3] [ref=e894]:
+                  - img [ref=e895]
+                  - generic [ref=e898]: 🎂 Aniversários (próximos 7 dias)
+                - paragraph [ref=e899]: Nenhum aniversário nos próximos 7 dias
+              - generic [ref=e900]:
+                - heading "Estatísticas por Canal" [level=2] [ref=e901]:
+                  - img [ref=e902]
+                  - text: Estatísticas por Canal
+                - generic [ref=e907]:
+                  - img [ref=e909]
+                  - paragraph [ref=e913]: Nenhuma conexão
+                  - paragraph [ref=e914]: Adicione uma conexão para ver estatísticas
+              - generic [ref=e915]:
+                - heading "Performance por Agente" [level=3] [ref=e917]:
+                  - img [ref=e918]
+                  - text: Performance por Agente
+                - table [ref=e922]:
+                  - rowgroup [ref=e923]:
+                    - row "Agente Conversas Resolvidas Taxa TMA" [ref=e924]:
+                      - columnheader "Agente" [ref=e925]
+                      - columnheader "Conversas" [ref=e926]
+                      - columnheader "Resolvidas" [ref=e927]
+                      - columnheader "Taxa" [ref=e928]
+                      - columnheader "TMA" [ref=e929]
+                  - rowgroup [ref=e930]:
+                    - row "AD Administrador 0 0 0.0% 0s" [ref=e931]:
+                      - cell "AD Administrador" [ref=e932]:
+                        - generic [ref=e933]:
+                          - generic [ref=e935]: AD
+                          - generic [ref=e936]: Administrador
+                      - cell "0" [ref=e937]
+                      - cell "0" [ref=e938]
+                      - cell "0.0%" [ref=e939]:
+                        - generic [ref=e940]: 0.0%
+                      - cell "0s" [ref=e941]
+                    - row "US Usuario Teste 0 0 0.0% 0s" [ref=e942]:
+                      - cell "US Usuario Teste" [ref=e943]:
+                        - generic [ref=e944]:
+                          - generic [ref=e946]: US
+                          - generic [ref=e947]: Usuario Teste
+                      - cell "0" [ref=e948]
+                      - cell "0" [ref=e949]
+                      - cell "0.0%" [ref=e950]:
+                        - generic [ref=e951]: 0.0%
+                      - cell "0s" [ref=e952]
+                    - row "MI MICHAEL COSME SILVA EDVALDO DE OLIVEIRA 0 0 0.0% 0s" [ref=e953]:
+                      - cell "MI MICHAEL COSME SILVA EDVALDO DE OLIVEIRA" [ref=e954]:
+                        - generic [ref=e955]:
+                          - generic [ref=e957]: MI
+                          - generic [ref=e958]: MICHAEL COSME SILVA EDVALDO DE OLIVEIRA
+                      - cell "0" [ref=e959]
+                      - cell "0" [ref=e960]
+                      - cell "0.0%" [ref=e961]:
+                        - generic [ref=e962]: 0.0%
+                      - cell "0s" [ref=e963]
+              - generic [ref=e964]:
+                - heading "Relatórios Detalhados" [level=3] [ref=e965]:
+                  - img [ref=e966]
+                  - text: Relatórios Detalhados
+                - generic [ref=e968]:
+                  - tablist [ref=e969]:
+                    - tab "RELATÓRIO POR OPERADOR" [selected] [ref=e970] [cursor=pointer]:
+                      - img [ref=e971]
+                      - text: RELATÓRIO POR OPERADOR
+                    - tab "RELATÓRIO POR PERÍODO" [ref=e974] [cursor=pointer]:
+                      - img [ref=e975]
+                      - text: RELATÓRIO POR PERÍODO
+                  - tabpanel "RELATÓRIO POR OPERADOR" [ref=e977]:
+                    - generic [ref=e978]:
+                      - generic [ref=e979]: Selecionar Operador
+                      - combobox [ref=e980] [cursor=pointer]:
+                        - generic: planostreaming25 (Você)
+                        - img [ref=e981]
+                    - generic [ref=e984]:
+                      - generic [ref=e986]: MI
+                      - generic [ref=e987]:
+                        - paragraph [ref=e988]:
+                          - img [ref=e989]
+                          - text: Relatório de Atendimento
+                        - paragraph [ref=e992]: MICHAEL COSME SILVA EDVALDO DE OLIVEIRA
+                        - paragraph [ref=e993]: planostreaming25@gmail.com
+                      - generic [ref=e994]:
+                        - img [ref=e995]
+                        - text: 29/03/2026 - 05/04/2026
+                    - generic [ref=e998]:
+                      - heading "Dados de desempenho" [level=4] [ref=e999]:
+                        - img [ref=e1000]
+                        - text: Dados de desempenho
+                      - generic [ref=e1002]:
+                        - button [ref=e1003] [cursor=pointer]:
+                          - img
+                        - button [ref=e1004] [cursor=pointer]:
+                          - img
+                    - generic [ref=e1005]:
+                      - generic [ref=e1006]:
+                        - img [ref=e1008]
+                        - paragraph [ref=e1011]: Conversas atendidas
+                        - paragraph [ref=e1012]: "1"
+                      - generic [ref=e1013]:
+                        - img [ref=e1015]
+                        - paragraph [ref=e1017]: Mensagens enviadas
+                        - paragraph [ref=e1018]: "2"
+                      - generic [ref=e1019]:
+                        - img [ref=e1021]
+                        - paragraph [ref=e1024]: Tempo total de resolução
+                        - paragraph [ref=e1025]: 7min
+                      - generic [ref=e1026]:
+                        - img [ref=e1028]
+                        - paragraph [ref=e1031]: Tempo médio de espera
+                        - paragraph [ref=e1032]: 1min 24s
+                    - generic [ref=e1033]:
+                      - generic [ref=e1034]:
+                        - heading "Tempo Médio de Resolução" [level=4] [ref=e1035]:
+                          - img [ref=e1036]
+                          - text: Tempo Médio de Resolução
+                        - paragraph [ref=e1039]: 7min
+                        - paragraph [ref=e1040]: Tempo médio para finalizar um protocolo
+                      - generic [ref=e1041]:
+                        - heading "Avaliação Média" [level=4] [ref=e1042]:
+                          - img [ref=e1043]
+                          - text: Avaliação Média
+                        - paragraph [ref=e1046]: Sem avaliações no período
+              - generic [ref=e1047]:
+                - generic [ref=e1048]:
+                  - button "Exportar para Excel" [ref=e1049] [cursor=pointer]:
+                    - img
+                    - text: Exportar para Excel
+                  - button "Exportar PDF" [ref=e1050] [cursor=pointer]:
+                    - img
+                    - text: Exportar PDF
+                - paragraph [ref=e1051]: Dashboard atualizado em 06/04/2026 00:36:26
+  - generic [ref=e1052]: "0"
+  - generic [ref=e1053]:
+    - generic [ref=e1054]:
+      - generic [ref=e1055]: Passo 1 de 7
+      - button "×" [ref=e1056] [cursor=pointer]
+    - heading "💬 Inbox" [level=3] [ref=e1057]
+    - paragraph [ref=e1058]: Aqui ficam todas as conversas do WhatsApp. Responda mensagens, transfira e organize os atendimentos.
+    - generic [ref=e1059]:
+      - button "← Anterior" [disabled] [ref=e1060]
+      - button "Próximo →" [ref=e1069] [cursor=pointer]

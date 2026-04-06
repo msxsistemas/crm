@@ -171,7 +171,7 @@ const ContactDetailsSidebar = ({
 
   // Custom fields
   type CustomFieldDef = { id: string; label: string; field_type: string; options: string[]; required: boolean; position: number; value: string | null };
-  const [customFields, setCustomFields] = useState<CustomFieldDef[]>([]);
+  const [contactCustomFields, setContactCustomFields] = useState<CustomFieldDef[]>([]);
   const [customFieldsOpen, setCustomFieldsOpen] = useState(false);
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, string>>({});
   const [savingCustomField, setSavingCustomField] = useState<Record<string, boolean>>({});
@@ -235,7 +235,7 @@ const ContactDetailsSidebar = ({
     api.get<any[]>(`/contacts/${contactId}/custom-fields`)
       .then(data => {
         if (Array.isArray(data)) {
-          setCustomFields(data);
+          setContactCustomFields(data);
           const vals: Record<string, string> = {};
           data.forEach((f: any) => { if (f.value != null) vals[f.id] = f.value; });
           setCustomFieldValues(vals);
@@ -1615,7 +1615,7 @@ const ContactDetailsSidebar = ({
         </button>
         {customFieldsOpen && (
           <div className="mt-3 space-y-3 ml-6">
-            {customFields.length === 0 ? (
+            {contactCustomFields.length === 0 ? (
               <div className="text-center py-2">
                 <p className="text-xs text-muted-foreground">Nenhum campo configurado.</p>
                 <Link to="/configuracoes" className="text-xs text-primary hover:underline">
@@ -1623,7 +1623,7 @@ const ContactDetailsSidebar = ({
                 </Link>
               </div>
             ) : (
-              customFields.map(field => (
+              contactCustomFields.map(field => (
                 <div key={field.id} className="space-y-1">
                   <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
                     {field.label}

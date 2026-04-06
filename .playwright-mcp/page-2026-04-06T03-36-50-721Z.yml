@@ -1,0 +1,273 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - region "Notifications (F8)":
+      - list
+    - region "Notifications alt+T"
+    - generic [ref=e1070]:
+      - complementary [ref=e1071]:
+        - generic [ref=e1072]:
+          - generic [ref=e1073]:
+            - img [ref=e1075]
+            - generic [ref=e1077]: MSX CRM
+          - button [ref=e1078] [cursor=pointer]:
+            - img [ref=e1079]
+        - navigation [ref=e1081]:
+          - generic [ref=e1082]:
+            - paragraph [ref=e1083]: PRINCIPAL
+            - generic [ref=e1084]:
+              - link "Dashboard" [ref=e1085] [cursor=pointer]:
+                - /url: /
+                - img [ref=e1086]
+                - generic [ref=e1088]: Dashboard
+              - link "Dashboard (legado)" [ref=e1089] [cursor=pointer]:
+                - /url: /dashboard-legado
+                - img [ref=e1090]
+                - generic [ref=e1092]: Dashboard (legado)
+          - generic [ref=e1093]:
+            - paragraph [ref=e1095]: CHATS
+            - generic [ref=e1096]:
+              - link "Chats" [ref=e1097] [cursor=pointer]:
+                - /url: /inbox
+                - img [ref=e1098]
+                - generic [ref=e1100]: Chats
+              - link "Pesquisar" [ref=e1101] [cursor=pointer]:
+                - /url: /pesquisar
+                - img [ref=e1102]
+                - generic [ref=e1105]: Pesquisar
+              - link "Contatos" [ref=e1106] [cursor=pointer]:
+                - /url: /contatos
+                - img [ref=e1107]
+                - generic [ref=e1111]: Contatos
+              - link "Grupos de Contatos" [ref=e1112] [cursor=pointer]:
+                - /url: /grupos-contatos
+                - img [ref=e1113]
+                - generic [ref=e1117]: Grupos de Contatos
+              - link "Tarefas" [ref=e1118] [cursor=pointer]:
+                - /url: /tarefas
+                - img [ref=e1119]
+                - generic [ref=e1122]: Tarefas
+              - link "Agendamentos" [ref=e1123] [cursor=pointer]:
+                - /url: /agendamentos
+                - img [ref=e1124]
+                - generic [ref=e1126]: Agendamentos
+          - generic [ref=e1129]:
+            - button "Kanban" [ref=e1131] [cursor=pointer]:
+              - img [ref=e1132]
+              - generic [ref=e1134]: Kanban
+              - img [ref=e1135]
+            - button "CRM" [ref=e1138] [cursor=pointer]:
+              - img [ref=e1139]
+              - generic [ref=e1149]: CRM
+              - img [ref=e1150]
+          - generic [ref=e1152]:
+            - paragraph [ref=e1154]: FERRAMENTAS
+            - generic [ref=e1155]:
+              - link "Tags" [ref=e1156] [cursor=pointer]:
+                - /url: /tags
+                - img [ref=e1157]
+                - generic [ref=e1160]: Tags
+              - link "Segmentos" [ref=e1161] [cursor=pointer]:
+                - /url: /segmentos
+                - img [ref=e1162]
+                - generic [ref=e1163]: Segmentos
+              - link "Respostas Rápidas" [ref=e1164] [cursor=pointer]:
+                - /url: /respostas-rapidas
+                - img [ref=e1165]
+                - generic [ref=e1167]: Respostas Rápidas
+              - link "Chat Interno" [ref=e1168] [cursor=pointer]:
+                - /url: /chat-interno
+                - img [ref=e1169]
+                - generic [ref=e1172]: Chat Interno
+              - link "Central de Ajuda" [ref=e1173] [cursor=pointer]:
+                - /url: /central-ajuda
+                - img [ref=e1174]
+                - generic [ref=e1177]: Central de Ajuda
+              - link "Deduplicação" [ref=e1178] [cursor=pointer]:
+                - /url: /deduplicacao
+                - img [ref=e1179]
+                - generic [ref=e1183]: Deduplicação
+              - link "Formulários de Captação" [ref=e1184] [cursor=pointer]:
+                - /url: /formularios-captacao
+                - img [ref=e1185]
+                - generic [ref=e1191]: Formulários de Captação
+          - generic [ref=e1192]:
+            - paragraph [ref=e1194]: ADMINISTRAÇÃO
+            - generic [ref=e1195]:
+              - link "Avaliações" [ref=e1196] [cursor=pointer]:
+                - /url: /avaliacoes
+                - img [ref=e1197]
+                - generic [ref=e1199]: Avaliações
+              - link "Conexões" [ref=e1200] [cursor=pointer]:
+                - /url: /conexoes
+                - img [ref=e1201]
+                - generic [ref=e1203]: Conexões
+              - link "Filas & Chatbot" [ref=e1204] [cursor=pointer]:
+                - /url: /filas-chatbot
+                - img [ref=e1205]
+                - generic [ref=e1206]: Filas & Chatbot
+              - link "Categorias" [ref=e1207] [cursor=pointer]:
+                - /url: /categorias
+                - img [ref=e1208]
+                - generic [ref=e1211]: Categorias
+              - link "Equipe" [ref=e1212] [cursor=pointer]:
+                - /url: /usuarios
+                - img [ref=e1213]
+                - generic [ref=e1217]: Equipe
+              - link "Registro de Atividades" [ref=e1218] [cursor=pointer]:
+                - /url: /registro-atividades
+                - img [ref=e1219]
+                - generic [ref=e1222]: Registro de Atividades
+              - link "Central do Supervisor" [ref=e1223] [cursor=pointer]:
+                - /url: /supervisor
+                - img [ref=e1224]
+                - generic [ref=e1227]: Central do Supervisor
+              - link "Configuração de SLA" [ref=e1228] [cursor=pointer]:
+                - /url: /sla
+                - img [ref=e1229]
+                - generic [ref=e1231]: Configuração de SLA
+              - link "Lista Negra (Blacklist)" [ref=e1232] [cursor=pointer]:
+                - /url: /blacklist
+                - img [ref=e1233]
+                - generic [ref=e1236]: Lista Negra (Blacklist)
+              - link "Horários dos Agentes" [ref=e1237] [cursor=pointer]:
+                - /url: /horarios-agentes
+                - img [ref=e1238]
+                - generic [ref=e1241]: Horários dos Agentes
+          - generic [ref=e1242]:
+            - paragraph [ref=e1244]: AUTOMAÇÃO
+            - generic [ref=e1245]:
+              - link "FlowBuilder Nativo" [ref=e1246] [cursor=pointer]:
+                - /url: /flowbuilder
+                - img [ref=e1247]
+                - generic [ref=e1251]: FlowBuilder Nativo
+              - link "Templates de Atendimento" [ref=e1252] [cursor=pointer]:
+                - /url: /flow-templates
+                - img [ref=e1253]
+                - generic [ref=e1257]: Templates de Atendimento
+              - link "Agente IA" [ref=e1258] [cursor=pointer]:
+                - /url: /agente-ia
+                - img [ref=e1259]
+                - generic [ref=e1269]: Agente IA
+              - link "Gerenciador de Arquivos" [ref=e1270] [cursor=pointer]:
+                - /url: /gerenciador-arquivos
+                - img [ref=e1271]
+                - generic [ref=e1273]: Gerenciador de Arquivos
+              - link "Templates HSM" [ref=e1274] [cursor=pointer]:
+                - /url: /hsm-templates
+                - img [ref=e1275]
+                - generic [ref=e1279]: Templates HSM
+              - link "Distribuição Automática" [ref=e1280] [cursor=pointer]:
+                - /url: /distribuicao-automatica
+                - img [ref=e1281]
+                - generic [ref=e1287]: Distribuição Automática
+          - generic [ref=e1288]:
+            - paragraph [ref=e1290]: RELATÓRIOS
+            - link "Builder de Relatórios" [ref=e1292] [cursor=pointer]:
+              - /url: /relatorios-customizados
+              - img [ref=e1293]
+              - generic [ref=e1296]: Builder de Relatórios
+          - generic [ref=e1297]:
+            - paragraph [ref=e1299]: WHATSAPP
+            - link "Status do WhatsApp" [ref=e1301] [cursor=pointer]:
+              - /url: /status-whatsapp
+              - img [ref=e1302]
+              - generic [ref=e1308]: Status do WhatsApp
+          - generic [ref=e1309]:
+            - paragraph [ref=e1311]: SISTEMA
+            - generic [ref=e1312]:
+              - link "Relatórios Agendados" [ref=e1313] [cursor=pointer]:
+                - /url: /relatorios-agendados
+                - img [ref=e1314]
+                - generic [ref=e1317]: Relatórios Agendados
+              - link "Configurações" [ref=e1318] [cursor=pointer]:
+                - /url: /configuracoes
+                - img [ref=e1319]
+                - generic [ref=e1322]: Configurações
+              - link "Minha Assinatura" [ref=e1323] [cursor=pointer]:
+                - /url: /assinatura
+                - img [ref=e1324]
+                - generic [ref=e1326]: Minha Assinatura
+        - generic [ref=e1328]:
+          - generic [ref=e1329]: P
+          - generic [ref=e1330]:
+            - paragraph [ref=e1331]: planostreaming25
+            - paragraph [ref=e1332]: planostreaming25@gmail.com
+          - generic [ref=e1333]:
+            - button [ref=e1334] [cursor=pointer]:
+              - img [ref=e1335]
+            - button [ref=e1337] [cursor=pointer]:
+              - img [ref=e1338]
+            - button [ref=e1341] [cursor=pointer]:
+              - img [ref=e1342]
+      - generic [ref=e1345]:
+        - generic [ref=e1346]:
+          - generic [ref=e1347]: Olá MICHAEL COSME SILVA EDVALDO DE OLIVEIRA, Seja bem vindo(a) a plataforma MSX CRM!
+          - generic [ref=e1348]:
+            - button [ref=e1349] [cursor=pointer]:
+              - img [ref=e1350]
+            - button [ref=e1358] [cursor=pointer]:
+              - img [ref=e1359]
+            - button [ref=e1361] [cursor=pointer]:
+              - img [ref=e1362]
+            - button [ref=e1366] [cursor=pointer]:
+              - img [ref=e1367]
+            - button [ref=e1372] [cursor=pointer]:
+              - img [ref=e1373]
+            - button "🔔" [ref=e1375] [cursor=pointer]:
+              - generic [ref=e1376]: 🔔
+            - button [ref=e1377] [cursor=pointer]:
+              - img [ref=e1378]
+            - button [ref=e1381] [cursor=pointer]:
+              - img [ref=e1382]
+            - button [ref=e1385] [cursor=pointer]:
+              - img [ref=e1386]
+            - button [ref=e1389] [cursor=pointer]:
+              - img [ref=e1390]
+            - button [ref=e1393] [cursor=pointer]:
+              - img [ref=e1394]
+            - button [ref=e1398] [cursor=pointer]
+        - main [ref=e1400]:
+          - generic [ref=e1401]:
+            - generic [ref=e1402]:
+              - heading "Conexões" [level=1] [ref=e1403]
+              - button [ref=e1405] [cursor=pointer]:
+                - img
+            - generic [ref=e1406]:
+              - generic [ref=e1407]:
+                - generic [ref=e1408]:
+                  - img [ref=e1410]
+                  - generic [ref=e1412]:
+                    - paragraph [ref=e1413]: "0"
+                    - paragraph [ref=e1414]: Total de conexões
+                - generic [ref=e1415]:
+                  - img [ref=e1417]
+                  - generic [ref=e1421]:
+                    - paragraph [ref=e1422]: "0"
+                    - paragraph [ref=e1423]: Conectadas
+                - generic [ref=e1424]:
+                  - img [ref=e1426]
+                  - generic [ref=e1433]:
+                    - paragraph [ref=e1434]: "0"
+                    - paragraph [ref=e1435]: Desconectadas
+              - generic [ref=e1436]:
+                - img [ref=e1437]
+                - textbox "Buscar conexões..." [ref=e1440]
+              - generic [ref=e1441]:
+                - tablist [ref=e1442]:
+                  - tab "Evolution API" [selected] [ref=e1443] [cursor=pointer]:
+                    - img [ref=e1444]
+                    - text: Evolution API
+                  - tab "WhatsApp Oficial" [ref=e1447] [cursor=pointer]:
+                    - img [ref=e1448]
+                    - text: WhatsApp Oficial
+                - tabpanel "Evolution API" [ref=e1450]:
+                  - generic [ref=e1451]:
+                    - paragraph [ref=e1452]: Insira apenas o nome da instância para conectar via Evolution API
+                    - button "Nova Instância" [ref=e1453] [cursor=pointer]:
+                      - img
+                      - text: Nova Instância
+                  - generic [ref=e1454]:
+                    - img [ref=e1455]
+                    - paragraph [ref=e1457]: Nenhuma conexão encontrada
+                  - paragraph [ref=e1458]: Atualizado às 00:36:48
+  - generic [ref=e1052]: "0"

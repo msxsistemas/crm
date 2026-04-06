@@ -1,0 +1,304 @@
+- generic:
+  - generic:
+    - list
+    - region "Notifications alt+T"
+    - generic:
+      - complementary:
+        - generic:
+          - generic:
+            - generic:
+              - img
+            - generic: MSX CRM
+          - button:
+            - img
+        - navigation:
+          - generic:
+            - paragraph: PRINCIPAL
+            - generic:
+              - link:
+                - /url: /
+                - img
+                - generic: Dashboard
+              - link:
+                - /url: /dashboard-legado
+                - img
+                - generic: Dashboard (legado)
+          - generic:
+            - paragraph: CHATS
+            - generic:
+              - link:
+                - /url: /inbox
+                - img
+                - generic: Chats
+              - link:
+                - /url: /pesquisar
+                - img
+                - generic: Pesquisar
+              - link:
+                - /url: /contatos
+                - img
+                - generic: Contatos
+              - link:
+                - /url: /grupos-contatos
+                - img
+                - generic: Grupos de Contatos
+              - link:
+                - /url: /tarefas
+                - img
+                - generic: Tarefas
+              - link:
+                - /url: /agendamentos
+                - img
+                - generic: Agendamentos
+          - generic:
+            - generic:
+              - generic:
+                - button:
+                  - img
+                  - generic: Kanban
+                  - img
+              - generic:
+                - button:
+                  - img
+                  - generic: CRM
+                  - img
+          - generic:
+            - paragraph: FERRAMENTAS
+            - generic:
+              - link:
+                - /url: /tags
+                - img
+                - generic: Tags
+              - link:
+                - /url: /segmentos
+                - img
+                - generic: Segmentos
+              - link:
+                - /url: /respostas-rapidas
+                - img
+                - generic: Respostas Rápidas
+              - link:
+                - /url: /chat-interno
+                - img
+                - generic: Chat Interno
+              - link:
+                - /url: /central-ajuda
+                - img
+                - generic: Central de Ajuda
+              - link:
+                - /url: /deduplicacao
+                - img
+                - generic: Deduplicação
+              - link:
+                - /url: /formularios-captacao
+                - img
+                - generic: Formulários de Captação
+          - generic:
+            - paragraph: ADMINISTRAÇÃO
+            - generic:
+              - link:
+                - /url: /avaliacoes
+                - img
+                - generic: Avaliações
+              - link:
+                - /url: /conexoes
+                - img
+                - generic: Conexões
+              - link:
+                - /url: /filas-chatbot
+                - img
+                - generic: Filas & Chatbot
+              - link:
+                - /url: /categorias
+                - img
+                - generic: Categorias
+              - link:
+                - /url: /usuarios
+                - img
+                - generic: Equipe
+              - link:
+                - /url: /registro-atividades
+                - img
+                - generic: Registro de Atividades
+              - link:
+                - /url: /supervisor
+                - img
+                - generic: Central do Supervisor
+              - link:
+                - /url: /sla
+                - img
+                - generic: Configuração de SLA
+              - link:
+                - /url: /blacklist
+                - img
+                - generic: Lista Negra (Blacklist)
+              - link:
+                - /url: /horarios-agentes
+                - img
+                - generic: Horários dos Agentes
+          - generic:
+            - paragraph: AUTOMAÇÃO
+            - generic:
+              - link:
+                - /url: /flowbuilder
+                - img
+                - generic: FlowBuilder Nativo
+              - link:
+                - /url: /flow-templates
+                - img
+                - generic: Templates de Atendimento
+              - link:
+                - /url: /agente-ia
+                - img
+                - generic: Agente IA
+              - link:
+                - /url: /gerenciador-arquivos
+                - img
+                - generic: Gerenciador de Arquivos
+              - link:
+                - /url: /hsm-templates
+                - img
+                - generic: Templates HSM
+              - link:
+                - /url: /distribuicao-automatica
+                - img
+                - generic: Distribuição Automática
+          - generic:
+            - paragraph: RELATÓRIOS
+            - generic:
+              - link:
+                - /url: /relatorios-customizados
+                - img
+                - generic: Builder de Relatórios
+          - generic:
+            - paragraph: WHATSAPP
+            - generic:
+              - link:
+                - /url: /status-whatsapp
+                - img
+                - generic: Status do WhatsApp
+          - generic:
+            - paragraph: SISTEMA
+            - generic:
+              - link:
+                - /url: /relatorios-agendados
+                - img
+                - generic: Relatórios Agendados
+              - link:
+                - /url: /configuracoes
+                - img
+                - generic: Configurações
+              - link:
+                - /url: /assinatura
+                - img
+                - generic: Minha Assinatura
+        - generic:
+          - generic:
+            - generic: P
+            - generic:
+              - paragraph: planostreaming25
+              - paragraph: planostreaming25@gmail.com
+            - generic:
+              - button:
+                - img
+              - button:
+                - img
+              - button:
+                - img
+      - generic:
+        - generic:
+          - generic: Olá MICHAEL COSME SILVA EDVALDO DE OLIVEIRA, Seja bem vindo(a) a plataforma MSX CRM!
+          - generic:
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - generic: 🔔
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - img
+            - button
+        - main:
+          - generic:
+            - generic:
+              - heading [level=1]: Conexões
+              - generic:
+                - button:
+                  - img
+            - generic:
+              - generic:
+                - generic:
+                  - generic:
+                    - img
+                  - generic:
+                    - paragraph: "0"
+                    - paragraph: Total de conexões
+                - generic:
+                  - generic:
+                    - img
+                  - generic:
+                    - paragraph: "0"
+                    - paragraph: Conectadas
+                - generic:
+                  - generic:
+                    - img
+                  - generic:
+                    - paragraph: "0"
+                    - paragraph: Desconectadas
+              - generic:
+                - img
+                - textbox:
+                  - /placeholder: Buscar conexões...
+              - generic:
+                - tablist:
+                  - tab [selected]:
+                    - img
+                    - text: Evolution API
+                  - tab:
+                    - img
+                    - text: WhatsApp Oficial
+                - tabpanel:
+                  - generic:
+                    - paragraph: Insira apenas o nome da instância para conectar via Evolution API
+                    - button:
+                      - img
+                      - text: Nova Instância
+                  - generic:
+                    - img
+                    - paragraph: Nenhuma conexão encontrada
+                  - paragraph: Atualizado às 00:44:35
+  - dialog [active] [ref=e466]:
+    - generic [ref=e467]:
+      - img [ref=e469]
+      - generic [ref=e472]:
+        - heading "Escanear QR Code" [level=2] [ref=e486]
+        - paragraph [ref=e474]: "Instância: minha-instancia"
+      - button [ref=e475] [cursor=pointer]:
+        - img [ref=e476]
+    - generic [ref=e487]:
+      - paragraph [ref=e488]:
+        - text: Abra o WhatsApp →
+        - strong [ref=e489]: Dispositivos Vinculados
+        - text: →
+        - strong [ref=e490]: Vincular Dispositivo
+      - img [ref=e492]
+      - paragraph [ref=e494]:
+        - img [ref=e495]
+        - text: QR atualiza automaticamente a cada 30s
+      - button "Atualizar agora" [ref=e500] [cursor=pointer]:
+        - img
+        - text: Atualizar agora
