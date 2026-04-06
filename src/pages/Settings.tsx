@@ -25,6 +25,7 @@ import { Loader2 as TabLoader } from "lucide-react";
 const WebhooksTabLazy = lazy(() => import('./settings/WebhooksTab'));
 const ApiTokensTabLazy = lazy(() => import('./settings/ApiTokensTab'));
 const LeadScoringTabLazy = lazy(() => import('./settings/LeadScoringTab'));
+const ApiKeysTabLazy = lazy(() => import('./settings/ApiKeysTab'));
 
 const TabFallback = () => (
   <div className="flex items-center justify-center py-12">
@@ -3154,6 +3155,7 @@ const Settings = () => {
             <TabsTrigger value="hsm_templates_local" className="gap-1.5"><Zap className="h-3.5 w-3.5" /> Templates HSM</TabsTrigger>
             <TabsTrigger value="relatorios_agendados" className="gap-1.5"><Star className="h-3.5 w-3.5" /> Relatórios Agendados</TabsTrigger>
             <TabsTrigger value="webhooks_out" className="gap-1.5"><Globe className="h-3.5 w-3.5" /> Webhooks de Saída</TabsTrigger>
+            <TabsTrigger value="api_publica" className="gap-1.5"><Key className="h-3.5 w-3.5" /> API & Integrações</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -3175,6 +3177,7 @@ const Settings = () => {
           <TabsContent value="hsm_templates_local"><HsmTemplatesTab /></TabsContent>
           <TabsContent value="relatorios_agendados"><RelatoriosAgendadosTab /></TabsContent>
           <TabsContent value="webhooks_out"><WebhooksOutTab /></TabsContent>
+          <TabsContent value="api_publica"><Suspense fallback={<TabFallback />}><ApiKeysTabLazy /></Suspense></TabsContent>
         </Tabs>
       </div>
     </div>

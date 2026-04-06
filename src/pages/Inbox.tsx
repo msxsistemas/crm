@@ -11,7 +11,7 @@ import {
   Shuffle, CheckCircle, X, Image, FileText, Mic, Folder, ChevronDown, Smartphone, Star,
   Trash2, Copy, Forward, Reply, Pencil, Check, AlertCircle, Bot, Clock, Target, Sparkles,
   LayoutTemplate, Tag, History, Ban, LayoutList, List, GitMerge, ShoppingBag, Download,
-  CheckSquare, Users,
+  CheckSquare, Users, Languages,
 } from "lucide-react";
 import { useFollowupReminders } from "@/hooks/useFollowupReminders";
 import FollowupDialog from "@/components/followup/FollowupDialog";
@@ -392,6 +392,9 @@ const Inbox = () => {
   // Keyboard shortcuts help modal
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
 
+  // Inline translation state: messageId -> translated text
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+
   // Follow-up reminder state
   const [showFollowupDialog, setShowFollowupDialog] = useState(false);
   const { reminders: followupReminders, createReminder } = useFollowupReminders();
@@ -582,6 +585,18 @@ const Inbox = () => {
     document.addEventListener("click", handler);
     return () => document.removeEventListener("click", handler);
   }, [sentimentDropdownOpen]);
+
+  const handleTranslate = async (msgId: string, text: string) => {
+    if (translations[msgId]) {
+      // Toggle off
+      setTranslations(prev => { const n = {...prev}; delete n[msgId]; return n; });
+      return;
+    }
+    try {
+      const res = await api.post<{translated: string}>('/translate', { text, target_language: 'pt' });
+      if (res?.translated) setTranslations(prev => ({ ...prev, [msgId]: res.translated }));
+    } catch { toast.error('Erro ao traduzir'); }
+  };
 
   const handleToggleReaction = useCallback(
     async (msgId: string, emoji: string) => {
@@ -3594,6 +3609,24 @@ const Inbox = () => {
                             </p>
                             {/https?:\/\//.test(msg.body) && (
                               <LinkPreview text={msg.body} fromMe={msg.from_me} />
+                            )}
+                            {/* Translate button for inbound messages */}
+                            {!msg.from_me && msg.body && (
+                              <div className="mt-1">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleTranslate(msg.id, msg.body); }}
+                                  className="flex items-center gap-1 text-[10px] text-[#8696a0] hover:text-[#53bdeb] transition-colors"
+                                  title={translations[msg.id] ? "Ocultar tradução" : "Traduzir para português"}
+                                >
+                                  <Languages className="h-2.5 w-2.5" />
+                                  {translations[msg.id] ? "Ocultar tradução" : "Traduzir"}
+                                </button>
+                                {translations[msg.id] && (
+                                  <p className="mt-1 text-[13px] italic text-[#667781] dark:text-[#8696a0] bg-black/5 dark:bg-white/5 rounded px-2 py-1 whitespace-pre-wrap leading-[18px]">
+                                    {translations[msg.id]}
+                                  </p>
+                                )}
+                              </div>
                             )}
                           </>
                         )}

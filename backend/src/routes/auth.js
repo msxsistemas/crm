@@ -136,8 +136,9 @@ export default async function authRoutes(fastify) {
   });
 
   // Update profile
+  // -- ALTER TABLE profiles ADD COLUMN IF NOT EXISTS theme_preference TEXT DEFAULT 'dark';
   fastify.patch('/auth/me', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { name, avatar_url, permissions, two_factor_enabled, signing_enabled, signature, status, max_conversations, absence_enabled, absence_start, absence_end, absence_message } = req.body;
+    const { name, avatar_url, permissions, two_factor_enabled, signing_enabled, signature, status, max_conversations, absence_enabled, absence_start, absence_end, absence_message, theme_preference } = req.body;
     const updates = [];
     const params = [];
     let p = 1;
@@ -153,6 +154,7 @@ export default async function authRoutes(fastify) {
     if (absence_start !== undefined) { updates.push(`absence_start = $${p}`); params.push(absence_start || null); p++; }
     if (absence_end !== undefined) { updates.push(`absence_end = $${p}`); params.push(absence_end || null); p++; }
     if (absence_message !== undefined) { updates.push(`absence_message = $${p}`); params.push(absence_message || null); p++; }
+    if (theme_preference !== undefined && ['dark','light'].includes(theme_preference)) { updates.push(`theme_preference = $${p}`); params.push(theme_preference); p++; }
     if (!updates.length) return reply.status(400).send({ error: 'Nada para atualizar' });
     updates.push(`updated_at = NOW()`);
     params.push(req.user.id);

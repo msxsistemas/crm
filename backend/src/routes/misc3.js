@@ -1,4 +1,16 @@
 // Migration (run manually on VPS if tables don't exist):
+//
+// CREATE TABLE IF NOT EXISTS api_keys (
+//   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+//   name TEXT NOT NULL,
+//   key_hash TEXT NOT NULL UNIQUE,
+//   key_prefix TEXT NOT NULL,
+//   user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+//   is_active BOOLEAN DEFAULT true,
+//   last_used_at TIMESTAMPTZ,
+//   created_at TIMESTAMPTZ DEFAULT NOW()
+// );
+//
 // CREATE TABLE IF NOT EXISTS quick_replies (
 //   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 //   shortcut TEXT NOT NULL,
@@ -619,5 +631,203 @@ export default async function misc3Routes(fastify) {
     } catch {
       return reply.status(422).send({ error: 'Não foi possível carregar preview' });
     }
+  });
+
+  // ── Translation proxy ────────────────────────────────────────────────────────
+  fastify.post('/translate', auth, async (req) => {
+    const { text, target_language } = req.body;
+    if (!text) return { translated: text };
+
+    const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+    if (!anthropicKey) return { translated: text, error: 'No API key' };
+
+    const langNames = { 'pt': 'português', 'en': 'inglês', 'es': 'espanhol', 'fr': 'francês', 'de': 'alemão', 'it': 'italiano', 'zh': 'chinês', 'ja': 'japonês', 'ar': 'árabe' };
+    const targetName = langNames[target_language] || target_language || 'português';
+
+    try {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 500,
+          system: `Traduza o texto a seguir para ${targetName}. Retorne APENAS o texto traduzido, sem explicações ou aspas.`,
+          messages: [{ role: 'user', content: text }]
+        })
+      });
+      if (!resp.ok) return { translated: text };
+      const data = await resp.json();
+      return { translated: data.content?.[0]?.text || text };
+    } catch(e) {
+      return { translated: text };
+    }
+  });
+
+  // ── API Keys (Public API) ────────────────────────────────────────────────────
+  fastify.get('/api-keys', auth, async (req) => {
+    const { rows } = await query('SELECT id, name, key_prefix, created_at, last_used_at, is_active FROM api_keys WHERE user_id=$1 ORDER BY created_at DESC', [req.user.id]);
+    return rows;
+  });
+
+  fastify.post('/api-keys', auth, async (req, reply) => {
+    const { name } = req.body;
+    const crypto = await import('crypto');
+    const fullKey = 'msxcrm_' + crypto.randomBytes(32).toString('hex');
+    const keyHash = crypto.createHash('sha256').update(fullKey).digest('hex');
+    const keyPrefix = fullKey.substring(0, 16) + '...';
+    const { rows } = await query(
+      'INSERT INTO api_keys (name, key_hash, key_prefix, user_id) VALUES ($1,$2,$3,$4) RETURNING id, name, key_prefix, created_at',
+      [name, keyHash, keyPrefix, req.user.id]
+    );
+    return { ...rows[0], full_key: fullKey }; // Only returned once
+  });
+
+  fastify.delete('/api-keys/:id', auth, async (req) => {
+    await query('DELETE FROM api_keys WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    return { ok: true };
+  });
+
+  // ── Public API endpoints (authenticated by X-API-Key header) ─────────────────
+  const apiKeyAuth = async (req, reply) => {
+    const key = req.headers['x-api-key'];
+    if (!key) return reply.code(401).send({ error: 'X-API-Key header required' });
+    const crypto = await import('crypto');
+    const keyHash = crypto.createHash('sha256').update(key).digest('hex');
+    const { rows } = await query('SELECT * FROM api_keys WHERE key_hash=$1 AND is_active=true', [keyHash]);
+    if (!rows[0]) return reply.code(401).send({ error: 'Invalid API key' });
+    await query('UPDATE api_keys SET last_used_at=NOW() WHERE id=$1', [rows[0].id]);
+    req.apiUser = { id: rows[0].user_id };
+  };
+
+  fastify.get('/public/v1/contacts', { preHandler: apiKeyAuth }, async (req) => {
+    const { phone, limit } = req.query;
+    let q = 'SELECT id, name, phone, email, tags FROM contacts WHERE 1=1';
+    const params = [];
+    if (phone) { q += ` AND phone LIKE $${params.length+1}`; params.push(`%${phone}%`); }
+    q += ` ORDER BY created_at DESC LIMIT ${Math.min(parseInt(limit)||50, 100)}`;
+    const { rows } = await query(q, params);
+    return { data: rows };
+  });
+
+  fastify.post('/public/v1/contacts', { preHandler: apiKeyAuth }, async (req, reply) => {
+    const { name, phone, email, tags } = req.body;
+    if (!phone) return reply.code(400).send({ error: 'phone is required' });
+    const { rows } = await query(
+      'INSERT INTO contacts (name, phone, email, tags) VALUES ($1,$2,$3,$4) ON CONFLICT (phone) DO UPDATE SET name=COALESCE(EXCLUDED.name,contacts.name) RETURNING *',
+      [name, phone, email, tags || []]
+    );
+    return reply.code(201).send({ data: rows[0] });
+  });
+
+  fastify.post('/public/v1/messages', { preHandler: apiKeyAuth }, async (req, reply) => {
+    const { phone, text, instance_name } = req.body;
+    if (!phone || !text) return reply.code(400).send({ error: 'phone and text are required' });
+    const resp = await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${instance_name}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+      body: JSON.stringify({ number: phone, text })
+    });
+    return { ok: resp.ok };
+  });
+
+  fastify.get('/public/v1/conversations', { preHandler: apiKeyAuth }, async (req) => {
+    const { status, limit } = req.query;
+    const { rows } = await query(
+      `SELECT c.id, c.status, c.created_at, c.last_message_at, c.last_message_body, ct.name as contact_name, ct.phone as contact_phone FROM conversations c JOIN contacts ct ON ct.id=c.contact_id WHERE ($1::text IS NULL OR c.status=$1) ORDER BY c.last_message_at DESC LIMIT $2`,
+      [status || null, Math.min(parseInt(limit)||50, 100)]
+    );
+    return { data: rows };
+  });
+
+  // ── Capture Forms ─────────────────────────────────────────────────────────
+  fastify.get('/capture-forms', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM capture_forms ORDER BY created_at DESC');
+    return rows;
+  });
+
+  fastify.post('/capture-forms', auth, async (req, reply) => {
+    const { name, fields, destination_team_id } = req.body;
+    const { rows: orgRows } = await query('SELECT organization_id FROM profiles WHERE id=$1', [req.user.id]);
+    const organization_id = orgRows[0]?.organization_id || null;
+    const { rows } = await query(
+      'INSERT INTO capture_forms (name, fields, destination_team_id, organization_id) VALUES ($1,$2,$3,$4) RETURNING *',
+      [name, JSON.stringify(fields || []), destination_team_id || null, organization_id]
+    );
+    return reply.code(201).send(rows[0]);
+  });
+
+  fastify.patch('/capture-forms/:id', auth, async (req) => {
+    const { name, fields, destination_team_id } = req.body;
+    const sets = []; const vals = []; let p = 1;
+    if (name !== undefined) { sets.push(`name=$${p}`); vals.push(name); p++; }
+    if (fields !== undefined) { sets.push(`fields=$${p}`); vals.push(JSON.stringify(fields)); p++; }
+    if (destination_team_id !== undefined) { sets.push(`destination_team_id=$${p}`); vals.push(destination_team_id); p++; }
+    if (!sets.length) return {};
+    vals.push(req.params.id);
+    const { rows } = await query(`UPDATE capture_forms SET ${sets.join(',')} WHERE id=$${p} RETURNING *`, vals);
+    return rows[0] || {};
+  });
+
+  fastify.delete('/capture-forms/:id', auth, async (req) => {
+    await query('DELETE FROM capture_forms WHERE id=$1', [req.params.id]);
+    return { ok: true };
+  });
+
+  // Public capture form endpoints (no auth)
+  fastify.get('/public/capture/:slug', async (req, reply) => {
+    const { rows } = await query('SELECT id, name, fields, slug FROM capture_forms WHERE slug=$1', [req.params.slug]);
+    if (!rows[0]) return reply.code(404).send({ error: 'Formulário não encontrado' });
+    return rows[0];
+  });
+
+  fastify.post('/public/capture/:slug/submit', async (req, reply) => {
+    const { rows: formRows } = await query('SELECT * FROM capture_forms WHERE slug=$1', [req.params.slug]);
+    if (!formRows[0]) return reply.code(404).send({ error: 'Formulário não encontrado' });
+    const form = formRows[0];
+    const body = req.body || {};
+    // Create contact from form data
+    const contactRes = await query(
+      'INSERT INTO contacts (name, phone, email, organization_id) VALUES ($1,$2,$3,$4) ON CONFLICT (phone, organization_id) DO UPDATE SET name=EXCLUDED.name RETURNING id',
+      [body.name || 'Lead', body.phone || null, body.email || null, form.organization_id]
+    );
+    const contactId = contactRes.rows[0].id;
+    // Create conversation
+    const convRes = await query(
+      "INSERT INTO conversations (contact_id, organization_id, status, channel, assigned_team_id, origin) VALUES ($1,$2,'open','web',$3,'capture_form') RETURNING id",
+      [contactId, form.organization_id, form.destination_team_id]
+    );
+    return reply.code(201).send({ ok: true, conversation_id: convRes.rows[0].id });
+  });
+
+  // ── Conversation Checklist ────────────────────────────────────────────────
+  fastify.get('/conversations/:id/checklist', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM conversation_checklist WHERE conversation_id=$1 ORDER BY created_at ASC', [req.params.id]);
+    return rows;
+  });
+
+  fastify.post('/conversations/:id/checklist', auth, async (req, reply) => {
+    const { text } = req.body;
+    if (!text) return reply.code(400).send({ error: 'text é obrigatório' });
+    const { rows } = await query(
+      'INSERT INTO conversation_checklist (conversation_id, text) VALUES ($1,$2) RETURNING *',
+      [req.params.id, text]
+    );
+    return reply.code(201).send(rows[0]);
+  });
+
+  fastify.patch('/conversations/:id/checklist/:itemId', auth, async (req) => {
+    const { done, text } = req.body;
+    const sets = []; const vals = []; let p = 1;
+    if (done !== undefined) { sets.push(`done=$${p}`); vals.push(done); p++; }
+    if (text !== undefined) { sets.push(`text=$${p}`); vals.push(text); p++; }
+    if (!sets.length) return {};
+    vals.push(req.params.itemId);
+    const { rows } = await query(`UPDATE conversation_checklist SET ${sets.join(',')} WHERE id=$${p} RETURNING *`, vals);
+    return rows[0] || {};
+  });
+
+  fastify.delete('/conversations/:id/checklist/:itemId', auth, async (req) => {
+    await query('DELETE FROM conversation_checklist WHERE id=$1 AND conversation_id=$2', [req.params.itemId, req.params.id]);
+    return { ok: true };
   });
 }

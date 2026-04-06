@@ -96,6 +96,12 @@ const TopBar = ({ onStartTour }: TopBarProps) => {
   const [socketStatus, setSocketStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [apiStatus, setApiStatus] = useState<'connected' | 'disconnected'>('disconnected');
 
+  // Persist theme preference to server when changed
+  useEffect(() => {
+    if (!theme) return;
+    api.patch('/auth/me', { theme_preference: theme }).catch(() => {});
+  }, [theme]);
+
   // Notification states
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
