@@ -1,3 +1,13 @@
+// Migration SQL (run manually on DB):
+// ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_sent_at TIMESTAMPTZ;
+// ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_score INTEGER;
+// ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_responded_at TIMESTAMPTZ;
+// ALTER TABLE settings ADD COLUMN IF NOT EXISTS csat_enabled BOOLEAN DEFAULT false;
+// ALTER TABLE settings ADD COLUMN IF NOT EXISTS csat_message TEXT;
+// ALTER TABLE conversations ADD COLUMN IF NOT EXISTS sla_deadline TIMESTAMPTZ;
+// ALTER TABLE conversations ADD COLUMN IF NOT EXISTS sla_alerted BOOLEAN DEFAULT false;
+// ALTER TABLE categories ADD COLUMN IF NOT EXISTS sla_hours INTEGER;
+
 import { query, pool, withTransaction } from '../database.js';
 import { cached, invalidate } from '../redis.js';
 import { deliverWebhook } from '../jobs/webhookDelivery.js';
@@ -109,12 +119,20 @@ export default async function conversationRoutes(fastify) {
 
   // Create conversation
   fastify.post('/conversations', auth, async (req, reply) => {
-    const { contact_id, connection_name, assigned_to, status = 'open' } = req.body;
+    const { contact_id, connection_name, assigned_to, status = 'open', category_id } = req.body;
     const { rows } = await query(
-      'INSERT INTO conversations (contact_id, connection_name, assigned_to, status) VALUES ($1,$2,$3,$4) RETURNING *',
-      [contact_id, connection_name, assigned_to, status]
+      'INSERT INTO conversations (contact_id, connection_name, assigned_to, status, category_id) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [contact_id, connection_name, assigned_to, status, category_id || null]
     );
-    return reply.status(201).send(rows[0]);
+    const conv = rows[0];
+    // Set SLA deadline if category has sla_hours
+    if (category_id) {
+      query(
+        "UPDATE conversations SET sla_deadline=NOW() + interval '1 hour' * (SELECT sla_hours FROM categories WHERE id=$1 AND sla_hours IS NOT NULL) WHERE id=$2 AND (SELECT sla_hours FROM categories WHERE id=$1) IS NOT NULL",
+        [category_id, conv.id]
+      ).catch(() => {});
+    }
+    return reply.status(201).send(conv);
   });
 
   // Update conversation
@@ -211,6 +229,14 @@ export default async function conversationRoutes(fastify) {
         [req.params.id, req.body.assigned_to ? 'assigned' : 'unassigned', req.user?.id || null, actorName, null, agentLabel]).catch(() => {});
     }
 
+    // Update SLA deadline when category changes
+    if (req.body.category_id) {
+      query(
+        "UPDATE conversations SET sla_deadline=NOW() + interval '1 hour' * cat.sla_hours FROM categories cat WHERE cat.id=$1 AND cat.sla_hours IS NOT NULL AND conversations.id=$2",
+        [req.body.category_id, req.params.id]
+      ).catch(() => {});
+    }
+
     // Emit realtime update + invalidate cache
     fastify.io?.emit('conversation:updated', rows[0]);
     invalidate('conv:list:*').catch(() => {});
@@ -247,6 +273,29 @@ export default async function conversationRoutes(fastify) {
           body: JSON.stringify({ number: row.phone, text: '⭐ Como você avaliaria nosso atendimento?\nResponda com um número de *1* a *5*:\n\n1 - Muito ruim\n2 - Ruim\n3 - Regular\n4 - Bom\n5 - Excelente' }),
         }).catch(() => {});
       }).catch(() => {});
+    }
+
+    // CSAT automático: enviar mensagem CSAT ao fechar conversa se csat_enabled=true
+    if (req.body.status === 'closed') {
+      const { rows: sRows } = await query('SELECT csat_enabled, csat_message FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+      if (sRows[0]?.csat_enabled) {
+        const { rows: cRows } = await query(
+          'SELECT c.connection_name, ct.phone FROM conversations c JOIN contacts ct ON ct.id=c.contact_id WHERE c.id=$1',
+          [req.params.id]
+        ).catch(() => ({ rows: [] }));
+        if (cRows[0]) {
+          const csatMsg = sRows[0].csat_message || 'Como você avalia nosso atendimento? Responda com um número de 1 a 5 (1=péssimo, 5=ótimo)';
+          const { rows: sEvo } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+          if (sEvo[0]?.evolution_url) {
+            fetch(`${sEvo[0].evolution_url}/message/sendText/${cRows[0].connection_name}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': sEvo[0].evolution_key },
+              body: JSON.stringify({ number: cRows[0].phone, text: csatMsg })
+            }).catch(() => {});
+            query('UPDATE conversations SET csat_sent_at=NOW() WHERE id=$1', [req.params.id]).catch(() => {});
+          }
+        }
+      }
     }
 
     return rows[0];
@@ -367,6 +416,54 @@ ${'─'.repeat(60)}
     return rows[0];
   });
 
+  // SLA violated conversations
+  fastify.get('/conversations/sla-violated', auth, async (req) => {
+    const { rows } = await query(`
+      SELECT c.*, ct.name as contact_name, ct.phone as contact_phone
+      FROM conversations c
+      JOIN contacts ct ON ct.id = c.contact_id
+      WHERE c.status='open' AND c.sla_deadline IS NOT NULL AND c.sla_deadline < NOW()
+      ORDER BY c.sla_deadline ASC
+      LIMIT 50
+    `);
+    return rows;
+  });
+
+  // Bulk archive conversations
+  fastify.post('/conversations/archive-bulk', auth, async (req) => {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) return { ok: true };
+    const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+    await query(`UPDATE conversations SET status='archived', updated_at=NOW() WHERE id IN (${placeholders})`, ids);
+    invalidate('conv:list:*').catch(() => {});
+    return { ok: true, count: ids.length };
+  });
+
+  // Send audio (base64) via Evolution API
+  fastify.post('/conversations/:id/send-audio', auth, async (req, reply) => {
+    const { audio_base64, mime_type } = req.body;
+    const { rows } = await query(
+      'SELECT c.connection_name AS instance_name, ct.phone FROM conversations c JOIN contacts ct ON ct.id=c.contact_id WHERE c.id=$1',
+      [req.params.id]
+    );
+    if (!rows[0]) return reply.code(404).send({ error: 'Not found' });
+    const { rows: settings } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
+    const s = settings[0];
+    if (!s?.evolution_url) return reply.code(400).send({ error: 'Evolution API não configurada' });
+    const resp = await fetch(`${s.evolution_url}/message/sendMedia/${rows[0].instance_name}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': s.evolution_key },
+      body: JSON.stringify({
+        number: rows[0].phone,
+        mediatype: 'audio',
+        media: audio_base64,
+        fileName: 'audio.ogg',
+        mimetype: mime_type || 'audio/ogg',
+      }),
+    });
+    return { ok: resp.ok };
+  });
+
   // Bulk assign conversations from one agent to another
   fastify.post('/conversations/bulk-assign', auth, async (req) => {
     const { from_user, to_user } = req.body;
@@ -402,6 +499,24 @@ ${'─'.repeat(60)}
         )
     `);
     return { count: rows[0]?.count ?? 0 };
+  });
+
+  // ── Scheduled Messages ────────────────────────────────────────────────────
+  fastify.post('/conversations/:id/scheduled-messages', auth, async (req, reply) => {
+    const { content, scheduled_at } = req.body;
+    const { rows } = await query(
+      'INSERT INTO scheduled_messages (conversation_id, content, scheduled_at, created_by, status) VALUES ($1,$2,$3,$4,\'pending\') RETURNING *',
+      [req.params.id, content, scheduled_at, req.user.id]
+    );
+    return rows[0];
+  });
+  fastify.get('/conversations/:id/scheduled-messages', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM scheduled_messages WHERE conversation_id=$1 AND status=\'pending\' ORDER BY scheduled_at ASC', [req.params.id]);
+    return rows;
+  });
+  fastify.delete('/scheduled-messages/:id', auth, async (req) => {
+    await query('DELETE FROM scheduled_messages WHERE id=$1', [req.params.id]);
+    return { ok: true };
   });
 
   fastify.get('/conversations/pending-response', auth, async (req) => {

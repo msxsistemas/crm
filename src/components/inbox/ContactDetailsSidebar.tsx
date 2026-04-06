@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clock, TrendingUp, Send, ChevronDown, ChevronUp, Cake } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clock, TrendingUp, Send, ChevronDown, ChevronUp, Cake, Star } from "lucide-react";
 import TagSelector from "@/components/shared/TagSelector";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { db } from "@/lib/db";
+import api from "@/lib/api";
 
 interface ContactDetailsSidebarProps {
   contactId: string;
@@ -125,6 +127,11 @@ const ContactDetailsSidebar = ({
   const [auditEvents, setAuditEvents] = useState<{ id: string; event_type: string; actor_name: string | null; old_value: string | null; new_value: string | null; created_at: string }[]>([]);
   const [auditOpen, setAuditOpen] = useState(false);
 
+  // Contact conversation history
+  const [contactHistory, setContactHistory] = useState<any[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const navigate = useNavigate();
+
   // @mention states
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -148,6 +155,14 @@ const ContactDetailsSidebar = ({
         }
       });
   }, []);
+
+  // Load contact history when contactId changes
+  useEffect(() => {
+    if (!contactId) return;
+    api.get<any[]>(`/contacts/${contactId}/conversations`)
+      .then(data => setContactHistory(data || []))
+      .catch(() => {});
+  }, [contactId]);
 
   // Filter mention results when mentionQuery changes
   useEffect(() => {
@@ -693,6 +708,72 @@ const ContactDetailsSidebar = ({
             {savingNote ? "Salvando..." : "Adicionar nota"}
           </Button>
         </div>
+      </div>
+
+      {/* Histórico de Atendimentos */}
+      <div className="px-4 py-3 border-b border-border">
+        <button
+          className="flex items-center justify-between w-full"
+          onClick={() => setHistoryOpen(v => !v)}
+        >
+          <div className="flex items-center gap-2">
+            <History className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-semibold text-foreground">
+              Histórico de Atendimentos ({contactHistory.length})
+            </span>
+          </div>
+          {historyOpen ? (
+            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          )}
+        </button>
+
+        {historyOpen && (
+          <div className="mt-3 space-y-2">
+            {contactHistory.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Nenhum atendimento anterior</p>
+            ) : (
+              contactHistory.map((c) => {
+                const statusConfig: Record<string, { label: string; className: string }> = {
+                  open: { label: "Aberta", className: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
+                  closed: { label: "Encerrada", className: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400" },
+                  in_progress: { label: "Em andamento", className: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300" },
+                };
+                const sc = statusConfig[c.status] ?? statusConfig["open"];
+                const lastMsg = c.last_message_body ? (c.last_message_body.length > 40 ? c.last_message_body.slice(0, 40) + "…" : c.last_message_body) : "—";
+                return (
+                  <div
+                    key={c.id}
+                    className="rounded-md p-2.5 bg-muted/40 hover:bg-muted/60 cursor-pointer transition-colors"
+                    onClick={() => navigate(`/inbox?conversation=${c.id}`)}
+                  >
+                    <div className="flex items-center justify-between gap-1 mb-1">
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${sc.className}`}>{sc.label}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {new Date(c.created_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" })}
+                      </span>
+                    </div>
+                    {c.agent_name && (
+                      <p className="text-[11px] text-muted-foreground">Agente: {c.agent_name}</p>
+                    )}
+                    {c.category_name && (
+                      <p className="text-[11px] text-muted-foreground">Categoria: {c.category_name}</p>
+                    )}
+                    <p className="text-[11px] text-foreground mt-0.5">{lastMsg}</p>
+                    {c.csat_score != null && (
+                      <div className="flex items-center gap-0.5 mt-1">
+                        {[1,2,3,4,5].map(n => (
+                          <Star key={n} className={`h-3 w-3 ${n <= c.csat_score ? 'text-yellow-400 fill-yellow-400' : 'text-muted-foreground'}`} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
       </div>
 
       {/* Timeline */}

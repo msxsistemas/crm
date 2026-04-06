@@ -154,6 +154,21 @@ export default async function contactRoutes(fastify) {
     return { updated, total: contacts.length };
   });
 
+  // Contact conversation history
+  fastify.get('/contacts/:id/conversations', auth, async (req) => {
+    const { rows } = await query(`
+      SELECT c.id, c.status, c.created_at, c.closed_at, c.last_message_body, c.last_message_at,
+             c.csat_score, p.full_name as agent_name, cat.name as category_name
+      FROM conversations c
+      LEFT JOIN profiles p ON p.id = c.assigned_to
+      LEFT JOIN categories cat ON cat.id = c.category_id
+      WHERE c.contact_id = $1
+      ORDER BY c.created_at DESC
+      LIMIT 50
+    `, [req.params.id]);
+    return rows;
+  });
+
   // Detect duplicate contacts (same phone)
   fastify.get('/contacts/duplicates', auth, async (req) => {
     const { rows } = await query(`
@@ -200,6 +215,85 @@ export default async function contactRoutes(fastify) {
       } catch { errors++; }
     }
     return { imported, skipped, errors };
+  });
+
+  // ── Contact Segments CRUD ─────────────────────────────────────────────────
+  // Migration (run once on DB):
+  // CREATE TABLE IF NOT EXISTS contact_segments (
+  //   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  //   name TEXT NOT NULL,
+  //   description TEXT,
+  //   rules JSONB DEFAULT '[]',
+  //   created_at TIMESTAMPTZ DEFAULT NOW()
+  // );
+
+  fastify.get('/segments', auth, async () => {
+    const { rows } = await query('SELECT * FROM contact_segments ORDER BY created_at DESC');
+    return rows;
+  });
+
+  fastify.post('/segments', auth, async (req, reply) => {
+    const { name, description, rules } = req.body;
+    if (!name) return reply.status(400).send({ error: 'name é obrigatório' });
+    const { rows } = await query(
+      'INSERT INTO contact_segments (name, description, rules) VALUES ($1,$2,$3) RETURNING *',
+      [name, description || null, JSON.stringify(rules || [])]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.patch('/segments/:id', auth, async (req, reply) => {
+    const { name, description, rules } = req.body;
+    const updates = [];
+    const params = [];
+    let p = 1;
+    if (name !== undefined) { updates.push(`name=$${p}`); params.push(name); p++; }
+    if (description !== undefined) { updates.push(`description=$${p}`); params.push(description); p++; }
+    if (rules !== undefined) { updates.push(`rules=$${p}`); params.push(JSON.stringify(rules)); p++; }
+    if (!updates.length) return reply.status(400).send({ error: 'Nada para atualizar' });
+    params.push(req.params.id);
+    const { rows } = await query(`UPDATE contact_segments SET ${updates.join(',')} WHERE id=$${p} RETURNING *`, params);
+    if (!rows[0]) return reply.status(404).send({ error: 'Segmento não encontrado' });
+    return rows[0];
+  });
+
+  fastify.delete('/segments/:id', auth, async (req, reply) => {
+    const { rowCount } = await query('DELETE FROM contact_segments WHERE id=$1', [req.params.id]);
+    if (!rowCount) return reply.status(404).send({ error: 'Segmento não encontrado' });
+    return { ok: true };
+  });
+
+  fastify.get('/segments/:id/contacts', auth, async (req, reply) => {
+    const { rows: segs } = await query('SELECT * FROM contact_segments WHERE id=$1', [req.params.id]);
+    if (!segs[0]) return reply.status(404).send({ error: 'Segmento não encontrado' });
+    const rules = segs[0].rules || [];
+
+    const conditions = [];
+    const params = [];
+    let pi = 1;
+
+    for (const rule of rules) {
+      if (rule.field === 'tag' && rule.operator === 'contains') {
+        conditions.push(`$${pi} = ANY(tags)`); params.push(rule.value); pi++;
+      } else if (rule.field === 'created_days_ago' && rule.operator === 'less_than') {
+        conditions.push(`created_at > NOW() - interval '1 day' * $${pi}`); params.push(Number(rule.value)); pi++;
+      } else if (rule.field === 'phone_contains') {
+        conditions.push(`phone LIKE $${pi}`); params.push(`%${rule.value}%`); pi++;
+      } else if (rule.field === 'label' && rule.operator === 'contains') {
+        conditions.push(`$${pi} = ANY(label_ids)`); params.push(rule.value); pi++;
+      } else if (rule.field === 'city' && rule.operator === 'contains') {
+        conditions.push(`city ILIKE $${pi}`); params.push(`%${rule.value}%`); pi++;
+      } else if (rule.field === 'state' && rule.operator === 'equals') {
+        conditions.push(`state = $${pi}`); params.push(rule.value); pi++;
+      }
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const { rows } = await query(
+      `SELECT id, name, phone, email, tags, created_at FROM contacts ${where} LIMIT 500`,
+      params
+    );
+    return rows;
   });
 
   // Import contacts via vCard (.vcf)

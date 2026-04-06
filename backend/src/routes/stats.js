@@ -348,6 +348,24 @@ export default async function statsRoutes(fastify) {
     return result;
   });
 
+  // CSAT stats
+  fastify.get('/stats/csat', auth, async (req) => {
+    const { start, end } = req.query;
+    const { rows } = await query(`
+      SELECT
+        ROUND(AVG(csat_score)::numeric, 2) as avg_score,
+        COUNT(*) FILTER (WHERE csat_score IS NOT NULL) as total_responses,
+        COUNT(*) FILTER (WHERE csat_sent_at IS NOT NULL) as total_sent,
+        COUNT(*) FILTER (WHERE csat_score = 5) as score_5,
+        COUNT(*) FILTER (WHERE csat_score = 4) as score_4,
+        COUNT(*) FILTER (WHERE csat_score = 3) as score_3,
+        COUNT(*) FILTER (WHERE csat_score <= 2) as score_low
+      FROM conversations
+      WHERE csat_sent_at >= $1 AND csat_sent_at <= $2
+    `, [start || '2020-01-01', end || 'NOW()']);
+    return rows[0];
+  });
+
   // Agent stats for today
   fastify.get('/stats/agents-today', auth, async (req) => {
     const { rows } = await query(`

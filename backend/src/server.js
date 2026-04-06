@@ -1,3 +1,15 @@
+// Migration (run manually on VPS if table doesn't exist):
+// CREATE TABLE IF NOT EXISTS scheduled_messages (
+//   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+//   conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+//   content TEXT NOT NULL,
+//   scheduled_at TIMESTAMPTZ NOT NULL,
+//   status TEXT DEFAULT 'pending',
+//   sent_at TIMESTAMPTZ,
+//   created_by UUID REFERENCES profiles(id),
+//   created_at TIMESTAMPTZ DEFAULT NOW()
+// );
+
 import 'dotenv/config';
 import * as Sentry from '@sentry/node';
 import Fastify from 'fastify';
@@ -182,6 +194,21 @@ startSchedulesWorker(io);
 deliverWebhook.startWorker();
 startSLAWorker();
 
+// SLA violation check — runs every 5 minutes, emits socket event
+setInterval(async () => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT c.id, c.assigned_to FROM conversations c
+      WHERE c.status='open' AND c.sla_deadline IS NOT NULL
+      AND c.sla_deadline < NOW() AND c.sla_alerted = false
+    `);
+    for (const c of rows) {
+      await pool.query('UPDATE conversations SET sla_alerted=true WHERE id=$1', [c.id]);
+      if (io) io.emit('sla:violated', { conversation_id: c.id, assigned_to: c.assigned_to });
+    }
+  } catch(e) { /* silent */ }
+}, 300000);
+
 // Auto-close inactive conversations (runs every hour)
 const autoCloseInactive = async () => {
   try {
@@ -206,6 +233,25 @@ const autoCloseInactive = async () => {
 };
 setInterval(autoCloseInactive, 60 * 60 * 1000); // a cada hora
 autoCloseInactive(); // rodar na inicialização também
+
+// Scheduled messages job — runs every minute
+setInterval(async () => {
+  try {
+    const { rows } = await pool.query("SELECT sm.*, c.connection_name as instance_name, ct.phone FROM scheduled_messages sm JOIN conversations c ON c.id=sm.conversation_id JOIN contacts ct ON ct.id=c.contact_id WHERE sm.status='pending' AND sm.scheduled_at <= NOW()");
+    for (const msg of rows) {
+      try {
+        await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${msg.instance_name}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+          body: JSON.stringify({ number: msg.phone, text: msg.content })
+        });
+        await pool.query("UPDATE scheduled_messages SET status='sent', sent_at=NOW() WHERE id=$1", [msg.id]);
+      } catch(e) {
+        await pool.query("UPDATE scheduled_messages SET status='error' WHERE id=$1", [msg.id]);
+      }
+    }
+  } catch(e) { /* silent */ }
+}, 60000);
 
 // Start
 const PORT = parseInt(process.env.PORT || '3000');

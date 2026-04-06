@@ -807,6 +807,7 @@ const HorariosTab = () => {
   const [enabled, setEnabled] = useState(true);
   const [offMessage, setOffMessage] = useState("No momento estamos fora do horário de atendimento. Retornaremos em breve!");
   const [csatEnabled, setCsatEnabled] = useState(false);
+  const [csatMessage, setCsatMessage] = useState("Como você avalia nosso atendimento? Responda com um número de 1 a 5 (1=péssimo, 5=ótimo)");
   const [schedule, setSchedule] = useState(DEFAULT_DAYS);
   const [saving, setSaving] = useState(false);
   const [autoAssignEnabled, setAutoAssignEnabled] = useState(false);
@@ -818,6 +819,8 @@ const HorariosTab = () => {
       if (data.office_hours_off_message) setOffMessage(data.office_hours_off_message);
       if (data.office_hours_schedule?.length) setSchedule(data.office_hours_schedule);
       if (data.auto_csat_enabled !== undefined) setCsatEnabled(data.auto_csat_enabled);
+      if (data.csat_enabled !== undefined) setCsatEnabled(data.csat_enabled);
+      if (data.csat_message) setCsatMessage(data.csat_message);
       if (data.auto_assign_enabled !== undefined) setAutoAssignEnabled(data.auto_assign_enabled);
       if (data.auto_close_days !== undefined) setAutoCloseDays(parseInt(data.auto_close_days) || 0);
     }).catch(() => {});
@@ -841,6 +844,8 @@ const HorariosTab = () => {
         office_hours_off_message: offMessage,
         office_hours_schedule: schedule,
         auto_csat_enabled: csatEnabled,
+        csat_enabled: csatEnabled,
+        csat_message: csatMessage,
         auto_assign_enabled: autoAssignEnabled,
         auto_close_days: autoCloseDays,
       });
@@ -886,9 +891,15 @@ const HorariosTab = () => {
           <Switch checked={csatEnabled} onCheckedChange={handleCsatToggle} />
         </div>
         {csatEnabled && (
-          <div className="mt-3 rounded-lg bg-muted/40 border border-border p-3 text-xs text-muted-foreground">
-            <p className="font-medium text-foreground mb-1">Mensagem enviada ao encerrar:</p>
-            <p className="whitespace-pre-line">{`Olá [nome]! 😊 Como você avalia o atendimento que recebeu hoje?\n\n1️⃣ - Péssimo\n2️⃣ - Ruim\n3️⃣ - Regular\n4️⃣ - Bom\n5️⃣ - Excelente\n\nResponda com o número correspondente.`}</p>
+          <div className="mt-3 space-y-2">
+            <label className="text-sm font-medium text-foreground">Mensagem de avaliação</label>
+            <Textarea
+              value={csatMessage}
+              onChange={e => setCsatMessage(e.target.value)}
+              rows={3}
+              placeholder="Mensagem enviada ao cliente ao encerrar a conversa..."
+            />
+            <p className="text-xs text-muted-foreground">O cliente deve responder com um número de 1 a 5</p>
           </div>
         )}
       </Card>

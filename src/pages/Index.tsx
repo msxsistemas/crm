@@ -486,6 +486,15 @@ const Index = () => {
   const closedCount = data?.realtime.closedCount ?? 0;
   const prevKPIs = data?.prevKpis ?? { resolutionRate: 0, avgResponseMinutes: 0, slaCompliance: 0, totalTickets: 0 };
 
+  // CSAT stats
+  const [csatStats, setCsatStats] = useState<{ avg_score: string | null; total_responses: number; total_sent: number } | null>(null);
+  useEffect(() => {
+    if (!startDate || !endDate) return;
+    api.get<any>(`/stats/csat?start=${startDate}&end=${endDate}`)
+      .then(d => setCsatStats(d))
+      .catch(() => {});
+  }, [startDate, endDate]);
+
   // Extra widget data — deferred until after primary render
   const { topContacts } = useTopContacts(widgetsReady);
   const { activities } = useRecentActivity(widgetsReady);
@@ -1047,14 +1056,31 @@ const Index = () => {
             ))}
           </div>
 
-          <div className="mt-4">
-            <div className="rounded-xl border bg-slate-50/60 dark:bg-slate-950/20 border-slate-200 dark:border-slate-800 px-5 py-6 max-w-xs relative">
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="rounded-xl border bg-slate-50/60 dark:bg-slate-950/20 border-slate-200 dark:border-slate-800 px-5 py-6 relative">
               <div className="absolute top-5 right-5 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900/40">
                 <FileText className="h-5 w-5 text-slate-500" />
               </div>
               <p className="text-[10px] font-bold text-muted-foreground tracking-wider uppercase mb-3">TOTAL DE CONTATOS</p>
               <p className="text-4xl font-bold text-foreground">{data?.kpis.totalContacts ?? 0}</p>
               <p className="text-[10px] text-muted-foreground mt-2">Contatos na plataforma</p>
+            </div>
+
+            {/* CSAT Card */}
+            <div className="rounded-xl border bg-yellow-50/60 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800 px-5 py-6 relative">
+              <div className="absolute top-5 right-5 p-2.5 rounded-xl bg-yellow-100 dark:bg-yellow-900/40">
+                <Star className="h-5 w-5 text-yellow-500" />
+              </div>
+              <p className="text-[10px] font-bold text-muted-foreground tracking-wider uppercase mb-3">NOTA MÉDIA CSAT</p>
+              <p className="text-4xl font-bold text-foreground">
+                {csatStats?.avg_score ? Number(csatStats.avg_score).toFixed(1) : "—"}
+                <span className="text-lg font-medium text-muted-foreground"> /5</span>
+              </p>
+              <p className="text-[10px] text-muted-foreground mt-2">
+                {csatStats
+                  ? `${csatStats.total_responses} resp. de ${csatStats.total_sent} enviadas${csatStats.total_sent > 0 ? ` (${Math.round((csatStats.total_responses / csatStats.total_sent) * 100)}%)` : ''}`
+                  : "Sem dados no período"}
+              </p>
             </div>
           </div>
         </div>

@@ -450,6 +450,18 @@ async function handleEvolutionWebhook(payload, fastify) {
       }
     }
 
+    // ── CSAT automático: detectar resposta 1-5 para conversas fechadas com csat_sent_at ──
+    if (textContent) {
+      const bodyNum = parseInt(textContent.trim());
+      if (!isNaN(bodyNum) && bodyNum >= 1 && bodyNum <= 5) {
+        const { rows: csatRows } = await query('SELECT csat_sent_at, status FROM conversations WHERE id=$1', [conv.id]).catch(() => ({ rows: [] }));
+        if (csatRows[0]?.csat_sent_at && csatRows[0]?.status === 'closed') {
+          await query('UPDATE conversations SET csat_score=$1, csat_responded_at=NOW() WHERE id=$2', [bodyNum, conv.id]).catch(() => {});
+          return; // não processar mais
+        }
+      }
+    }
+
     // ── Office hours check ────────────────────────────────────────────────
     try {
       const { rows: s } = await query('SELECT office_hours_enabled, office_hours_schedule, office_hours_off_message FROM settings WHERE id=1');
