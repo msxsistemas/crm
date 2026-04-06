@@ -502,6 +502,24 @@ export default async function statsRoutes(fastify) {
     return rows[0] || {};
   });
 
+  // ── Campaigns Dashboard ───────────────────────────────────────────────────
+  fastify.get('/stats/campaigns', auth, async (req) => {
+    const { rows } = await query(`
+      SELECT
+        c.id, c.name, c.status, c.created_at,
+        COUNT(cr.id) as total_sent,
+        COUNT(cr.id) FILTER (WHERE cr.status='delivered') as delivered,
+        COUNT(cr.id) FILTER (WHERE cr.status='read') as read_count,
+        COUNT(DISTINCT cv.id) FILTER (WHERE cv.last_message_at > c.dispatched_at) as replied
+      FROM campaigns c
+      LEFT JOIN campaign_recipients cr ON cr.campaign_id = c.id
+      LEFT JOIN conversations cv ON cv.contact_id = cr.contact_id AND cv.created_at >= c.created_at
+      WHERE c.status = 'sent' OR c.dispatched_at IS NOT NULL
+      GROUP BY c.id ORDER BY c.created_at DESC LIMIT 20
+    `);
+    return rows;
+  });
+
   // ── Tags Analytics ────────────────────────────────────────────────────────
   fastify.get('/stats/tags', auth, async (req) => {
     const { start, end } = req.query;

@@ -2852,6 +2852,101 @@ const Inbox = () => {
         )}
 
         {/* Conversation list */}
+        {viewMode === 'kanban' ? (
+          <div className="flex-1 overflow-hidden">
+            {loading ? (
+              <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">Carregando...</div>
+            ) : (
+              <div className="flex h-full gap-0 overflow-x-auto">
+                {/* Aguardando column */}
+                {(() => {
+                  const col = conversations.filter(c => c.status === 'open' && !c.assigned_to);
+                  return (
+                    <div className="flex flex-col min-w-[200px] flex-1 border-r border-border">
+                      <div className="px-3 py-2 bg-yellow-500/10 border-b border-border shrink-0">
+                        <span className="text-xs font-bold text-yellow-600 uppercase tracking-wide">Aguardando</span>
+                        <span className="ml-2 text-xs font-bold text-yellow-600">{col.length}</span>
+                      </div>
+                      <div className="flex-1 overflow-y-auto scrollbar-thin p-1.5 space-y-1.5">
+                        {col.map(convo => (
+                          <div
+                            key={convo.id}
+                            className={cn("rounded-lg border border-border bg-card p-2.5 cursor-pointer hover:bg-muted/50 transition-colors", selected === convo.id && "ring-2 ring-primary")}
+                            onClick={() => handleSelectConvo(convo.id)}
+                          >
+                            <p className="text-xs font-semibold truncate text-foreground">{convo.contacts?.name || convo.contacts?.phone}</p>
+                            <p className="text-[11px] text-muted-foreground truncate mt-0.5">{(convo.last_message_body || '').slice(0, 40)}</p>
+                            <span className="text-[10px] text-muted-foreground">{formatTime(convo.last_message_at)}</span>
+                            {convo.unread_count > 0 && (
+                              <span className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-green-600 px-1 text-[9px] font-bold text-white">{convo.unread_count}</span>
+                            )}
+                          </div>
+                        ))}
+                        {col.length === 0 && <p className="text-xs text-muted-foreground text-center py-4">Vazio</p>}
+                      </div>
+                    </div>
+                  );
+                })()}
+                {/* Em Atendimento column */}
+                {(() => {
+                  const col = conversations.filter(c => c.status === 'in_progress' || (c.status === 'open' && c.assigned_to));
+                  return (
+                    <div className="flex flex-col min-w-[200px] flex-1 border-r border-border">
+                      <div className="px-3 py-2 bg-green-500/10 border-b border-border shrink-0">
+                        <span className="text-xs font-bold text-green-600 uppercase tracking-wide">Em Atendimento</span>
+                        <span className="ml-2 text-xs font-bold text-green-600">{col.length}</span>
+                      </div>
+                      <div className="flex-1 overflow-y-auto scrollbar-thin p-1.5 space-y-1.5">
+                        {col.map(convo => (
+                          <div
+                            key={convo.id}
+                            className={cn("rounded-lg border border-border bg-card p-2.5 cursor-pointer hover:bg-muted/50 transition-colors", selected === convo.id && "ring-2 ring-primary")}
+                            onClick={() => handleSelectConvo(convo.id)}
+                          >
+                            <p className="text-xs font-semibold truncate text-foreground">{convo.contacts?.name || convo.contacts?.phone}</p>
+                            <p className="text-[11px] text-muted-foreground truncate mt-0.5">{(convo.last_message_body || '').slice(0, 40)}</p>
+                            <span className="text-[10px] text-muted-foreground">{formatTime(convo.last_message_at)}</span>
+                            {convo.unread_count > 0 && (
+                              <span className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-green-600 px-1 text-[9px] font-bold text-white">{convo.unread_count}</span>
+                            )}
+                          </div>
+                        ))}
+                        {col.length === 0 && <p className="text-xs text-muted-foreground text-center py-4">Vazio</p>}
+                      </div>
+                    </div>
+                  );
+                })()}
+                {/* Resolvido column (closed today) */}
+                {(() => {
+                  const todayStr = new Date().toDateString();
+                  const col = conversations.filter(c => c.status === 'closed' && c.last_message_at && new Date(c.last_message_at).toDateString() === todayStr);
+                  return (
+                    <div className="flex flex-col min-w-[200px] flex-1">
+                      <div className="px-3 py-2 bg-muted border-b border-border shrink-0">
+                        <span className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Resolvido (hoje)</span>
+                        <span className="ml-2 text-xs font-bold text-muted-foreground">{col.length}</span>
+                      </div>
+                      <div className="flex-1 overflow-y-auto scrollbar-thin p-1.5 space-y-1.5">
+                        {col.map(convo => (
+                          <div
+                            key={convo.id}
+                            className={cn("rounded-lg border border-border bg-card p-2.5 cursor-pointer hover:bg-muted/50 transition-colors opacity-70", selected === convo.id && "ring-2 ring-primary opacity-100")}
+                            onClick={() => handleSelectConvo(convo.id)}
+                          >
+                            <p className="text-xs font-semibold truncate text-foreground">{convo.contacts?.name || convo.contacts?.phone}</p>
+                            <p className="text-[11px] text-muted-foreground truncate mt-0.5">{(convo.last_message_body || '').slice(0, 40)}</p>
+                            <span className="text-[10px] text-muted-foreground">{formatTime(convo.last_message_at)}</span>
+                          </div>
+                        ))}
+                        {col.length === 0 && <p className="text-xs text-muted-foreground text-center py-4">Vazio</p>}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+        ) : (
         <div ref={convoListRef} className="flex-1 overflow-y-auto scrollbar-thin">
           {loading ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
@@ -3162,6 +3257,7 @@ const Inbox = () => {
             </div>
           )}
         </div>
+        )}
 
         {/* Bulk action bar (legado selectedConvos) */}
         {selectedConvos.size > 0 && bulkSelected.size === 0 && (
@@ -5194,6 +5290,86 @@ const Inbox = () => {
               }}
             >
               {groupSending ? 'Enviando...' : 'Enviar para grupo'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Interactive Message Modal */}
+      <Dialog open={interactiveOpen} onOpenChange={setInteractiveOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <LayoutList className="h-5 w-5 text-indigo-500" />
+              Mensagem Interativa
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto flex flex-col gap-4 py-2">
+            <div className="flex gap-2">
+              <button onClick={() => setInteractiveType('button')} className={cn("flex-1 py-2 rounded-lg text-sm font-medium border transition-colors", interactiveType === 'button' ? "bg-indigo-600 text-white border-indigo-600" : "border-border text-muted-foreground hover:bg-muted")}>Botões</button>
+              <button onClick={() => setInteractiveType('list')} className={cn("flex-1 py-2 rounded-lg text-sm font-medium border transition-colors", interactiveType === 'list' ? "bg-indigo-600 text-white border-indigo-600" : "border-border text-muted-foreground hover:bg-muted")}>Lista</button>
+            </div>
+            {interactiveType === 'list' && (
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Título</Label>
+                <Input value={interactiveHeaderText} onChange={(e) => setInteractiveHeaderText(e.target.value)} placeholder="Título da mensagem" />
+              </div>
+            )}
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Corpo da mensagem *</Label>
+              <Textarea value={interactiveBody} onChange={(e) => setInteractiveBody(e.target.value)} placeholder="Texto principal da mensagem..." rows={3} />
+            </div>
+            {interactiveType === 'button' ? (
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Botões (máx. 3)</Label>
+                {interactiveButtons.map((btn, i) => (
+                  <div key={i} className="flex gap-2 mb-2">
+                    <Input value={btn} onChange={(e) => { const next = [...interactiveButtons]; next[i] = e.target.value; setInteractiveButtons(next); }} placeholder={`Botão ${i + 1}`} />
+                    {interactiveButtons.length > 1 && (
+                      <Button variant="ghost" size="icon" className="shrink-0 h-10 w-10 text-destructive" onClick={() => setInteractiveButtons(interactiveButtons.filter((_, j) => j !== i))}><X className="h-4 w-4" /></Button>
+                    )}
+                  </div>
+                ))}
+                {interactiveButtons.length < 3 && (
+                  <Button variant="outline" size="sm" onClick={() => setInteractiveButtons([...interactiveButtons, ''])}>+ Adicionar botão</Button>
+                )}
+              </div>
+            ) : (
+              <div>
+                <Label className="text-xs text-muted-foreground mb-2 block">Seções</Label>
+                {interactiveSections.map((section, si) => (
+                  <div key={si} className="border border-border rounded-lg p-3 mb-3">
+                    <div className="flex gap-2 mb-2">
+                      <Input value={section.title} onChange={(e) => { const next = [...interactiveSections]; next[si] = { ...next[si], title: e.target.value }; setInteractiveSections(next); }} placeholder="Título da seção" className="text-sm" />
+                      {interactiveSections.length > 1 && (
+                        <Button variant="ghost" size="icon" className="shrink-0 h-9 w-9 text-destructive" onClick={() => setInteractiveSections(interactiveSections.filter((_, j) => j !== si))}><X className="h-4 w-4" /></Button>
+                      )}
+                    </div>
+                    {section.rows.map((row, ri) => (
+                      <div key={ri} className="flex gap-2 mb-1">
+                        <Input value={row.title} onChange={(e) => { const next = [...interactiveSections]; next[si].rows[ri] = { ...next[si].rows[ri], title: e.target.value }; setInteractiveSections(next); }} placeholder={`Item ${ri + 1}`} className="text-sm" />
+                        {section.rows.length > 1 && (
+                          <Button variant="ghost" size="icon" className="shrink-0 h-9 w-9 text-destructive" onClick={() => { const next = [...interactiveSections]; next[si].rows = next[si].rows.filter((_, j) => j !== ri); setInteractiveSections(next); }}><X className="h-4 w-4" /></Button>
+                        )}
+                      </div>
+                    ))}
+                    <Button variant="ghost" size="sm" className="text-xs mt-1" onClick={() => { const next = [...interactiveSections]; next[si].rows.push({ id: String(Date.now()), title: '' }); setInteractiveSections(next); }}>+ Item</Button>
+                  </div>
+                ))}
+                <Button variant="outline" size="sm" onClick={() => setInteractiveSections([...interactiveSections, { title: '', rows: [{ id: String(Date.now()), title: '' }] }])}>+ Seção</Button>
+              </div>
+            )}
+            {interactiveType === 'list' && (
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">Rodapé</Label>
+                <Input value={interactiveFooterText} onChange={(e) => setInteractiveFooterText(e.target.value)} placeholder="Texto do rodapé (opcional)" />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setInteractiveOpen(false)} disabled={interactiveSending}>Cancelar</Button>
+            <Button onClick={handleSendInteractive} disabled={interactiveSending || !interactiveBody.trim()} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+              {interactiveSending ? 'Enviando...' : 'Enviar'}
             </Button>
           </DialogFooter>
         </DialogContent>
