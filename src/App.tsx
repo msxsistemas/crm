@@ -117,6 +117,7 @@ const MessageSearch = lazy(() => import("./pages/MessageSearch"));
 const SentimentDashboard = lazy(() => import("./pages/SentimentDashboard"));
 const AdminPanel = lazy(() => import("./pages/AdminPanel"));
 const ResponseTimeReport = lazy(() => import("./pages/ResponseTimeReport"));
+const HeatmapReport = lazy(() => import("./pages/HeatmapReport"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -230,6 +231,7 @@ const App = () => (
                     <Route path="/sentiment-dashboard" element={<SentimentDashboard />} />
                     <Route path="/painel-admin" element={<AdminPanel />} />
                     <Route path="/response-time-report" element={<ResponseTimeReport />} />
+                    <Route path="/heatmap-report" element={<HeatmapReport />} />
                   </Route>
                   <Route
                     element={

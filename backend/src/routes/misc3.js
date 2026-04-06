@@ -608,6 +608,92 @@ export default async function misc3Routes(fastify) {
     return { ok: resp.ok };
   });
 
+  // ── Conversation Free Tags ────────────────────────────────────────────────
+  fastify.get('/conversations/:id/tags', auth, async (req) => {
+    const { rows } = await query('SELECT tags FROM conversations WHERE id=$1', [req.params.id]);
+    return rows[0]?.tags || [];
+  });
+
+  fastify.post('/conversations/:id/tags', auth, async (req, reply) => {
+    const { tag } = req.body;
+    if (!tag?.trim()) return reply.status(400).send({ error: 'Tag obrigatória' });
+    await query(
+      "UPDATE conversations SET tags=array_append(COALESCE(tags,ARRAY[]::text[]),$1) WHERE id=$2 AND NOT ($1=ANY(COALESCE(tags,ARRAY[]::text[])))",
+      [tag.trim().toLowerCase(), req.params.id]
+    );
+    if (fastify.io) fastify.io.emit('conversation:tag_added', { conversation_id: req.params.id, tag: tag.trim().toLowerCase() });
+    return { success: true };
+  });
+
+  fastify.delete('/conversations/:id/tags/:tag', auth, async (req) => {
+    await query(
+      "UPDATE conversations SET tags=array_remove(COALESCE(tags,ARRAY[]::text[]),$1) WHERE id=$2",
+      [req.params.tag, req.params.id]
+    );
+    return { success: true };
+  });
+
+  // Get all tags used (for autocomplete)
+  fastify.get('/conversations/tags/all', auth, async () => {
+    const { rows } = await query(`
+      SELECT DISTINCT unnest(tags) as tag, COUNT(*) OVER (PARTITION BY unnest(tags)) as count
+      FROM conversations WHERE tags IS NOT NULL
+      ORDER BY count DESC LIMIT 50
+    `);
+    return rows;
+  });
+
+  // ── Integrations (n8n / Zapier / Make) ────────────────────────────────────
+  fastify.post('/integrations/test-webhook', auth, async (req, reply) => {
+    const { url, event_type } = req.body;
+    if (!url) return reply.status(400).send({ error: 'URL obrigatória' });
+    const testPayload = {
+      event: event_type || 'conversation.updated',
+      timestamp: new Date().toISOString(),
+      data: {
+        conversation: { id: 'test-id', status: 'open', priority: 'normal' },
+        contact: { name: 'Contato Teste', phone: '5511999990000' },
+        agent: { name: req.user.full_name },
+      }
+    };
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(testPayload)
+      });
+      return { status: res.status, ok: res.ok };
+    } catch (e) {
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  fastify.get('/integrations', auth, async () => {
+    const { rows } = await query('SELECT * FROM integrations ORDER BY created_at DESC');
+    return rows;
+  });
+
+  fastify.post('/integrations', auth, async (req, reply) => {
+    if (!['admin','supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { name, webhook_url, events, secret_token, platform } = req.body;
+    const { rows } = await query(
+      'INSERT INTO integrations (name, webhook_url, events, secret_token, platform) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [name, webhook_url, JSON.stringify(events || []), secret_token || null, platform || 'generic']
+    );
+    return rows[0];
+  });
+
+  fastify.patch('/integrations/:id', auth, async (req) => {
+    const { is_active } = req.body;
+    const { rows } = await query('UPDATE integrations SET is_active=$1 WHERE id=$2 RETURNING *', [is_active, req.params.id]);
+    return rows[0] || {};
+  });
+
+  fastify.delete('/integrations/:id', auth, async (req) => {
+    await query('DELETE FROM integrations WHERE id=$1', [req.params.id]);
+    return { success: true };
+  });
+
   // ── Link preview proxy ────────────────────────────────────────────────────
   fastify.get('/link-preview', auth, async (req, reply) => {
     const { url } = req.query;
@@ -1709,6 +1795,142 @@ export default async function misc3Routes(fastify) {
       GROUP BY s.id
     `, [currentDay, currentTime]);
     return rows[0] || null;
+  });
+
+  // ── Queue Position (public, no auth) ─────────────────────────────────────
+  fastify.get('/queue/position/:conversation_id', async (req, reply) => {
+    const { rows: conv } = await query(
+      "SELECT id, assigned_to, assigned_team_id, created_at FROM conversations WHERE id=$1 AND status='open'",
+      [req.params.conversation_id]
+    );
+    if (!conv[0]) return { position: 0, estimated_minutes: 0, assigned: true };
+
+    const conv_ = conv[0];
+    if (conv_.assigned_to) return { position: 0, estimated_minutes: 0, assigned: true };
+
+    // Count conversations waiting before this one
+    const { rows: waiting } = await query(`
+      SELECT COUNT(*) as count FROM conversations
+      WHERE status='open' AND assigned_to IS NULL
+      AND created_at < $1
+      AND ($2::uuid IS NULL OR assigned_team_id=$2)
+    `, [conv_.created_at, conv_.assigned_team_id]);
+
+    const position = parseInt(waiting[0].count) + 1;
+    const { rows: avgTime } = await query(`
+      SELECT ROUND(AVG(EXTRACT(EPOCH FROM (closed_at - created_at))/60)::numeric, 0) as avg_min
+      FROM conversations WHERE status='closed' AND closed_at > NOW() - interval '7 days'
+    `);
+    const avgMin = parseFloat(avgTime[0]?.avg_min || 10);
+
+    return {
+      position,
+      estimated_minutes: Math.ceil(position * avgMin),
+      assigned: false,
+      queue_size: position
+    };
+  });
+
+  fastify.get('/settings/queue-message', auth, async (req, reply) => {
+    const { rows } = await query("SELECT queue_message_enabled, queue_message_text FROM settings WHERE id=1");
+    return rows[0] || {};
+  });
+
+  fastify.patch('/settings/queue-message', auth, async (req, reply) => {
+    const { enabled, text } = req.body;
+    await query("UPDATE settings SET queue_message_enabled=$1, queue_message_text=$2 WHERE id=1", [enabled, text]);
+    return { success: true };
+  });
+
+  // ── SLA por Categoria ─────────────────────────────────────────────────────
+  fastify.get('/sla-categories', auth, async (req, reply) => {
+    const { rows } = await query('SELECT * FROM sla_category_rules ORDER BY created_at ASC');
+    return rows;
+  });
+
+  fastify.post('/sla-categories', auth, async (req, reply) => {
+    if (!['admin','supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { category_name, sla_hours, priority } = req.body;
+    const { rows } = await query(
+      'INSERT INTO sla_category_rules (category_name, sla_hours, priority) VALUES ($1,$2,$3) ON CONFLICT (category_name) DO UPDATE SET sla_hours=$2, priority=$3 RETURNING *',
+      [category_name, sla_hours, priority || 'normal']
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.delete('/sla-categories/:id', auth, async (req, reply) => {
+    await query('DELETE FROM sla_category_rules WHERE id=$1', [req.params.id]);
+    return { success: true };
+  });
+
+  // ── Voice Transcription (Whisper) ─────────────────────────────────────────
+  fastify.post('/voice/transcribe', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const data = await req.file();
+    if (!data) return reply.status(400).send({ error: 'Arquivo de áudio não enviado' });
+
+    const audioBuffer = await data.toBuffer();
+    const filename = data.filename || 'audio.webm';
+
+    const formData = new FormData();
+    const blob = new Blob([audioBuffer], { type: data.mimetype || 'audio/webm' });
+    formData.append('file', blob, filename);
+    formData.append('model', 'whisper-1');
+    formData.append('language', 'pt');
+
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}` },
+      body: formData
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      return reply.status(500).send({ error: 'Falha na transcrição', details: err });
+    }
+
+    const result = await response.json();
+    return { text: result.text };
+  });
+
+  // ── AI Copilot for Agents ─────────────────────────────────────────────────
+  fastify.post('/ai/copilot', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { question, conversation_id, context_messages = 10 } = req.body;
+
+    let conversationContext = '';
+    if (conversation_id) {
+      const { rows: msgs } = await query(
+        "SELECT content, sender_type FROM messages WHERE conversation_id=$1 ORDER BY created_at DESC LIMIT $2",
+        [conversation_id, context_messages]
+      );
+      conversationContext = msgs.reverse().map(m => `[${m.sender_type === 'agent' ? 'Agente' : 'Cliente'}]: ${m.content}`).join('\n');
+    }
+
+    const systemPrompt = `Você é um assistente especializado em atendimento ao cliente para um CRM de WhatsApp.
+Ajude o agente a:
+- Redigir respostas profissionais e empáticas
+- Responder dúvidas sobre produtos/serviços
+- Sugerir soluções para problemas
+- Manter um tom cordial e profissional
+
+${conversationContext ? `Contexto da conversa atual:\n${conversationContext}\n\n` : ''}Responda de forma concisa e útil.`;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 500,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: question }]
+      })
+    });
+
+    const ai = await response.json();
+    return { answer: ai.content?.[0]?.text || 'Não foi possível gerar resposta.' };
   });
 
 }

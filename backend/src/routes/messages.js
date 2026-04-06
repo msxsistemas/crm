@@ -406,6 +406,30 @@ async function handleEvolutionWebhook(payload, fastify) {
     fastify.io?.emit('message:new', { ...msgRow, conversation_id: conv.id });
     fastify.io?.emit('conversation:updated', { id: conv.id });
 
+    // ── Queue position message — send on new conversation ─────────────────
+    if (!conv.assigned_to) {
+      (async () => {
+        try {
+          const { rows: qs } = await pool.query("SELECT queue_message_enabled, queue_message_text FROM settings WHERE id=1");
+          if (qs[0]?.queue_message_enabled && qs[0]?.queue_message_text) {
+            const { rows: waiting } = await pool.query(
+              "SELECT COUNT(*) as count FROM conversations WHERE status='open' AND assigned_to IS NULL AND created_at < NOW()"
+            );
+            const position = parseInt(waiting[0].count) + 1;
+            const msg = (qs[0].queue_message_text || '')
+              .replace('{{posicao}}', position)
+              .replace('{{tempo}}', Math.ceil(position * 10));
+            await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${instance}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+              body: JSON.stringify({ number: phone, text: msg })
+            });
+            await pool.query("INSERT INTO messages (conversation_id, content, sender_type, direction) VALUES ($1,$2,'bot','outbound')", [conv.id, msg]);
+          }
+        } catch(e) {}
+      })();
+    }
+
     // ── AI intelligent routing — non-blocking ────────────────────────────
     (async () => {
       try {

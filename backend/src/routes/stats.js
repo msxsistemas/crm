@@ -740,6 +740,74 @@ export default async function statsRoutes(fastify) {
     return { byAgent, byTeam, byChannel, trend };
   });
 
+  // ── Heatmap de Volume por Hora ────────────────────────────────────────────
+  fastify.get('/stats/heatmap', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { start, end } = req.query;
+    const startDate = start || new Date(Date.now() - 30*24*60*60*1000).toISOString();
+    const endDate = end || new Date().toISOString();
+
+    // Messages per hour of day (0-23) and day of week (0=Sun, 6=Sat)
+    const { rows } = await query(`
+      SELECT
+        EXTRACT(DOW FROM created_at AT TIME ZONE 'America/Sao_Paulo') as dow,
+        EXTRACT(HOUR FROM created_at AT TIME ZONE 'America/Sao_Paulo') as hour,
+        COUNT(*) as count
+      FROM messages
+      WHERE created_at BETWEEN $1 AND $2 AND sender_type = 'contact'
+      GROUP BY dow, hour
+      ORDER BY dow, hour
+    `, [startDate, endDate]);
+
+    // Also get peak hours summary
+    const { rows: peaks } = await query(`
+      SELECT
+        EXTRACT(HOUR FROM created_at AT TIME ZONE 'America/Sao_Paulo') as hour,
+        COUNT(*) as count
+      FROM messages
+      WHERE created_at BETWEEN $1 AND $2 AND sender_type = 'contact'
+      GROUP BY hour ORDER BY count DESC LIMIT 5
+    `, [startDate, endDate]);
+
+    return { heatmap: rows, peaks };
+  });
+
+  // ── Supervisor Live Panel ─────────────────────────────────────────────────
+  fastify.get('/stats/supervisor-live', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows: agents } = await query(`
+      SELECT
+        p.id, p.full_name, p.status, p.avatar_url,
+        COUNT(c.id) FILTER (WHERE c.status='open') as open_count,
+        COUNT(c.id) FILTER (WHERE c.status='open' AND c.assigned_to=p.id) as assigned_count,
+        MAX(m.created_at) FILTER (WHERE m.sender_type='agent') as last_message_at,
+        COUNT(c.id) FILTER (WHERE c.status='open' AND c.last_message_at < NOW() - interval '10 minutes' AND m_last.sender_type='contact') as waiting_reply
+      FROM profiles p
+      LEFT JOIN conversations c ON c.assigned_to = p.id
+      LEFT JOIN LATERAL (
+        SELECT sender_type FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1
+      ) m_last ON true
+      LEFT JOIN messages m ON m.conversation_id = c.id
+      WHERE p.role IN ('agent','supervisor')
+      GROUP BY p.id ORDER BY p.status DESC, open_count DESC
+    `);
+
+    const { rows: alerts } = await query(`
+      SELECT c.id, ct.name as contact_name, c.assigned_to, p.full_name as agent_name,
+        EXTRACT(EPOCH FROM (NOW() - c.last_message_at))/60 as minutes_waiting,
+        c.priority
+      FROM conversations c
+      JOIN contacts ct ON ct.id = c.contact_id
+      LEFT JOIN profiles p ON p.id = c.assigned_to
+      WHERE c.status='open' AND c.last_message_at < NOW() - interval '15 minutes'
+      ORDER BY c.last_message_at ASC LIMIT 20
+    `);
+
+    const { rows: queue } = await query(`
+      SELECT COUNT(*) as unassigned FROM conversations WHERE status='open' AND assigned_to IS NULL
+    `);
+
+    return { agents, alerts, queue: queue[0] };
+  });
+
   // ── SLA by Team ────────────────────────────────────────────────────────────
   fastify.get('/stats/sla-by-team', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const { rows } = await query(`

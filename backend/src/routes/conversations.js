@@ -253,12 +253,50 @@ export default async function conversationRoutes(fastify) {
         "UPDATE conversations SET sla_deadline=NOW() + interval '1 hour' * cat.sla_hours FROM categories cat WHERE cat.id=$1 AND cat.sla_hours IS NOT NULL AND conversations.id=$2",
         [req.body.category_id, req.params.id]
       ).catch(() => {});
+
+      // Check for category-specific SLA rule in sla_category_rules
+      query(
+        "SELECT sla_hours FROM sla_category_rules WHERE category_name=(SELECT name FROM categories WHERE id=$1)",
+        [req.body.category_id]
+      ).then(({ rows: catSla }) => {
+        if (catSla[0]) {
+          const slaDeadline = new Date(Date.now() + catSla[0].sla_hours * 3600000);
+          query('UPDATE conversations SET sla_deadline=$1 WHERE id=$2', [slaDeadline, req.params.id]).catch(() => {});
+        }
+      }).catch(() => {});
     }
 
     // Emit realtime update + invalidate cache
     fastify.io?.emit('conversation:updated', rows[0]);
     invalidate('conv:list:*').catch(() => {});
     deliverWebhook.dispatchEvent('conversation.updated', rows[0]).catch(err => console.error('webhook dispatch failed:', err.message));
+
+    // Fire integrations webhooks on status change
+    if (req.body.status && oldConv?.status !== req.body.status) {
+      (async () => {
+        try {
+          const { rows: integrations } = await query("SELECT * FROM integrations WHERE is_active=true");
+          for (const integration of integrations) {
+            const events = integration.events || [];
+            const eventName = 'conversation.status_changed';
+            if (events.length > 0 && !events.includes(eventName)) continue;
+            await fetch(integration.webhook_url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(integration.secret_token ? { 'X-Webhook-Secret': integration.secret_token } : {})
+              },
+              body: JSON.stringify({
+                event: eventName,
+                platform: integration.platform,
+                timestamp: new Date().toISOString(),
+                data: { conversation_id: req.params.id, status: req.body.status }
+              })
+            }).catch(() => {});
+          }
+        } catch(e) {}
+      })();
+    }
 
     // Socket + DB notification when assigned_to changes
     if (req.body.assigned_to) {

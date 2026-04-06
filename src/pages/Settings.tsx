@@ -4746,6 +4746,231 @@ const TurnosTab = () => {
   );
 };
 
+// ─── Queue Message Tab ────────────────────────────────────────────────────────
+const QueueMessageTab = () => {
+  const [enabled, setEnabled] = useState(false);
+  const [text, setText] = useState("Olá! Você é o {{posicao}}º da fila. Tempo estimado: {{tempo}} minutos.");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get<any>('/settings/queue-message').then(data => {
+      if (data?.queue_message_enabled !== undefined) setEnabled(!!data.queue_message_enabled);
+      if (data?.queue_message_text) setText(data.queue_message_text);
+    }).catch(() => {});
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.patch('/settings/queue-message', { enabled, text });
+      toast.success("Configurações de fila salvas!");
+    } catch {
+      toast.error("Erro ao salvar configurações de fila");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card className="p-4">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center">
+            <Clock className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <div className="font-semibold">Mensagem de Fila de Espera</div>
+            <div className="text-sm text-muted-foreground">
+              Envie automaticamente a posição do cliente na fila ao iniciar uma nova conversa
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 mb-4">
+          <Switch checked={enabled} onCheckedChange={setEnabled} />
+          <span className="text-sm">{enabled ? "Habilitado" : "Desabilitado"}</span>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Mensagem</label>
+          <Textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            rows={4}
+            placeholder="Olá! Você é o {{posicao}}º da fila. Tempo estimado: {{tempo}} minutos."
+          />
+          <p className="text-xs text-muted-foreground">
+            Variáveis: <code className="bg-muted px-1 rounded">{"{{posicao}}"}</code> = posição na fila,{" "}
+            <code className="bg-muted px-1 rounded">{"{{tempo}}"}</code> = tempo estimado em minutos
+          </p>
+        </div>
+
+        <Button className="mt-4" onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+          Salvar
+        </Button>
+      </Card>
+    </div>
+  );
+};
+
+// ─── SLA por Categoria Tab ─────────────────────────────────────────────────
+const SlaCategoryTab = () => {
+  const [rules, setRules] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ category_name: "", sla_hours: "", priority: "normal" });
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await api.get<any[]>('/sla-categories');
+      setRules(data || []);
+    } catch {
+      toast.error("Erro ao carregar regras de SLA");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const handleAdd = async () => {
+    if (!form.category_name || !form.sla_hours) {
+      toast.error("Preencha categoria e horas de SLA");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.post('/sla-categories', {
+        category_name: form.category_name,
+        sla_hours: parseFloat(form.sla_hours),
+        priority: form.priority,
+      });
+      toast.success("Regra de SLA salva!");
+      setForm({ category_name: "", sla_hours: "", priority: "normal" });
+      load();
+    } catch {
+      toast.error("Erro ao salvar regra de SLA");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await api.delete(`/sla-categories/${id}`);
+      toast.success("Regra removida");
+      setRules(prev => prev.filter(r => r.id !== id));
+    } catch {
+      toast.error("Erro ao remover regra");
+    }
+  };
+
+  const PRIORITY_LABELS: Record<string, string> = {
+    low: "Baixa",
+    normal: "Normal",
+    high: "Alta",
+    urgent: "Urgente",
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card className="p-4">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center">
+            <Clock className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <div className="font-semibold">SLA por Categoria</div>
+            <div className="text-sm text-muted-foreground">
+              Define prazos de SLA específicos por categoria de conversa
+            </div>
+          </div>
+        </div>
+
+        {/* Add form */}
+        <div className="flex flex-wrap gap-3 mb-6 mt-4">
+          <Input
+            className="w-48"
+            placeholder="Nome da categoria"
+            value={form.category_name}
+            onChange={e => setForm(f => ({ ...f, category_name: e.target.value }))}
+          />
+          <Input
+            className="w-32"
+            type="number"
+            min="0.5"
+            step="0.5"
+            placeholder="Horas (ex: 24)"
+            value={form.sla_hours}
+            onChange={e => setForm(f => ({ ...f, sla_hours: e.target.value }))}
+          />
+          <select
+            className="border rounded px-3 py-2 text-sm bg-background"
+            value={form.priority}
+            onChange={e => setForm(f => ({ ...f, priority: e.target.value }))}
+          >
+            <option value="low">Baixa</option>
+            <option value="normal">Normal</option>
+            <option value="high">Alta</option>
+            <option value="urgent">Urgente</option>
+          </select>
+          <Button onClick={handleAdd} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+            Adicionar Regra
+          </Button>
+        </div>
+
+        {/* Table */}
+        {loading ? (
+          <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+        ) : rules.length === 0 ? (
+          <div className="text-center text-muted-foreground py-8">
+            Nenhuma regra de SLA por categoria cadastrada
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="text-left pb-2 font-medium">Categoria</th>
+                  <th className="text-left pb-2 font-medium">SLA (horas)</th>
+                  <th className="text-left pb-2 font-medium">Prioridade</th>
+                  <th className="text-right pb-2 font-medium">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rules.map(rule => (
+                  <tr key={rule.id} className="border-b last:border-0 hover:bg-muted/30">
+                    <td className="py-2 font-medium">{rule.category_name}</td>
+                    <td className="py-2">{rule.sla_hours}h</td>
+                    <td className="py-2">
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                        rule.priority === 'urgent' ? 'bg-red-100 text-red-700' :
+                        rule.priority === 'high' ? 'bg-orange-100 text-orange-700' :
+                        rule.priority === 'normal' ? 'bg-blue-100 text-blue-700' :
+                        'bg-gray-100 text-gray-600'
+                      }`}>
+                        {PRIORITY_LABELS[rule.priority] || rule.priority}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right">
+                      <Button variant="ghost" size="sm" onClick={() => handleDelete(rule.id)}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("geral");
 
@@ -4785,6 +5010,8 @@ const Settings = () => {
             <TabsTrigger value="roteamento" className="gap-1.5"><Shuffle className="h-3.5 w-3.5" /> Roteamento</TabsTrigger>
             <TabsTrigger value="campos_customizados" className="gap-1.5"><SettingsIcon className="h-3.5 w-3.5" /> Campos Personalizados</TabsTrigger>
             <TabsTrigger value="turnos" className="gap-1.5"><Clock className="h-3.5 w-3.5" /> Turnos</TabsTrigger>
+            <TabsTrigger value="fila_espera" className="gap-1.5"><Clock className="h-3.5 w-3.5" /> Fila de Espera</TabsTrigger>
+            <TabsTrigger value="sla_categoria" className="gap-1.5"><Clock className="h-3.5 w-3.5" /> SLA por Categoria</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -4814,6 +5041,8 @@ const Settings = () => {
           <TabsContent value="roteamento"><RotamentoTab /></TabsContent>
           <TabsContent value="campos_customizados"><CustomFieldsTab /></TabsContent>
           <TabsContent value="turnos"><TurnosTab /></TabsContent>
+          <TabsContent value="fila_espera"><QueueMessageTab /></TabsContent>
+          <TabsContent value="sla_categoria"><SlaCategoryTab /></TabsContent>
         </Tabs>
       </div>
     </div>

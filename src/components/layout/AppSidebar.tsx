@@ -80,6 +80,7 @@ import {
   MessageSquarePlus,
   Timer,
   Shield,
+  Grid3x3,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -197,6 +198,7 @@ const userNavSections: NavSection[] = [
       { to: "/sla-dashboard", icon: Timer, label: "Painel SLA" },
       { to: "/sentiment-dashboard", icon: TrendingUp, label: "Análise de Sentimento" },
       { to: "/response-time-report", icon: Clock, label: "Tempo de Atendimento" },
+      { to: "/heatmap-report", icon: Grid3x3, label: "Mapa de Calor" },
     ],
   },
   {
