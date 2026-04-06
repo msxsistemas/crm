@@ -234,6 +234,7 @@ export default async function misc3Routes(fastify) {
     const sets = [];
     const vals = [];
     let p = 3;
+    if (req.body.new_instance_name !== undefined) { sets.push(`instance_name=$${p}`); vals.push(req.body.new_instance_name); p++; }
     for (const k of allowed) {
       if (req.body[k] !== undefined) { sets.push(`${k}=$${p}`); vals.push(req.body[k]); p++; }
     }

@@ -186,49 +186,31 @@ const Connections = () => {
   const [qrInstance, setQrInstance] = useState("");
   const [qrLoading, setQrLoading] = useState(false);
 
-  // Evolution API - fetch ONLY from DB, enrich with live status
+  // Evolution API - fetch from backend DB, enrich with live status
   const fetchInstances = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: { user } } = await db.auth.getUser();
-      if (!user) { setLoading(false); return; }
-
-      // Load saved instances from DB only
-      const { data: dbInstances } = await db
-        .from("evolution_connections" as any)
-        .select("*")
-        .eq("user_id", user.id);
-
+      // Load saved instances from backend DB
+      const dbInstances = await api.get<any[]>('/evolution-connections');
       const allNames = (dbInstances || []).map((r: any) => r.instance_name as string);
 
-      // Enrich with live status
+      // Enrich with live status from Evolution API
       const enriched = await Promise.all(
         allNames.map(async (name) => {
           try {
-            const statusResult = await getInstanceStatus(name);
+            const statusResult = await getInstanceStatus(name) as any;
+            const connectionStatus = statusResult?.connectionStatus || statusResult?.instance?.state || statusResult?.state;
 
-            if (
-              statusResult?.notFound ||
-              statusResult?.exists === false ||
-              statusResult?.instance?.state === "not_found"
-            ) {
+            if (!connectionStatus || connectionStatus === 'not_found') {
               return { instanceName: name, __missing: true } as any;
             }
 
-            const status = statusResult?.instance?.state || statusResult?.state || "unknown";
-            const ownerJid = statusResult?.instance?.owner || "";
-            const profilePicUrl = statusResult?.instance?.profilePictureUrl || "";
+            const status = connectionStatus;
+            const ownerJid = statusResult?.ownerJid || statusResult?.instance?.owner || "";
+            const profilePicUrl = statusResult?.profilePicUrl || statusResult?.instance?.profilePictureUrl || "";
 
-            await db
-              .from("evolution_connections" as any)
-              .update({
-                status,
-                owner_jid: ownerJid,
-                profile_pic_url: profilePicUrl,
-                updated_at: new Date().toISOString(),
-              } as any)
-              .eq("user_id", user.id)
-              .eq("instance_name", name);
+            // Update status in backend DB
+            api.patch('/evolution-connections', { instance_name: name, status, owner_jid: ownerJid, profile_pic_url: profilePicUrl }).catch(() => {});
 
             return { instanceName: name, status, ownerJid, profilePicUrl };
           } catch {
@@ -237,16 +219,13 @@ const Connections = () => {
         })
       );
 
+      // Remove from backend DB any instances not found in Evolution API
       const missingNames = enriched
         .filter((item: any) => item?.__missing)
         .map((item: any) => item.instanceName as string);
 
       if (missingNames.length > 0) {
-        await db
-          .from("evolution_connections" as any)
-          .delete()
-          .eq("user_id", user.id)
-          .in("instance_name", missingNames as any);
+        api.delete(`/evolution-connections?instance_name=${missingNames.join(',')}`).catch(() => {});
       }
 
       setInstances(enriched.filter((item: any) => item && !item.__missing) as Instance[]);
@@ -342,9 +321,7 @@ const Connections = () => {
 
   const handleRemoveEvolution = async (instanceName: string) => {
     try {
-      const { data: { user } } = await db.auth.getUser();
-      if (!user) return;
-      await db.from("evolution_connections" as any).delete().eq("user_id", user.id).eq("instance_name", instanceName);
+      await api.delete(`/evolution-connections?instance_name=${instanceName}`);
       setInstances((prev) => prev.filter((i) => i.instanceName !== instanceName));
       toast.success("Instância removida");
     } catch {
@@ -361,12 +338,7 @@ const Connections = () => {
   const handleSaveEdit = async () => {
     if (!editName.trim()) return;
     try {
-      const { data: { user } } = await db.auth.getUser();
-      if (!user) return;
-      await db.from("evolution_connections" as any).update({
-        instance_name: editName.trim(),
-        updated_at: new Date().toISOString(),
-      } as any).eq("user_id", user.id).eq("instance_name", editOriginalName);
+      await api.patch('/evolution-connections', { instance_name: editOriginalName, new_instance_name: editName.trim() });
       setEditOpen(false);
       toast.success("Nome atualizado!");
       fetchInstances();
@@ -380,45 +352,28 @@ const Connections = () => {
     try {
       const result = await getInstanceStatus(instanceName);
 
-      if (result?.notFound || result?.exists === false || result?.instance?.state === "not_found") {
-        const { data: { user } } = await db.auth.getUser();
-        if (user) {
-          await db
-            .from("evolution_connections" as any)
-            .delete()
-            .eq("user_id", user.id)
-            .eq("instance_name", instanceName);
-        }
+      const connectionStatus = (result as any)?.connectionStatus || result?.instance?.state || result?.state;
+      if (!connectionStatus || connectionStatus === "not_found") {
+        api.delete(`/evolution-connections?instance_name=${instanceName}`).catch(() => {});
         setInstances((prev) => prev.filter((item) => item.instanceName !== instanceName));
         toast.error(`Instância ${instanceName} não existe mais e foi removida da lista`);
         return;
       }
 
-      const status = result?.instance?.state || result?.state || "unknown";
-      const isConnected = status === "open";
-      const ownerJid = result?.instance?.ownerJid || result?.ownerJid || null;
-      
-      // Update DB status + owner_jid
-      const { data: { user } } = await db.auth.getUser();
-      if (user) {
-        const updateData: any = { 
-          status: isConnected ? "connected" : "disconnected", 
-          updated_at: new Date().toISOString() 
-        };
-        if (ownerJid) updateData.owner_jid = ownerJid;
-        
-        await db
-          .from("evolution_connections" as any)
-          .update(updateData)
-          .eq("user_id", user.id)
-          .eq("instance_name", instanceName);
-      }
+      const isConnected = connectionStatus === "open";
+      const ownerJid = (result as any)?.ownerJid || result?.instance?.ownerJid || null;
+
+      api.patch('/evolution-connections', {
+        instance_name: instanceName,
+        status: isConnected ? "open" : connectionStatus,
+        owner_jid: ownerJid,
+      }).catch(() => {});
 
       // Update local state
       setInstances((prev) =>
         prev.map((inst) =>
           inst.instanceName === instanceName
-            ? { ...inst, status: isConnected ? "connected" : "disconnected", ownerJid: ownerJid || inst.ownerJid }
+            ? { ...inst, status: isConnected ? "open" : connectionStatus, ownerJid: ownerJid || inst.ownerJid }
             : inst
         )
       );
@@ -468,6 +423,7 @@ const Connections = () => {
         const result = await getQRCode(instanceName) as any;
         if (result?.notFound || result?.exists === false) {
           stopQrAutoRefresh();
+          api.delete(`/evolution-connections?instance_name=${instanceName}`).catch(() => {});
           setInstances((prev) => prev.filter((item) => item.instanceName !== instanceName));
           setQrOpen(false);
           toast.error(`Instância ${instanceName} não existe mais`);
