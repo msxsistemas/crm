@@ -1,4 +1,4 @@
-const CACHE_NAME = 'msx-crm-v7'
+const CACHE_NAME = 'msx-crm-v8'
 
 self.addEventListener('install', e => {
   self.skipWaiting()
@@ -12,6 +12,23 @@ self.addEventListener('activate', e => {
   )
   self.clients.claim()
 })
+
+self.addEventListener('push', (event) => {
+  const data = event.data?.json() || {};
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'Nova mensagem', {
+      body: data.body || '',
+      icon: '/favicon.ico',
+      badge: '/favicon.ico',
+      data: { url: data.url || '/' }
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(clients.openWindow(event.notification.data?.url || '/'));
+});
 
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return

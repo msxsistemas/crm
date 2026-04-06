@@ -361,6 +361,31 @@ export default async function statsRoutes(fastify) {
     return result;
   });
 
+  // ── Stats by Channel ─────────────────────────────────────────────────────
+  fastify.get('/stats/by-channel', auth, async (req, reply) => {
+    const { start, end } = req.query;
+    const startDate = start || new Date(Date.now() - 30*24*60*60*1000).toISOString();
+    const endDate = end || new Date().toISOString();
+
+    const { rows } = await query(`
+      SELECT
+        COALESCE(c.connection_name, 'web') as channel,
+        COUNT(c.id) as total_conversations,
+        COUNT(c.id) FILTER (WHERE c.status='closed') as closed,
+        COUNT(c.id) FILTER (WHERE c.status='open') as open,
+        ROUND(AVG(c.csat_score)::numeric, 2) as avg_csat,
+        ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(c.first_response_at, NOW()) - c.created_at))/60)::numeric, 1) as avg_response_min,
+        COUNT(DISTINCT c.contact_id) as unique_contacts,
+        COUNT(m.id) as total_messages
+      FROM conversations c
+      LEFT JOIN messages m ON m.conversation_id = c.id
+      WHERE c.created_at BETWEEN $1 AND $2
+      GROUP BY COALESCE(c.connection_name, 'web')
+      ORDER BY total_conversations DESC
+    `, [startDate, endDate]);
+    return rows;
+  });
+
   // ── Scheduled Reports Config ──────────────────────────────────────────────
   fastify.get('/scheduled-reports', auth, async (req) => {
     const { rows } = await query('SELECT * FROM scheduled_reports WHERE created_by=$1 ORDER BY created_at DESC', [req.user.id]);
@@ -553,5 +578,24 @@ export default async function statsRoutes(fastify) {
     `);
 
     return { contactTags, convTags, trend };
+  });
+
+  // ── SLA by Team ────────────────────────────────────────────────────────────
+  fastify.get('/stats/sla-by-team', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query(`
+      SELECT
+        t.name as team_name,
+        t.id as team_id,
+        COUNT(c.id) as total,
+        COUNT(c.id) FILTER (WHERE c.sla_deadline IS NOT NULL AND c.closed_at <= c.sla_deadline) as within_sla,
+        COUNT(c.id) FILTER (WHERE c.sla_deadline IS NOT NULL AND (c.closed_at > c.sla_deadline OR (c.sla_deadline < NOW() AND c.status != 'closed'))) as breached,
+        COUNT(c.id) FILTER (WHERE c.status != 'closed' AND c.sla_deadline IS NOT NULL AND c.sla_deadline < NOW()) as active_breaches,
+        ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(c.first_response_at, NOW()) - c.created_at))/60)::numeric, 1) as avg_response_min
+      FROM teams t
+      LEFT JOIN conversations c ON c.assigned_team_id = t.id AND c.created_at > NOW() - interval '30 days'
+      GROUP BY t.id, t.name
+      ORDER BY breached DESC
+    `);
+    return rows;
   });
 }

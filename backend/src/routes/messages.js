@@ -399,6 +399,79 @@ async function handleEvolutionWebhook(payload, fastify) {
     fastify.io?.emit('message:new', { ...msgRow, conversation_id: conv.id });
     fastify.io?.emit('conversation:updated', { id: conv.id });
 
+    // ── Automation rules execution ─────────────────────────────────────────
+    try {
+      const { rows: rules } = await pool.query(
+        "SELECT * FROM automation_rules WHERE is_active=true AND trigger IN ('message_received','conversation_created')"
+      );
+      for (const rule of rules) {
+        const ruleActions = rule.actions || [];
+        const ruleConditions = rule.conditions || [];
+        let match = true;
+        for (const cond of ruleConditions) {
+          if (cond.field === 'content' && cond.operator === 'contains') {
+            if (!(content || '').toLowerCase().includes((cond.value || '').toLowerCase())) { match = false; break; }
+          }
+          if (cond.field === 'channel' && cond.operator === 'equals') {
+            if (instance !== cond.value) { match = false; break; }
+          }
+        }
+        if (!match) continue;
+        for (const action of ruleActions) {
+          if (action.type === 'assign_team' && action.team_id) {
+            await pool.query('UPDATE conversations SET assigned_team_id=$1 WHERE id=$2', [action.team_id, conv.id]);
+          } else if (action.type === 'add_label' && action.label) {
+            await pool.query('UPDATE conversations SET labels=array_append(COALESCE(labels,ARRAY[]::text[]),$1) WHERE id=$2', [action.label, conv.id]);
+          } else if (action.type === 'send_message' && action.message) {
+            await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${instance}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+              body: JSON.stringify({ number: phone, text: action.message })
+            });
+            await pool.query("INSERT INTO messages (conversation_id, content, sender_type) VALUES ($1,$2,'bot')", [conv.id, action.message]);
+          }
+        }
+      }
+    } catch(e) { /* automation error — silent */ }
+
+    // ── AI auto-labeling — non-blocking ──────────────────────────────────
+    (async () => {
+      try {
+        const msgText = content || '';
+        if (msgText.length < 5) return;
+        const { rows: aiLabelSettings } = await pool.query("SELECT ai_labels_enabled FROM settings WHERE id=1");
+        if (!aiLabelSettings[0]?.ai_labels_enabled) return;
+        const anthropicKeyLabel = process.env.ANTHROPIC_API_KEY;
+        if (!anthropicKeyLabel) return;
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': anthropicKeyLabel,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 50,
+            messages: [{
+              role: 'user',
+              content: `Classifique esta mensagem de atendimento em UMA das categorias: suporte, financeiro, reclamacao, elogio, informacao, vendas, cancelamento, outro. Responda APENAS com a palavra da categoria, sem explicação.\n\nMensagem: "${msgText}"`
+            }]
+          })
+        });
+        const ai = await response.json();
+        const label = (ai.content?.[0]?.text || '').trim().toLowerCase().replace(/[^a-z]/g, '');
+        const validLabels = ['suporte','financeiro','reclamacao','elogio','informacao','vendas','cancelamento','outro'];
+        if (validLabels.includes(label)) {
+          await pool.query(
+            "UPDATE conversations SET labels=array_append(COALESCE(labels,ARRAY[]::text[]),$1) WHERE id=$2 AND NOT ($1=ANY(COALESCE(labels,ARRAY[]::text[])))",
+            [label, conv.id]
+          );
+          if (fastify.io) fastify.io.emit('conversation:label_added', { conversation_id: conv.id, label });
+        }
+      } catch(e) {}
+    })();
+
     // ── Audio transcription — non-blocking ────────────────────────────────
     if (type === 'audio' || messageContent?.audioMessage) {
       const openaiKey = process.env.OPENAI_API_KEY;
@@ -640,6 +713,37 @@ async function handleEvolutionWebhook(payload, fastify) {
         }
       }
     } catch {}
+
+    // ── Out-of-hours bot ──────────────────────────────────────────────────
+    try {
+      const { rows: s } = await pool.query("SELECT out_of_hours_enabled, out_of_hours_message FROM settings WHERE id=1");
+      if (s[0]?.out_of_hours_enabled) {
+        const now = new Date();
+        const { rows: bh } = await pool.query("SELECT * FROM business_hours WHERE day_of_week=$1 AND is_active=true", [now.getDay()]);
+        const isWorkingHour = bh.length > 0 && (() => {
+          const [sh, sm] = (bh[0].start_time || '08:00').split(':').map(Number);
+          const [eh, em] = (bh[0].end_time || '18:00').split(':').map(Number);
+          const nowMins = now.getHours() * 60 + now.getMinutes();
+          const startMins = sh * 60 + sm;
+          const endMins = eh * 60 + em;
+          return nowMins >= startMins && nowMins <= endMins;
+        })();
+        if (!isWorkingHour && s[0].out_of_hours_message) {
+          const { rows: recent } = await pool.query(
+            "SELECT id FROM messages WHERE conversation_id=$1 AND sender_type='bot' AND content=$2 AND created_at > NOW() - interval '12 hours'",
+            [conv.id, s[0].out_of_hours_message]
+          );
+          if (!recent.length) {
+            await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${instance}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+              body: JSON.stringify({ number: phone, text: s[0].out_of_hours_message })
+            });
+            await pool.query("INSERT INTO messages (conversation_id, content, sender_type) VALUES ($1,$2,'bot')", [conv.id, s[0].out_of_hours_message]);
+          }
+        }
+      }
+    } catch(e) { /* out-of-hours error — silent */ }
 
     // ── Chatbot engine ─────────────────────────────────────────────────────
     // Skip if contact has chatbot disabled or conversation is assigned to an agent

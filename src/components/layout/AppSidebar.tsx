@@ -192,6 +192,7 @@ const userNavSections: NavSection[] = [
       { to: "/agent-report", icon: FileText, label: "Relatório Agente" },
       { to: "/campaigns-dashboard", icon: BarChart3, label: "Métricas de Campanha" },
       { to: "/channel-report", icon: Radio, label: "Relatório por Canal" },
+      { to: "/sla-dashboard", icon: Timer, label: "Painel SLA" },
     ],
   },
   {

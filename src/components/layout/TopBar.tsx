@@ -11,6 +11,7 @@ import {
   Wifi,
   WifiOff,
   Bell,
+  BellOff,
   Volume2,
   VolumeX,
   RefreshCw,
@@ -27,6 +28,7 @@ import {
   HelpCircle,
   Search,
 } from "lucide-react";
+import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useFollowupReminders } from "@/hooks/useFollowupReminders";
 import { FollowupPanel } from "@/components/followup/FollowupPanel";
 import { useTheme } from "next-themes";
@@ -117,6 +119,8 @@ const TopBar = ({ onStartTour, onOpenSearch }: TopBarProps) => {
     dueTodayCount,
     updateReminderStatus,
   } = useFollowupReminders();
+
+  const { enabled: pushEnabled, subscribe: pushSubscribe, unsubscribe: pushUnsubscribe } = usePushNotifications();
 
   const prevUnreadRef = useRef(0);
   const prevWaitingRef = useRef(0);
@@ -456,6 +460,34 @@ const TopBar = ({ onStartTour, onOpenSearch }: TopBarProps) => {
             </button>
           </TooltipTrigger>
           <TooltipContent side="bottom">{soundEnabled ? "Desativar sons" : "Ativar sons"}</TooltipContent>
+        </Tooltip>
+
+        {/* Push notifications toggle */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={async () => {
+                if (pushEnabled) {
+                  await pushUnsubscribe();
+                } else {
+                  if ("Notification" in window && Notification.permission === "default") {
+                    await Notification.requestPermission();
+                  }
+                  await pushSubscribe();
+                }
+              }}
+              className="hover:text-white/80 transition-colors p-1"
+            >
+              {pushEnabled ? (
+                <BellOff className="h-[18px] w-[18px]" />
+              ) : (
+                <Bell className="h-[18px] w-[18px] text-white/60" />
+              )}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {pushEnabled ? "Desativar notificações push" : "Ativar notificações push"}
+          </TooltipContent>
         </Tooltip>
 
         {/* Refresh */}
