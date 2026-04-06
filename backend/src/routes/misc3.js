@@ -1,4 +1,14 @@
-// Migration (run manually on VPS if table doesn't exist):
+// Migration (run manually on VPS if tables don't exist):
+// CREATE TABLE IF NOT EXISTS quick_replies (
+//   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+//   shortcut TEXT NOT NULL,
+//   title TEXT NOT NULL,
+//   content TEXT NOT NULL,
+//   is_global BOOLEAN DEFAULT false,
+//   created_by UUID REFERENCES profiles(id),
+//   created_at TIMESTAMPTZ DEFAULT NOW()
+// );
+//
 // CREATE TABLE IF NOT EXISTS webhook_delivery_log (
 //   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 //   webhook_id UUID, event_type TEXT, url TEXT, status_code INTEGER,
@@ -25,22 +35,6 @@ export default async function misc3Routes(fastify) {
     q += ` ORDER BY created_at DESC LIMIT 50`;
     const { rows } = await query(q, vals);
     return rows;
-  });
-
-  // ── Segments ──────────────────────────────────────────────────────────────
-  fastify.get('/segments', auth, async (req) => {
-    const limit = Math.min(parseInt(req.query.limit) || 200, 500);
-    const offset = parseInt(req.query.offset) || 0;
-    const { rows } = await query('SELECT * FROM segments ORDER BY name LIMIT $1 OFFSET $2', [limit, offset]);
-    return rows;
-  });
-  fastify.post('/segments', auth, async (req, reply) => {
-    const { name, description, conditions, operator } = req.body;
-    const { rows } = await query('INSERT INTO segments (name, description, conditions, operator) VALUES ($1,$2,$3,$4) RETURNING *', [name, description, JSON.stringify(conditions || []), operator || 'AND']);
-    return reply.status(201).send(rows[0]);
-  });
-  fastify.delete('/segments/:id', auth, async (req) => {
-    await query('DELETE FROM segments WHERE id=$1', [req.params.id]); return { ok: true };
   });
 
   // ── Contact Groups ────────────────────────────────────────────────────────
