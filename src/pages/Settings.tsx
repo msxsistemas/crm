@@ -3330,6 +3330,194 @@ const InboundWebhooksTab = () => {
   );
 };
 
+// ─── AI Labels Tab ───
+const AILabelsTab = () => {
+  const [enabled, setEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get<any>('/settings/ai-labels').then(d => {
+      setEnabled(d?.enabled ?? false);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  const handleToggle = async (val: boolean) => {
+    setSaving(true);
+    try {
+      await api.patch('/settings/ai-labels', { enabled: val });
+      setEnabled(val);
+      toast.success(val ? "Etiquetas automáticas ativadas!" : "Etiquetas automáticas desativadas");
+    } catch {
+      toast.error("Erro ao salvar configuração");
+    }
+    setSaving(false);
+  };
+
+  const categories = [
+    { key: 'suporte', label: 'Suporte', color: 'bg-blue-100 text-blue-700' },
+    { key: 'financeiro', label: 'Financeiro', color: 'bg-green-100 text-green-700' },
+    { key: 'reclamacao', label: 'Reclamação', color: 'bg-red-100 text-red-700' },
+    { key: 'elogio', label: 'Elogio', color: 'bg-yellow-100 text-yellow-700' },
+    { key: 'informacao', label: 'Informação', color: 'bg-sky-100 text-sky-700' },
+    { key: 'vendas', label: 'Vendas', color: 'bg-purple-100 text-purple-700' },
+    { key: 'cancelamento', label: 'Cancelamento', color: 'bg-orange-100 text-orange-700' },
+    { key: 'outro', label: 'Outro', color: 'bg-gray-100 text-gray-600' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
+            <Zap className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-foreground">Etiquetas Automáticas por IA</h3>
+            <p className="text-sm text-muted-foreground">
+              A IA classifica automaticamente cada mensagem recebida em categorias como suporte, financeiro, reclamação...
+            </p>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center gap-2 text-muted-foreground text-sm">
+            <Loader2 className="h-4 w-4 animate-spin" /> Carregando...
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/20">
+              <div>
+                <p className="text-sm font-medium text-foreground">Classificação automática por IA</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Cada mensagem recebida é analisada e a conversa recebe uma etiqueta automaticamente
+                </p>
+              </div>
+              <Switch checked={enabled} onCheckedChange={handleToggle} disabled={saving} />
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Categorias disponíveis</p>
+              <div className="flex flex-wrap gap-2">
+                {categories.map(c => (
+                  <span key={c.key} className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border ${c.color}`}>
+                    {c.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-muted/30 border border-border p-4 text-sm text-muted-foreground">
+              <p className="font-medium text-foreground mb-1">Como funciona</p>
+              <ul className="space-y-1 text-xs">
+                <li>• Cada mensagem recebida via WhatsApp é enviada ao modelo Claude Haiku</li>
+                <li>• O modelo classifica a mensagem em uma das 8 categorias</li>
+                <li>• A etiqueta é adicionada à conversa (se ainda não estiver presente)</li>
+                <li>• Requer chave ANTHROPIC_API_KEY configurada no servidor</li>
+              </ul>
+            </div>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+// ─── Out-of-Hours Bot Tab ───
+const OutOfHoursBotTab = () => {
+  const [enabled, setEnabled] = useState(false);
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get<any>('/settings/out-of-hours').then(d => {
+      setEnabled(d?.out_of_hours_enabled ?? false);
+      setMessage(d?.out_of_hours_message ?? '');
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.patch('/settings/out-of-hours', { enabled, message });
+      toast.success("Configuração salva!");
+    } catch {
+      toast.error("Erro ao salvar configuração");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
+            <Clock className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-foreground">Bot Fora do Horário</h3>
+            <p className="text-sm text-muted-foreground">
+              Envia uma resposta automática quando mensagens chegam fora do horário comercial configurado
+            </p>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center gap-2 text-muted-foreground text-sm">
+            <Loader2 className="h-4 w-4 animate-spin" /> Carregando...
+          </div>
+        ) : (
+          <div className="space-y-5">
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/20">
+              <div>
+                <p className="text-sm font-medium text-foreground">Ativar bot fora do horário</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Resposta automática é enviada quando fora do horário comercial (tabela business_hours)
+                </p>
+              </div>
+              <Switch checked={enabled} onCheckedChange={setEnabled} />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-foreground">Mensagem automática</label>
+              <Textarea
+                value={message}
+                onChange={e => setMessage(e.target.value)}
+                rows={4}
+                placeholder="Ex: Olá! Nosso horário de atendimento é de segunda a sexta, das 8h às 18h. Retornaremos sua mensagem em breve!"
+                className="resize-none"
+              />
+              <p className="text-xs text-muted-foreground">
+                A mensagem é enviada uma vez a cada 12h por conversa quando fora do horário comercial
+              </p>
+            </div>
+
+            {message && (
+              <div className="rounded-lg border border-border bg-muted/20 p-4">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Pré-visualização</p>
+                <div className="flex justify-start">
+                  <div className="max-w-xs rounded-xl rounded-tl-sm bg-white border border-border px-3 py-2 shadow-sm">
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap">{message}</p>
+                    <p className="text-[10px] text-gray-400 mt-1 text-right">Bot • agora</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <Button onClick={handleSave} disabled={saving} className="gap-2">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Salvar
+            </Button>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("geral");
 
@@ -3364,6 +3552,8 @@ const Settings = () => {
             <TabsTrigger value="api_publica" className="gap-1.5"><Key className="h-3.5 w-3.5" /> API & Integrações</TabsTrigger>
             <TabsTrigger value="bot_faq" className="gap-1.5"><Zap className="h-3.5 w-3.5" /> Bot FAQ</TabsTrigger>
             <TabsTrigger value="inbound_webhooks" className="gap-1.5"><Globe className="h-3.5 w-3.5" /> WH Entrada</TabsTrigger>
+            <TabsTrigger value="ai_labels" className="gap-1.5"><Zap className="h-3.5 w-3.5" /> Etiquetas IA</TabsTrigger>
+            <TabsTrigger value="out_of_hours" className="gap-1.5"><Clock className="h-3.5 w-3.5" /> Bot Fora do Horário</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -3388,6 +3578,8 @@ const Settings = () => {
           <TabsContent value="api_publica"><Suspense fallback={<TabFallback />}><ApiKeysTabLazy /></Suspense></TabsContent>
           <TabsContent value="bot_faq"><BotFaqTab /></TabsContent>
           <TabsContent value="inbound_webhooks"><InboundWebhooksTab /></TabsContent>
+          <TabsContent value="ai_labels"><AILabelsTab /></TabsContent>
+          <TabsContent value="out_of_hours"><OutOfHoursBotTab /></TabsContent>
         </Tabs>
       </div>
     </div>
