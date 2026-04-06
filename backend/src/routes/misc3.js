@@ -494,7 +494,23 @@ export default async function misc3Routes(fastify) {
     return rows;
   });
 
-  // ── Link preview proxy ────────────────────────────────────────────────────
+  // ── Quick Replies CRUD ────────────────────────────────────────────────────
+  fastify.get('/quick-replies', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM quick_replies WHERE (created_by=$1 OR is_global=true) ORDER BY shortcut ASC', [req.user.id]);
+    return rows;
+  });
+  fastify.post('/quick-replies', auth, async (req) => {
+    const { shortcut, title, content, message, is_global } = req.body;
+    const body = content || message || '';
+    const { rows } = await query('INSERT INTO quick_replies (shortcut, title, content, is_global, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING *', [shortcut, title || shortcut, body, !!is_global, req.user.id]);
+    return rows[0];
+  });
+  fastify.delete('/quick-replies/:id', auth, async (req) => {
+    await query('DELETE FROM quick_replies WHERE id=$1 AND (created_by=$2 OR EXISTS(SELECT 1 FROM profiles WHERE id=$2 AND role IN ('admin','supervisor')))', [req.params.id, req.user.id]);
+    return { ok: true };
+  });
+
+    // ── Link preview proxy ────────────────────────────────────────────────────
   fastify.get('/link-preview', auth, async (req, reply) => {
     const { url } = req.query;
     if (!url || !/^https?:\/\//.test(url)) return reply.status(400).send({ error: 'URL inválida' });

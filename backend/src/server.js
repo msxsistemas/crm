@@ -1,3 +1,15 @@
+// Migration (run manually on VPS if table doesn't exist):
+// CREATE TABLE IF NOT EXISTS scheduled_messages (
+//   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+//   conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+//   content TEXT NOT NULL,
+//   scheduled_at TIMESTAMPTZ NOT NULL,
+//   status TEXT DEFAULT 'pending',
+//   sent_at TIMESTAMPTZ,
+//   created_by UUID REFERENCES profiles(id),
+//   created_at TIMESTAMPTZ DEFAULT NOW()
+// );
+
 import 'dotenv/config';
 import * as Sentry from '@sentry/node';
 import Fastify from 'fastify';
@@ -206,6 +218,25 @@ const autoCloseInactive = async () => {
 };
 setInterval(autoCloseInactive, 60 * 60 * 1000); // a cada hora
 autoCloseInactive(); // rodar na inicialização também
+
+// Scheduled messages job — runs every minute
+setInterval(async () => {
+  try {
+    const { rows } = await pool.query("SELECT sm.*, c.connection_name as instance_name, ct.phone FROM scheduled_messages sm JOIN conversations c ON c.id=sm.conversation_id JOIN contacts ct ON ct.id=c.contact_id WHERE sm.status='pending' AND sm.scheduled_at <= NOW()");
+    for (const msg of rows) {
+      try {
+        await fetch(process.env.EVOLUTION_API_URL + '/message/sendText/' + msg.instance_name, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+          body: JSON.stringify({ number: msg.phone, text: msg.content })
+        });
+        await pool.query("UPDATE scheduled_messages SET status='sent', sent_at=NOW() WHERE id=$1", [msg.id]);
+      } catch(e) {
+        await pool.query("UPDATE scheduled_messages SET status='error' WHERE id=$1", [msg.id]);
+      }
+    }
+  } catch(e) { /* silent */ }
+}, 60000);
 
 // Start
 const PORT = parseInt(process.env.PORT || '3000');

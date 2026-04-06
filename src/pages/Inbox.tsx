@@ -48,6 +48,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import api from "@/lib/api";
 import { db } from "@/lib/db";
 import { createInstance, getQRCode, getInstanceStatus, sendMessage, setupWebhook } from "@/lib/evolution-api";
 import { toast } from "sonner";
@@ -366,6 +367,7 @@ const Inbox = () => {
   // Schedule message state
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
   const [scheduleDateTime, setScheduleDateTime] = useState("");
+  const [convScheduledMsgs, setConvScheduledMsgs] = useState<{ id: string; content: string; scheduled_at: string }[]>([]);
 
   // HSM Template state
   const [hsmDialogOpen, setHsmDialogOpen] = useState(false);
@@ -815,8 +817,12 @@ const Inbox = () => {
 
   // Load quick replies for slash autocomplete
   useEffect(() => {
-    db.from("quick_replies").select("shortcut, message").order("created_at").then(({ data }) => {
-      if (data) setQuickRepliesForSlash(data);
+    api.get<any[]>('/quick-replies').then(data => {
+      if (data) setQuickRepliesForSlash(data.map(r => ({ shortcut: r.shortcut, message: r.content || r.message || '' })));
+    }).catch(() => {
+      db.from("quick_replies").select("shortcut, message").order("created_at").then(({ data }) => {
+        if (data) setQuickRepliesForSlash(data);
+      });
     });
   }, []);
 
@@ -1067,6 +1073,7 @@ const Inbox = () => {
     setSelected(id);
     prevMessagesLengthRef.current = 0;
     setMsgSearch(""); setShowMsgSearch(false);
+    setConvScheduledMsgs([]);
     // Atualiza estado local imediatamente para o badge sumir
     setConversations((prev) => prev.map((c) => c.id === id ? { ...c, unread_count: 0 } : c));
     await loadMessages(id);
@@ -1081,6 +1088,10 @@ const Inbox = () => {
         .maybeSingle();
       setContactDisableChatbot(data?.disable_chatbot || false);
     }
+    // Load scheduled messages for this conversation
+    api.get<any[]>(`/conversations/${id}/scheduled-messages`).then(data => {
+      if (data) setConvScheduledMsgs(data);
+    }).catch(() => {});
   };
 
 
@@ -1367,27 +1378,35 @@ const Inbox = () => {
   const handleScheduleMessage = async (dateTime: string) => {
     const convoForSchedule = conversations.find((c) => c.id === selected);
     if (!convoForSchedule || !messageInput.trim()) return;
-    const { error } = await db.from("schedules").insert({
-      user_id: user?.id,
-      contact_name: convoForSchedule.contacts.name || convoForSchedule.contacts.phone,
-      contact_phone: convoForSchedule.contacts.phone,
-      connection: convoForSchedule.instance_name,
-      message: messageInput.trim(),
-      send_at: new Date(dateTime).toISOString(),
-      status: "pending",
-      open_ticket: false,
-      create_note: false,
-      repeat_interval: "none",
-      repeat_daily: "none",
-      repeat_count: "unlimited",
-    });
-    if (error) {
-      toast.error("Erro ao agendar mensagem");
-      return;
+    try {
+      const scheduled = await api.post<any>(`/conversations/${selected}/scheduled-messages`, {
+        content: messageInput.trim(),
+        scheduled_at: new Date(dateTime).toISOString(),
+      });
+      if (scheduled) setConvScheduledMsgs(prev => [...prev, scheduled]);
+      toast.success("Mensagem agendada!");
+      setMessageInput("");
+      setScheduleDialogOpen(false);
+    } catch {
+      const { error } = await db.from("schedules").insert({
+        user_id: user?.id,
+        contact_name: convoForSchedule.contacts.name || convoForSchedule.contacts.phone,
+        contact_phone: convoForSchedule.contacts.phone,
+        connection: convoForSchedule.instance_name,
+        message: messageInput.trim(),
+        send_at: new Date(dateTime).toISOString(),
+        status: "pending",
+        open_ticket: false,
+        create_note: false,
+        repeat_interval: "none",
+        repeat_daily: "none",
+        repeat_count: "unlimited",
+      });
+      if (error) { toast.error("Erro ao agendar mensagem"); return; }
+      toast.success("Mensagem agendada! Veja em Agendamentos.");
+      setMessageInput("");
+      setScheduleDialogOpen(false);
     }
-    toast.success("Mensagem agendada! Veja em Agendamentos.");
-    setMessageInput("");
-    setScheduleDialogOpen(false);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3405,7 +3424,8 @@ const Inbox = () => {
                               : "max-w-[65%] pl-4 pr-8 py-2.5",
                           msg.from_me
                             ? "bg-[#dcf8c6] dark:bg-[#005c4b] text-[#111b21] dark:text-[#e9edef] rounded-tr-none"
-                            : "bg-white dark:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] rounded-tl-none"
+                            : "bg-white dark:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] rounded-tl-none",
+                          msgSearch && msg.body?.toLowerCase().includes(msgSearch.toLowerCase()) && "ring-2 ring-yellow-400"
                         )}
                         onClick={() => {
                           if (selectingForForward) {
@@ -3775,7 +3795,38 @@ const Inbox = () => {
                 </div>
               )}
 
-              {/* Reply preview */}
+              {/* Scheduled messages list */}
+              {convScheduledMsgs.length > 0 && (
+                <div className="mb-2 space-y-1">
+                  <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide flex items-center gap-1">
+                    <Clock className="h-3 w-3" /> {convScheduledMsgs.length} mensagem(s) agendada(s)
+                  </p>
+                  {convScheduledMsgs.map(sm => (
+                    <div key={sm.id} className="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg px-3 py-1.5">
+                      <Clock className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[12px] text-foreground truncate">{sm.content}</p>
+                        <p className="text-[10px] text-muted-foreground">{new Date(sm.scheduled_at).toLocaleString('pt-BR')}</p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await api.delete(`/scheduled-messages/${sm.id}`);
+                            setConvScheduledMsgs(prev => prev.filter(m => m.id !== sm.id));
+                            toast.success("Agendamento cancelado");
+                          } catch { toast.error("Erro ao cancelar agendamento"); }
+                        }}
+                        className="text-muted-foreground hover:text-destructive shrink-0"
+                        title="Cancelar agendamento"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+                            {/* Reply preview */}
               {replyTo && (
                 <div className="flex items-center gap-2 mb-2 bg-muted rounded-lg px-3 py-2 border-l-4 border-[hsl(var(--whatsapp))]">
                   <div className="flex-1 min-w-0">

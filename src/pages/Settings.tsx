@@ -689,7 +689,7 @@ const RespostasRapidasTab = () => {
   const loadReplies = useCallback(async () => {
     try {
       const data = await api.get<any[]>('/quick-replies');
-      setReplies(data || []);
+      setReplies((data || []).map((r: any) => ({ id: r.id, shortcut: r.shortcut, message: r.content || r.message || '' })));
     } catch {}
   }, []);
 
@@ -743,6 +743,19 @@ const RespostasRapidasTab = () => {
               <div key={r.id} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30">
                 <Badge variant="secondary" className="text-xs font-mono shrink-0">/{r.shortcut}</Badge>
                 <p className="text-sm text-foreground truncate flex-1">{r.message}</p>
+                <button
+                  onClick={async () => {
+                    try {
+                      await api.delete(`/quick-replies/${r.id}`);
+                      setReplies(prev => prev.filter(x => x.id !== r.id));
+                      toast.success("Resposta removida");
+                    } catch { toast.error("Erro ao remover resposta"); }
+                  }}
+                  className="text-muted-foreground hover:text-destructive shrink-0"
+                  title="Remover"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </div>
             ))}
           </div>

@@ -404,7 +404,25 @@ ${'─'.repeat(60)}
     return { count: rows[0]?.count ?? 0 };
   });
 
-  fastify.get('/conversations/pending-response', auth, async (req) => {
+  // ── Scheduled Messages ────────────────────────────────────────────────────
+  fastify.post('/conversations/:id/scheduled-messages', auth, async (req, reply) => {
+    const { content, scheduled_at } = req.body;
+    const { rows } = await query(
+      'INSERT INTO scheduled_messages (conversation_id, content, scheduled_at, created_by, status) VALUES ($1,$2,$3,$4,'pending') RETURNING *',
+      [req.params.id, content, scheduled_at, req.user.id]
+    );
+    return rows[0];
+  });
+  fastify.get('/conversations/:id/scheduled-messages', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM scheduled_messages WHERE conversation_id=$1 AND status='pending' ORDER BY scheduled_at ASC', [req.params.id]);
+    return rows;
+  });
+  fastify.delete('/scheduled-messages/:id', auth, async (req) => {
+    await query('DELETE FROM scheduled_messages WHERE id=$1', [req.params.id]);
+    return { ok: true };
+  });
+
+    fastify.get('/conversations/pending-response', auth, async (req) => {
     const { list } = req.query;
     if (list !== 'true') {
       const { rows } = await query(`
