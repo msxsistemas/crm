@@ -416,6 +416,35 @@ export default async function conversationRoutes(fastify) {
       }
     }
 
+    // Custom Survey: enviar link de pesquisa ao fechar conversa se houver survey com trigger_on_close=true
+    if (req.body.status === 'closed') {
+      try {
+        const { rows: convRows } = await query(
+          'SELECT c.connection_name, ct.phone, c.contact_id FROM conversations c JOIN contacts ct ON ct.id=c.contact_id WHERE c.id=$1',
+          [req.params.id]
+        ).catch(() => ({ rows: [] }));
+        if (convRows[0]) {
+          const { rows: surveys } = await query(
+            'SELECT id FROM custom_surveys WHERE trigger_on_close=true AND active=true AND (connection_name IS NULL OR connection_name=$1) LIMIT 1',
+            [convRows[0].connection_name]
+          ).catch(() => ({ rows: [] }));
+          if (surveys[0]) {
+            const { rows: sEvo3 } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+            if (sEvo3[0]?.evolution_url) {
+              const frontendUrl = process.env.FRONTEND_URL || 'https://msxzap.pro';
+              const surveyLink = `${frontendUrl}/pesquisa/${surveys[0].id}?c=${req.params.id}&ct=${convRows[0].contact_id}`;
+              const surveyMsg = `📋 Pesquisa de Satisfação\nGostaríamos de saber sua opinião sobre o atendimento!\nAcesse: ${surveyLink}`;
+              fetch(`${sEvo3[0].evolution_url}/message/sendText/${convRows[0].connection_name}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'apikey': sEvo3[0].evolution_key },
+                body: JSON.stringify({ number: convRows[0].phone, text: surveyMsg })
+              }).catch(() => {});
+            }
+          }
+        }
+      } catch (e) { /* silent */ }
+    }
+
     return rows[0];
   });
 

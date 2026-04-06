@@ -83,8 +83,11 @@ import {
   Shield,
   Grid3x3,
   Repeat,
+  Repeat2,
   Trophy,
   Filter,
+  Target,
+  Link2,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -161,6 +164,7 @@ const userNavSections: NavSection[] = [
       { to: "/formularios-captacao", icon: QrCode, label: "Formulários de Captação" },
       { to: "/capture-forms", icon: FormInput, label: "Formulários" },
       { to: "/chat-widget", icon: MessageSquarePlus, label: "Widget de Chat" },
+      { to: "/rastrear-links", icon: Link2, label: "Rastreamento de Links" },
     ],
   },
   {
@@ -177,6 +181,14 @@ const userNavSections: NavSection[] = [
       { to: "/auditoria", icon: ShieldCheck, label: "Log de Auditoria (LGPD)", adminOnly: true },
       { to: "/blacklist", icon: Ban, label: "Lista Negra (Blacklist)" },
       { to: "/horarios-agentes", icon: Clock, label: "Horários dos Agentes" },
+    ],
+  },
+  {
+    title: "CAMPANHAS",
+    items: [
+      { to: "/campanhas", icon: Send, label: "Campanhas" },
+      { to: "/campanhas-recorrentes", icon: Repeat2, label: "Campanhas Recorrentes" },
+      { to: "/campaigns-dashboard", icon: BarChart3, label: "Métricas de Campanha" },
     ],
   },
   {
@@ -208,6 +220,7 @@ const userNavSections: NavSection[] = [
       { to: "/gamification", icon: Trophy, label: "Ranking" },
       { to: "/word-cloud", icon: Cloud, label: "Nuvem de Palavras" },
       { to: "/crescimento-contatos", icon: TrendingUp, label: "Crescimento de Contatos" },
+      { to: "/minha-produtividade", icon: Target, label: "Minha Produtividade" },
     ],
   },
   {

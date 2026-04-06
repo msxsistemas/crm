@@ -110,15 +110,21 @@ export default async function messageRoutes(fastify) {
 
   // Generic POST /messages for shim compatibility (Inbox page sends here)
   fastify.post('/messages', auth, async (req, reply) => {
-    const { conversation_id, body, content, from_me, direction, type = 'text', media_url, media_type, status } = req.body;
+    const { conversation_id, body, content, from_me, direction, type = 'text', media_url, media_type, status, is_whisper } = req.body;
     const convId = conversation_id;
     const msgContent = content || body || '';
     const msgDirection = from_me === true ? 'outbound' : (from_me === false ? 'inbound' : (direction || 'outbound'));
     const msgType = media_type || type;
 
+    // Whisper: only supervisors and admins can send whisper messages
+    const whisper = is_whisper === true;
+    if (whisper && !['admin', 'supervisor'].includes(req.user.role)) {
+      return reply.status(403).send({ error: 'Apenas supervisores e admins podem enviar mensagens sussurro' });
+    }
+
     const { rows } = await query(
-      `INSERT INTO messages (conversation_id, content, direction, type, media_url) VALUES ($1,$2,$3,$4,$5) RETURNING *, content as body, (direction = 'outbound') as from_me`,
-      [convId, msgContent, msgDirection, msgType, media_url]
+      `INSERT INTO messages (conversation_id, content, direction, type, media_url, is_whisper) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *, content as body, (direction = 'outbound') as from_me`,
+      [convId, msgContent, msgDirection, msgType, media_url, whisper]
     );
     await query('UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1', [convId]);
     fastify.io?.to(`conversation:${convId}`).emit('message:new', rows[0]);
@@ -141,12 +147,19 @@ export default async function messageRoutes(fastify) {
           type: { type: 'string', enum: ['text', 'image', 'video', 'audio', 'document', 'template'] },
           media_url: { type: 'string', maxLength: 2048, nullable: true },
           quoted_message_id: { type: 'string', nullable: true },
+          is_whisper: { type: 'boolean', nullable: true },
         },
       },
     },
   }, async (req, reply) => {
-    const { content, type = 'text', media_url, quoted_message_id } = req.body;
+    const { content, type = 'text', media_url, quoted_message_id, is_whisper } = req.body;
     const convId = req.params.id;
+
+    // Whisper: only supervisors and admins
+    const whisper = is_whisper === true;
+    if (whisper && !['admin', 'supervisor'].includes(req.user.role)) {
+      return reply.status(403).send({ error: 'Apenas supervisores e admins podem enviar mensagens sussurro' });
+    }
 
     // Get conversation + contact + connection settings + meta connection
     const { rows: convRows } = await query(`
@@ -163,43 +176,48 @@ export default async function messageRoutes(fastify) {
 
     // Save message to DB
     const { rows } = await query(
-      'INSERT INTO messages (conversation_id, content, direction, type, media_url, quoted_message_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [convId, content, 'outbound', type, media_url, quoted_message_id]
+      'INSERT INTO messages (conversation_id, content, direction, type, media_url, quoted_message_id, is_whisper) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [convId, content, 'outbound', type, media_url, quoted_message_id, whisper]
     );
     const message = rows[0];
 
     // Update conversation last_message_at
     await query('UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1', [convId]);
 
-    // Enqueue send (with automatic retry on failure)
-    if (conv.meta_phone_number_id && conv.meta_access_token) {
-      await enqueueSend({
-        conversationId: convId,
-        messageId: message.id,
-        phone: conv.phone,
-        content, type, mediaUrl: media_url,
-        provider: 'meta',
-        phoneNumberId: conv.meta_phone_number_id,
-        accessToken: conv.meta_access_token,
-      }).catch(e => console.error('Enqueue error:', e.message));
-    } else if (conv.evolution_url && conv.connection_name) {
-      await enqueueSend({
-        conversationId: convId,
-        messageId: message.id,
-        phone: conv.phone,
-        content, type, mediaUrl: media_url,
-        provider: 'evolution',
-        evolutionUrl: conv.evolution_url,
-        evolutionKey: conv.evolution_key,
-        instance: conv.connection_name,
-      }).catch(e => console.error('Enqueue error:', e.message));
+    // Whisper messages are NOT sent to the client via Evolution/Meta API
+    if (!whisper) {
+      // Enqueue send (with automatic retry on failure)
+      if (conv.meta_phone_number_id && conv.meta_access_token) {
+        await enqueueSend({
+          conversationId: convId,
+          messageId: message.id,
+          phone: conv.phone,
+          content, type, mediaUrl: media_url,
+          provider: 'meta',
+          phoneNumberId: conv.meta_phone_number_id,
+          accessToken: conv.meta_access_token,
+        }).catch(e => console.error('Enqueue error:', e.message));
+      } else if (conv.evolution_url && conv.connection_name) {
+        await enqueueSend({
+          conversationId: convId,
+          messageId: message.id,
+          phone: conv.phone,
+          content, type, mediaUrl: media_url,
+          provider: 'evolution',
+          evolutionUrl: conv.evolution_url,
+          evolutionKey: conv.evolution_key,
+          instance: conv.connection_name,
+        }).catch(e => console.error('Enqueue error:', e.message));
+      }
     }
 
-    // Emit via Socket.io
+    // Emit via Socket.io (whisper included, clients filter by role)
     fastify.io?.to(`conversation:${convId}`).emit('message:new', message);
 
-    // Dispatch webhook event
-    deliverWebhook.dispatchEvent('message.new', { message, conversation_id: convId }).catch(err => console.error('webhook dispatch failed:', err.message));
+    // Dispatch webhook event (only for real messages)
+    if (!whisper) {
+      deliverWebhook.dispatchEvent('message.new', { message, conversation_id: convId }).catch(err => console.error('webhook dispatch failed:', err.message));
+    }
 
     return reply.status(201).send(message);
   });
@@ -823,6 +841,116 @@ async function handleEvolutionWebhook(payload, fastify) {
         }
       }
     } catch(e) { /* out-of-hours error — silent */ }
+
+    // ── AI Generative Chatbot ─────────────────────────────────────────────
+    // Runs before legacy chatbot rules; skips if human agent is assigned
+    (async () => {
+      try {
+        const anthropicKey = process.env.ANTHROPIC_API_KEY;
+        if (!anthropicKey) return;
+
+        const { rows: cbCfg } = await pool.query('SELECT * FROM ai_chatbot_config WHERE id=1');
+        const cfg = cbCfg[0];
+        if (!cfg || !cfg.enabled) return;
+
+        // Skip if a human agent is assigned
+        const { rows: convCheck } = await pool.query('SELECT assigned_to FROM conversations WHERE id=$1', [conv.id]);
+        if (convCheck[0]?.assigned_to) return;
+
+        // Skip if contact has chatbot disabled
+        const { rows: ctCheck } = await pool.query('SELECT disable_chatbot FROM contacts WHERE id=$1', [conv.contact_id]);
+        if (ctCheck[0]?.disable_chatbot) return;
+
+        const msgText = (textContent || '').trim();
+        if (!msgText) return;
+
+        // Check trigger_keywords (if any configured, message must match one)
+        const triggerKws = cfg.trigger_keywords || [];
+        if (triggerKws.length > 0) {
+          const lower = msgText.toLowerCase();
+          const triggered = triggerKws.some(kw => lower.includes(kw.toLowerCase()));
+          if (!triggered) return;
+        }
+
+        // Fetch conversation history
+        const maxHistory = cfg.max_history_messages || 10;
+        const { rows: historyRows } = await pool.query(
+          `SELECT content, direction FROM messages
+           WHERE conversation_id=$1 AND is_whisper IS NOT TRUE
+           ORDER BY created_at DESC LIMIT $2`,
+          [conv.id, maxHistory]
+        );
+        const historyMsgs = historyRows.reverse().map(m => ({
+          role: m.direction === 'outbound' ? 'assistant' : 'user',
+          content: m.content || ''
+        }));
+
+        const systemPrompt = cfg.system_prompt || 'Você é um assistente virtual prestativo. Responda de forma clara e educada em português.';
+
+        const aiResp = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': anthropicKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 1024,
+            system: systemPrompt,
+            messages: historyMsgs
+          })
+        });
+
+        if (!aiResp.ok) return;
+        const aiData = await aiResp.json();
+        const botReply = (aiData.content?.[0]?.text || '').trim();
+        if (!botReply) return;
+
+        // Check handoff keywords in bot reply
+        const handoffKws = cfg.handoff_keywords || [];
+        const replyLower = botReply.toLowerCase();
+        const needsHandoff = handoffKws.some(kw => replyLower.includes(kw.toLowerCase()));
+
+        if (needsHandoff) {
+          // Assign to least-busy available agent
+          const { rows: agents } = await pool.query(`
+            SELECT p.id, COUNT(c.id) as open_count
+            FROM profiles p
+            LEFT JOIN conversations c ON c.assigned_to = p.id AND c.status != 'closed'
+            WHERE p.role IN ('agent','supervisor') AND p.status = 'online'
+            GROUP BY p.id, p.max_conversations
+            HAVING p.max_conversations IS NULL OR COUNT(c.id) < p.max_conversations
+            ORDER BY open_count ASC LIMIT 1
+          `);
+          if (agents[0]) {
+            await pool.query('UPDATE conversations SET assigned_to=$1 WHERE id=$2', [agents[0].id, conv.id]);
+            fastify.io?.emit('conversation:updated', { id: conv.id, assigned_to: agents[0].id });
+          }
+          return; // no auto-reply on handoff
+        }
+
+        // Send reply via Evolution API
+        const { rows: evoSet } = await pool.query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
+        const evo = evoSet[0];
+        if (evo?.evolution_url) {
+          await fetch(`${evo.evolution_url}/message/sendText/${instance}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': evo.evolution_key },
+            body: JSON.stringify({ number: phone, text: botReply })
+          });
+        }
+
+        // Save bot message in DB
+        const { rows: botMsg } = await pool.query(
+          "INSERT INTO messages (conversation_id, content, direction, type, status, sender_type) VALUES ($1,$2,'outbound','text','sent','bot') RETURNING *",
+          [conv.id, botReply]
+        );
+        await pool.query('UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1', [conv.id]);
+        fastify.io?.emit('message:new', { ...botMsg[0], conversation_id: conv.id });
+
+      } catch(e) { /* AI chatbot error — silent */ }
+    })();
 
     // ── Chatbot engine ─────────────────────────────────────────────────────
     // Skip if contact has chatbot disabled or conversation is assigned to an agent

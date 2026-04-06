@@ -27,6 +27,9 @@ export function csrfMiddleware(fastify) {
     // Skip for webhook endpoints (no cookie auth)
     if (req.url.startsWith('/webhook/') || req.url.startsWith('/meta-webhook')) return;
 
+    // Skip public endpoints (survey responses, etc.)
+    if (req.url.startsWith('/survey/') || req.url.startsWith('/inbound-webhook/')) return;
+
     // Skip pre-authentication endpoints — no cookie/CSRF token exists yet
     const PRE_AUTH = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout'];
     if (PRE_AUTH.some(p => req.url.startsWith(p))) return;

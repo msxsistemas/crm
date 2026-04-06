@@ -2250,4 +2250,369 @@ ${conversationContext ? `Contexto da conversa atual:\n${conversationContext}\n\n
     return { success: true };
   });
 
+  // ── Recurring Campaigns ───────────────────────────────────────────────────
+
+  fastify.get('/recurring-campaigns', auth, async (req, reply) => {
+    const { rows } = await query(`
+      SELECT rc.*,
+        COALESCE((SELECT COUNT(*) FROM recurring_campaign_logs rl WHERE rl.campaign_id = rc.id), 0)::int AS total_sent
+      FROM recurring_campaigns rc
+      ORDER BY rc.created_at DESC
+    `);
+    return rows;
+  });
+
+  fastify.post('/recurring-campaigns', auth, async (req, reply) => {
+    const { name, type, message, connection_name, active, delay_days, custom_field_key } = req.body;
+    if (!name || !type || !message || !connection_name) {
+      return reply.status(400).send({ error: 'name, type, message e connection_name são obrigatórios' });
+    }
+    const { rows } = await query(
+      `INSERT INTO recurring_campaigns (name, type, message, connection_name, active, delay_days, custom_field_key, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [name, type, message, connection_name, active !== false, parseInt(delay_days) || 0, custom_field_key || null, req.user.id]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.put('/recurring-campaigns/:id', auth, async (req, reply) => {
+    const { name, type, message, connection_name, active, delay_days, custom_field_key } = req.body;
+    const { rows } = await query(
+      `UPDATE recurring_campaigns
+       SET name=COALESCE($1,name), type=COALESCE($2,type), message=COALESCE($3,message),
+           connection_name=COALESCE($4,connection_name), active=COALESCE($5,active),
+           delay_days=COALESCE($6,delay_days), custom_field_key=COALESCE($7,custom_field_key)
+       WHERE id=$8 RETURNING *`,
+      [name, type, message, connection_name, active !== undefined ? active : null,
+       delay_days !== undefined ? parseInt(delay_days) : null, custom_field_key, req.params.id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Campanha não encontrada' });
+    return rows[0];
+  });
+
+  fastify.delete('/recurring-campaigns/:id', auth, async (req, reply) => {
+    await query('DELETE FROM recurring_campaigns WHERE id=$1', [req.params.id]);
+    return { success: true };
+  });
+
+  fastify.get('/recurring-campaigns/:id/logs', auth, async (req, reply) => {
+    const { rows } = await query(`
+      SELECT rl.*, ct.name AS contact_name, ct.phone AS contact_phone
+      FROM recurring_campaign_logs rl
+      LEFT JOIN contacts ct ON ct.id = rl.contact_id
+      WHERE rl.campaign_id = $1
+      ORDER BY rl.sent_at DESC
+      LIMIT 200
+    `, [req.params.id]);
+    return rows;
+  });
+
+  // ── AI Chatbot Config ─────────────────────────────────────────────────────
+  // Migration: see backend/migrations/035_ai_chatbot_config.sql
+
+  fastify.get('/ai-chatbot-config', auth, async (req, reply) => {
+    const { rows } = await query('SELECT * FROM ai_chatbot_config WHERE id=1');
+    return rows[0] || { id: 1, enabled: false, system_prompt: '', max_history_messages: 10, trigger_keywords: [], handoff_keywords: [] };
+  });
+
+  fastify.put('/ai-chatbot-config', auth, async (req, reply) => {
+    if (!['admin', 'supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { enabled, system_prompt, max_history_messages, trigger_keywords, handoff_keywords } = req.body;
+    const { rows } = await query(
+      `INSERT INTO ai_chatbot_config (id, enabled, system_prompt, max_history_messages, trigger_keywords, handoff_keywords, updated_at)
+       VALUES (1, $1, $2, $3, $4, $5, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         enabled = EXCLUDED.enabled,
+         system_prompt = EXCLUDED.system_prompt,
+         max_history_messages = EXCLUDED.max_history_messages,
+         trigger_keywords = EXCLUDED.trigger_keywords,
+         handoff_keywords = EXCLUDED.handoff_keywords,
+         updated_at = NOW()
+       RETURNING *`,
+      [
+        enabled !== undefined ? enabled : false,
+        system_prompt || '',
+        max_history_messages ? parseInt(max_history_messages) : 10,
+        trigger_keywords || [],
+        handoff_keywords || []
+      ]
+    );
+    return rows[0];
+  });
+
+  // ── AI Chatbot Preview (test a message against the bot) ───────────────────
+  fastify.post('/ai-chatbot-preview', auth, async (req, reply) => {
+    if (!['admin', 'supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { message, system_prompt } = req.body;
+    if (!message) return reply.status(400).send({ error: 'message is required' });
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return reply.status(503).send({ error: 'ANTHROPIC_API_KEY não configurada no servidor' });
+
+    const prompt = system_prompt || 'Você é um assistente virtual prestativo. Responda de forma clara e educada em português.';
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        system: prompt,
+        messages: [{ role: 'user', content: message }]
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok) return reply.status(502).send({ error: 'Erro na API do Claude', details: data });
+    return { reply: data.content?.[0]?.text || '' };
+  });
+
+  // ── Custom Surveys ────────────────────────────────────────────────────────────
+
+  fastify.get('/custom-surveys', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM custom_surveys ORDER BY created_at DESC');
+    return rows;
+  });
+
+  fastify.get('/custom-surveys/:id', async (req, reply) => {
+    // Public endpoint — no auth required (for survey response page)
+    const { rows } = await query('SELECT * FROM custom_surveys WHERE id=$1', [req.params.id]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Pesquisa não encontrada' });
+    return rows[0];
+  });
+
+  fastify.post('/custom-surveys', auth, async (req, reply) => {
+    if (!['admin', 'supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { name, questions, trigger_on_close, connection_name, active } = req.body;
+    if (!name) return reply.status(400).send({ error: 'name obrigatório' });
+    const { rows } = await query(
+      'INSERT INTO custom_surveys (name, questions, trigger_on_close, connection_name, active) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [name, JSON.stringify(questions || []), trigger_on_close || false, connection_name || null, active !== false]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.put('/custom-surveys/:id', auth, async (req, reply) => {
+    if (!['admin', 'supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { name, questions, trigger_on_close, connection_name, active } = req.body;
+    const { rows } = await query(
+      `UPDATE custom_surveys SET
+        name=COALESCE($1,name),
+        questions=COALESCE($2,questions),
+        trigger_on_close=COALESCE($3,trigger_on_close),
+        connection_name=COALESCE($4,connection_name),
+        active=COALESCE($5,active)
+      WHERE id=$6 RETURNING *`,
+      [name || null, questions ? JSON.stringify(questions) : null,
+       trigger_on_close !== undefined ? trigger_on_close : null,
+       connection_name !== undefined ? connection_name : null,
+       active !== undefined ? active : null,
+       req.params.id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Pesquisa não encontrada' });
+    return rows[0];
+  });
+
+  fastify.delete('/custom-surveys/:id', auth, async (req, reply) => {
+    if (!['admin', 'supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    await query('DELETE FROM custom_surveys WHERE id=$1', [req.params.id]);
+    return { success: true };
+  });
+
+  fastify.get('/custom-surveys/:id/responses', auth, async (req) => {
+    const { page = 1, limit = 20 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { rows } = await query(
+      `SELECT sr.*, ct.name as contact_name, ct.phone as contact_phone
+       FROM survey_responses sr
+       LEFT JOIN contacts ct ON ct.id = sr.contact_id
+       WHERE sr.survey_id = $1
+       ORDER BY sr.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [req.params.id, parseInt(limit), offset]
+    );
+    const { rows: total } = await query('SELECT COUNT(*) FROM survey_responses WHERE survey_id=$1', [req.params.id]);
+    return { data: rows, total: parseInt(total[0].count) };
+  });
+
+  // Public endpoint: submit survey response
+  fastify.post('/survey/:surveyId/respond', async (req, reply) => {
+    const { surveyId } = req.params;
+    const { conversation_id, contact_id, answers } = req.body;
+    const { rows: s } = await query('SELECT id FROM custom_surveys WHERE id=$1 AND active=true', [surveyId]);
+    if (!s[0]) return reply.status(404).send({ error: 'Pesquisa não encontrada ou inativa' });
+    const { rows } = await query(
+      'INSERT INTO survey_responses (survey_id, conversation_id, contact_id, answers) VALUES ($1,$2,$3,$4) RETURNING *',
+      [surveyId, conversation_id || null, contact_id || null, JSON.stringify(answers || [])]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  // ── Tracked Links ─────────────────────────────────────────────────────────────
+
+  fastify.post('/track-links/shorten', auth, async (req, reply) => {
+    const { original_url, campaign_id, conversation_id } = req.body;
+    if (!original_url) return reply.status(400).send({ error: 'original_url obrigatório' });
+    const { rows: codeRows } = await query(
+      "SELECT SUBSTRING(MD5(RANDOM()::TEXT || CLOCK_TIMESTAMP()::TEXT), 1, 8) AS code"
+    );
+    const short_code = codeRows[0].code;
+    const backendUrl = process.env.BACKEND_URL || 'https://api.msxzap.pro';
+    const { rows } = await query(
+      'INSERT INTO tracked_links (original_url, short_code, campaign_id, conversation_id, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [original_url, short_code, campaign_id || null, conversation_id || null, req.user.id]
+    );
+    return reply.status(201).send({ ...rows[0], short_url: `${backendUrl}/r/${short_code}` });
+  });
+
+  fastify.get('/track-links', auth, async (req) => {
+    const backendUrl = process.env.BACKEND_URL || 'https://api.msxzap.pro';
+    const { rows } = await query(
+      `SELECT tl.*, COUNT(lc.id)::int as click_count
+       FROM tracked_links tl
+       LEFT JOIN link_clicks lc ON lc.link_id = tl.id
+       WHERE tl.created_by = $1
+       GROUP BY tl.id
+       ORDER BY tl.created_at DESC`,
+      [req.user.id]
+    );
+    return rows.map(r => ({ ...r, short_url: `${backendUrl}/r/${r.short_code}` }));
+  });
+
+  fastify.get('/track-links/:id/clicks', auth, async (req) => {
+    const { page = 1, limit = 20 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { rows } = await query(
+      'SELECT * FROM link_clicks WHERE link_id=$1 ORDER BY clicked_at DESC LIMIT $2 OFFSET $3',
+      [req.params.id, parseInt(limit), offset]
+    );
+    const { rows: total } = await query('SELECT COUNT(*) FROM link_clicks WHERE link_id=$1', [req.params.id]);
+    return { data: rows, total: parseInt(total[0].count) };
+  });
+
+  // Public redirect for tracked links
+  fastify.get('/r/:code', async (req, reply) => {
+    const { rows } = await query('SELECT * FROM tracked_links WHERE short_code=$1', [req.params.code]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Link não encontrado' });
+    query(
+      'INSERT INTO link_clicks (link_id, user_agent, ip) VALUES ($1,$2,$3)',
+      [rows[0].id, req.headers['user-agent'] || null, req.ip || null]
+    ).catch(() => {});
+    return reply.redirect(302, rows[0].original_url);
+  });
+
+  // ── Pix Charges ───────────────────────────────────────────────────────────────
+
+  fastify.get('/settings/pix-key', auth, async (req) => {
+    const { rows } = await query('SELECT pix_key, pix_merchant_name, pix_merchant_city FROM settings WHERE id=1');
+    return rows[0] || {};
+  });
+
+  fastify.put('/settings/pix-key', auth, async (req, reply) => {
+    if (!['admin', 'supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { pix_key, pix_merchant_name, pix_merchant_city } = req.body;
+    await query(
+      'UPDATE settings SET pix_key=COALESCE($1,pix_key), pix_merchant_name=COALESCE($2,pix_merchant_name), pix_merchant_city=COALESCE($3,pix_merchant_city) WHERE id=1',
+      [pix_key !== undefined ? pix_key : null, pix_merchant_name !== undefined ? pix_merchant_name : null, pix_merchant_city !== undefined ? pix_merchant_city : null]
+    );
+    return { success: true };
+  });
+
+  fastify.post('/pix-charges', auth, async (req, reply) => {
+    const { conversation_id, contact_id, amount, description } = req.body;
+    if (!amount || isNaN(parseFloat(amount))) return reply.status(400).send({ error: 'amount inválido' });
+
+    const { rows: sRows } = await query('SELECT pix_key, pix_merchant_name, pix_merchant_city, evolution_url, evolution_key FROM settings WHERE id=1');
+    const pixKey = sRows[0]?.pix_key || '';
+    const merchantName = (sRows[0]?.pix_merchant_name || 'Empresa').slice(0, 25).replace(/[^A-Za-z0-9 ]/g, '');
+    const merchantCity = (sRows[0]?.pix_merchant_city || 'BRASIL').slice(0, 15).replace(/[^A-Za-z0-9 ]/g, '').toUpperCase();
+
+    if (!pixKey) return reply.status(400).send({ error: 'Chave Pix não configurada nas configurações' });
+
+    const amountStr = parseFloat(amount).toFixed(2);
+    const desc = (description || 'Cobranca').slice(0, 35).replace(/[^A-Za-z0-9 ]/g, '') || 'Cobranca';
+
+    function fmt(id, value) {
+      return id + String(value.length).padStart(2, '0') + value;
+    }
+    function crc16pix(str) {
+      let crc = 0xFFFF;
+      for (let i = 0; i < str.length; i++) {
+        crc ^= str.charCodeAt(i) << 8;
+        for (let j = 0; j < 8; j++) {
+          crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) : (crc << 1);
+        }
+      }
+      return (crc & 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+    }
+
+    const merchantInfo = fmt('00', 'br.gov.bcb.pix') + fmt('01', pixKey);
+    let payload = fmt('00', '01')
+      + fmt('26', merchantInfo)
+      + fmt('52', '0000')
+      + fmt('53', '986')
+      + fmt('54', amountStr)
+      + fmt('58', 'BR')
+      + fmt('59', merchantName)
+      + fmt('60', merchantCity)
+      + fmt('62', fmt('05', desc))
+      + '6304';
+    payload += crc16pix(payload);
+
+    // Send WhatsApp messages if conversation_id provided
+    if (conversation_id && sRows[0]?.evolution_url) {
+      const { rows: cRows } = await query(
+        'SELECT c.connection_name, ct.phone FROM conversations c JOIN contacts ct ON ct.id=c.contact_id WHERE c.id=$1',
+        [conversation_id]
+      ).catch(() => ({ rows: [] }));
+      if (cRows[0]) {
+        const msg1 = `💳 Cobrança Pix\n${description || ''}\nValor: R$ ${parseFloat(amount).toFixed(2).replace('.', ',')}\n\nUse o código Pix abaixo para pagar:`;
+        fetch(`${sRows[0].evolution_url}/message/sendText/${cRows[0].connection_name}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': sRows[0].evolution_key },
+          body: JSON.stringify({ number: cRows[0].phone, text: msg1 }),
+        }).catch(() => {});
+        setTimeout(() => {
+          fetch(`${sRows[0].evolution_url}/message/sendText/${cRows[0].connection_name}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': sRows[0].evolution_key },
+            body: JSON.stringify({ number: cRows[0].phone, text: payload }),
+          }).catch(() => {});
+        }, 1500);
+      }
+    }
+
+    const { rows } = await query(
+      'INSERT INTO pix_charges (conversation_id, contact_id, amount, description, pix_key, qr_code_text, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [conversation_id || null, contact_id || null, parseFloat(amount), description || null, pixKey, payload, req.user.id]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.get('/pix-charges', auth, async (req) => {
+    const { conversation_id } = req.query;
+    let sql = 'SELECT pc.*, p.full_name as created_by_name FROM pix_charges pc LEFT JOIN profiles p ON p.id=pc.created_by';
+    const params = [];
+    if (conversation_id) {
+      sql += ' WHERE pc.conversation_id=$1';
+      params.push(conversation_id);
+    }
+    sql += ' ORDER BY pc.created_at DESC';
+    const { rows } = await query(sql, params);
+    return rows;
+  });
+
+  fastify.patch('/pix-charges/:id/mark-paid', auth, async (req, reply) => {
+    const { rows } = await query(
+      "UPDATE pix_charges SET status='paid', paid_at=NOW() WHERE id=$1 RETURNING *",
+      [req.params.id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Cobrança não encontrada' });
+    return rows[0];
+  });
+
 }

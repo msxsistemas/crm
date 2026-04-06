@@ -1028,6 +1028,134 @@ export default async function statsRoutes(fastify) {
     return result;
   });
 
+  // ── My Productivity ───────────────────────────────────────────────────────
+
+  fastify.get('/stats/my-productivity', auth, async (req) => {
+    const userId = req.user.id;
+
+    // Today stats
+    const { rows: todayRows } = await query(`
+      SELECT
+        COUNT(*) FILTER (WHERE status IN ('open','in_progress'))::int AS open_conversations,
+        COUNT(*) FILTER (WHERE status = 'closed' AND DATE(closed_at) = CURRENT_DATE)::int AS closed_today,
+        ROUND(AVG(EXTRACT(EPOCH FROM (first_response_at - created_at))/60) FILTER (
+          WHERE first_response_at IS NOT NULL AND DATE(created_at) = CURRENT_DATE
+        )::numeric, 1) AS avg_response_min_today
+      FROM conversations
+      WHERE assigned_to = $1
+    `, [userId]);
+
+    const { rows: msgToday } = await query(`
+      SELECT COUNT(*)::int AS sent_today
+      FROM messages m
+      JOIN conversations c ON c.id = m.conversation_id
+      WHERE c.assigned_to = $1 AND DATE(m.created_at) = CURRENT_DATE AND m.direction = 'outbound'
+    `, [userId]);
+
+    // Week stats
+    const { rows: weekRows } = await query(`
+      SELECT
+        COUNT(*) FILTER (WHERE status IN ('open','in_progress'))::int AS open_conversations,
+        COUNT(*) FILTER (WHERE status = 'closed' AND closed_at >= NOW() - INTERVAL '7 days')::int AS closed_week,
+        ROUND(AVG(EXTRACT(EPOCH FROM (first_response_at - created_at))/60) FILTER (
+          WHERE first_response_at IS NOT NULL AND created_at >= NOW() - INTERVAL '7 days'
+        )::numeric, 1) AS avg_response_min_week
+      FROM conversations
+      WHERE assigned_to = $1
+    `, [userId]);
+
+    const { rows: msgWeek } = await query(`
+      SELECT COUNT(*)::int AS sent_week
+      FROM messages m
+      JOIN conversations c ON c.id = m.conversation_id
+      WHERE c.assigned_to = $1 AND m.created_at >= NOW() - INTERVAL '7 days' AND m.direction = 'outbound'
+    `, [userId]);
+
+    // Goal
+    const { rows: goalRows } = await query(
+      'SELECT * FROM productivity_goals WHERE agent_id = $1',
+      [userId]
+    );
+
+    // Ranking (conversations closed this month)
+    const { rows: rankRows } = await query(`
+      SELECT agent_id, COUNT(*) AS closed_month,
+        RANK() OVER (ORDER BY COUNT(*) DESC) AS rank
+      FROM conversations
+      WHERE status = 'closed' AND closed_at >= DATE_TRUNC('month', NOW())
+      GROUP BY agent_id
+    `);
+    const myRank = rankRows.find(r => r.agent_id === userId);
+
+    // History: last 30 days
+    const { rows: historyRows } = await query(`
+      SELECT
+        DATE(closed_at) AS date,
+        COUNT(*)::int AS conversations_closed,
+        ROUND(AVG(EXTRACT(EPOCH FROM (first_response_at - created_at))/60) FILTER (
+          WHERE first_response_at IS NOT NULL
+        )::numeric, 1) AS avg_response_min
+      FROM conversations
+      WHERE assigned_to = $1 AND status = 'closed' AND closed_at >= NOW() - INTERVAL '30 days'
+      GROUP BY DATE(closed_at)
+      ORDER BY date ASC
+    `, [userId]);
+
+    const t = todayRows[0] || {};
+    const w = weekRows[0] || {};
+    const g = goalRows[0] || { daily_conversations: 10, weekly_conversations: 50 };
+
+    return {
+      today: {
+        open_conversations: t.open_conversations || 0,
+        closed_conversations: t.closed_today || 0,
+        messages_sent: (msgToday[0] || {}).sent_today || 0,
+        avg_response_min: t.avg_response_min_today ? parseFloat(t.avg_response_min_today) : null,
+      },
+      week: {
+        open_conversations: w.open_conversations || 0,
+        closed_conversations: w.closed_week || 0,
+        messages_sent: (msgWeek[0] || {}).sent_week || 0,
+        avg_response_min: w.avg_response_min_week ? parseFloat(w.avg_response_min_week) : null,
+      },
+      goal: {
+        daily_conversations: parseInt(g.daily_conversations) || 10,
+        weekly_conversations: parseInt(g.weekly_conversations) || 50,
+      },
+      ranking: {
+        position: myRank ? parseInt(myRank.rank) : null,
+        total_closed_month: myRank ? parseInt(myRank.closed_month) : 0,
+        total_agents: rankRows.length,
+      },
+      history: historyRows.map(r => ({
+        date: r.date,
+        conversations_closed: r.conversations_closed,
+        avg_response_min: r.avg_response_min ? parseFloat(r.avg_response_min) : null,
+      })),
+    };
+  });
+
+  fastify.get('/stats/my-productivity/goals', auth, async (req) => {
+    const { rows } = await query(
+      'SELECT * FROM productivity_goals WHERE agent_id = $1',
+      [req.user.id]
+    );
+    return rows[0] || { agent_id: req.user.id, daily_conversations: 10, weekly_conversations: 50 };
+  });
+
+  fastify.put('/stats/my-productivity/goals', auth, async (req, reply) => {
+    const { daily_conversations, weekly_conversations } = req.body;
+    const { rows } = await query(`
+      INSERT INTO productivity_goals (agent_id, daily_conversations, weekly_conversations)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (agent_id) DO UPDATE
+        SET daily_conversations = EXCLUDED.daily_conversations,
+            weekly_conversations = EXCLUDED.weekly_conversations
+      RETURNING *
+    `, [req.user.id, parseInt(daily_conversations) || 10, parseInt(weekly_conversations) || 50]);
+    return rows[0];
+  });
+
   // ── Public Agent Profile ──────────────────────────────────────────────────
   fastify.get('/public/agent/:id', async (req, reply) => {
     const { rows } = await query(`

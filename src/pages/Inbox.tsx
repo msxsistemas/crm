@@ -12,7 +12,7 @@ import {
   Trash2, Copy, Forward, Reply, Pencil, Check, AlertCircle, Bot, Clock, Target, Sparkles,
   LayoutTemplate, Tag, History, Ban, LayoutList, List, GitMerge, ShoppingBag, Download,
   CheckSquare, Users, Languages, UserCheck, Archive, LayoutGrid, AlignJustify, CreditCard,
-  Pin, PinOff, Eye, EyeOff, Bold, Italic, Code, Video,
+  Pin, PinOff, Eye, EyeOff, Bold, Italic, Code, Video, Link2,
 } from "lucide-react";
 import { useFollowupReminders } from "@/hooks/useFollowupReminders";
 import FollowupDialog from "@/components/followup/FollowupDialog";
@@ -139,6 +139,7 @@ interface DBMessage {
   created_at: string;
   whatsapp_message_id?: string | null;
   content?: string;
+  is_whisper?: boolean;
 }
 
 type TabFilter = "atendendo" | "aguardando" | "encerradas" | "favoritas" | "arquivadas";
@@ -249,6 +250,7 @@ const Inbox = () => {
     try { return JSON.parse(localStorage.getItem("inbox_search_history") || "[]"); } catch { return []; }
   });
   const [messageInput, setMessageInput] = useState("");
+  const [whisperMode, setWhisperMode] = useState(false);
   const [showMarkdownPreview, setShowMarkdownPreview] = useState(false);
   const [signing, setSigning] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -466,6 +468,11 @@ const Inbox = () => {
   const [pixPayload, setPixPayload] = useState<string | null>(null);
   const [pixMerchantName, setPixMerchantName] = useState("");
   const [pixMerchantCity, setPixMerchantCity] = useState("");
+
+  // Link shortener state
+  const [linkShortenerOpen, setLinkShortenerOpen] = useState(false);
+  const [linkShortenerUrl, setLinkShortenerUrl] = useState("");
+  const [linkShortening, setLinkShortening] = useState(false);
 
   // Payment link state
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
@@ -1387,6 +1394,25 @@ const Inbox = () => {
     return payload + calculateCRC16Pix(payload);
   };
 
+  const handleShortenLink = async () => {
+    if (!linkShortenerUrl.trim()) return;
+    setLinkShortening(true);
+    try {
+      const { data } = await api.post("/track-links/shorten", {
+        original_url: linkShortenerUrl.trim(),
+        conversation_id: selected || null,
+      });
+      const shortUrl = data.short_url || data.short_code;
+      setMessage((prev: string) => prev ? prev + " " + shortUrl : shortUrl);
+      setLinkShortenerUrl("");
+      setLinkShortenerOpen(false);
+      toast.success("Link encurtado e inserido na mensagem!");
+    } catch {
+      toast.error("Erro ao encurtar link");
+    }
+    setLinkShortening(false);
+  };
+
   const handleOpenPixDialog = () => {
     const saved = localStorage.getItem("pix_config");
     if (saved) {
@@ -1476,11 +1502,46 @@ const Inbox = () => {
     const convo = conversations.find((c) => c.id === selected);
     if (!convo) return;
 
-    const signaturePrefix = signing && profileName
+    const isWhisper = whisperMode;
+
+    const signaturePrefix = !isWhisper && signing && profileName
       ? (profileSignature ? `${profileName}:\n` : `${profileName}:\n`)
       : "";
-    const signatureSuffix = signing && profileSignature ? `\n\n${profileSignature}` : "";
+    const signatureSuffix = !isWhisper && signing && profileSignature ? `\n\n${profileSignature}` : "";
     const text = signaturePrefix + messageInput + signatureSuffix;
+
+    // Whisper messages: send via REST API only (not WhatsApp)
+    if (isWhisper) {
+      setMessageInput("");
+      const optimisticMsg: DBMessage = {
+        id: `temp-${Date.now()}`,
+        conversation_id: selected,
+        from_me: true,
+        is_whisper: true,
+        body: text,
+        media_url: null,
+        media_type: null,
+        status: "sent",
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, optimisticMsg]);
+      try {
+        const result = await api.post<DBMessage>('/messages', {
+          conversation_id: selected,
+          content: text,
+          body: text,
+          from_me: true,
+          type: 'text',
+          is_whisper: true,
+        });
+        setMessages((prev) => prev.map((m) => m.id === optimisticMsg.id ? { ...result, body: result.body || result.content || text } : m));
+      } catch (err: any) {
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticMsg.id));
+        toast.error("Erro ao enviar sussurro: " + (err?.message || "Tente novamente"));
+        setMessageInput(text);
+      }
+      return;
+    }
 
     // If offline, queue the message instead of sending
     if (!isOnline) {
@@ -2667,10 +2728,12 @@ const Inbox = () => {
     return <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-[10px] px-2 py-0.5 font-normal">▶ Em atendimento</Badge>;
   };
 
+  const canSeeWhisper = user?.role === 'supervisor' || user?.role === 'admin';
   const displayMessages = useMemo(() => {
-    if (!msgSearch.trim()) return messages;
-    return messages.filter(m => m.body?.toLowerCase().includes(msgSearch.toLowerCase()));
-  }, [messages, msgSearch]);
+    const base = canSeeWhisper ? messages : messages.filter(m => !m.is_whisper);
+    if (!msgSearch.trim()) return base;
+    return base.filter(m => m.body?.toLowerCase().includes(msgSearch.toLowerCase()));
+  }, [messages, msgSearch, canSeeWhisper]);
 
   const renderMarkdown = (text: string): string => {
     return text
@@ -4170,9 +4233,9 @@ const Inbox = () => {
                         </span>
                       </div>
                     )}
-                    <div className={`flex ${msg.from_me ? "justify-end mb-2" : "justify-start mb-4 pl-2"} group items-start gap-2`}>
+                    <div className={`flex ${msg.is_whisper ? "justify-start mb-2 pl-2" : msg.from_me ? "justify-end mb-2" : "justify-start mb-4 pl-2"} group items-start gap-2`}>
                       {/* Checkbox for forward selection - left side for received */}
-                      {selectingForForward && !msg.from_me && (
+                      {selectingForForward && !msg.from_me && !msg.is_whisper && (
                         <button
                           onClick={() => setSelectedForForward(prev => {
                             const next = new Set(prev);
@@ -4194,12 +4257,16 @@ const Inbox = () => {
                           "relative rounded-lg text-[14.2px] shadow-[0_1px_0.5px_rgba(11,20,26,0.13)]",
                           msg.media_url && msg.media_type
                             ? "max-w-[240px] px-1.5 py-1.5"
+                            : msg.is_whisper
+                              ? "max-w-[65%] pl-4 pr-8 py-2.5"
+                              : msg.from_me
+                                ? "max-w-[65%] pl-3 pr-8 py-2"
+                                : "max-w-[65%] pl-4 pr-8 py-2.5",
+                          msg.is_whisper
+                            ? "bg-amber-100 dark:bg-amber-900/30 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-tl-none"
                             : msg.from_me
-                              ? "max-w-[65%] pl-3 pr-8 py-2"
-                              : "max-w-[65%] pl-4 pr-8 py-2.5",
-                          msg.from_me
-                            ? "bg-[#dcf8c6] dark:bg-[#005c4b] text-[#111b21] dark:text-[#e9edef] rounded-tr-none"
-                            : "bg-white dark:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] rounded-tl-none",
+                              ? "bg-[#dcf8c6] dark:bg-[#005c4b] text-[#111b21] dark:text-[#e9edef] rounded-tr-none"
+                              : "bg-white dark:bg-[#202c33] text-[#111b21] dark:text-[#e9edef] rounded-tl-none",
                           msgSearch && msg.body?.toLowerCase().includes(msgSearch.toLowerCase()) && "ring-2 ring-yellow-400"
                         )}
                         onClick={() => {
@@ -4328,7 +4395,13 @@ const Inbox = () => {
                           </DropdownMenuContent>
                         </DropdownMenu>
 
-                        {msg.from_me && signing && profileName && (
+                        {msg.is_whisper && (
+                          <div className="flex items-center gap-1 mb-0.5">
+                            <EyeOff className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                            <span className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">Sussurro privado</span>
+                          </div>
+                        )}
+                        {!msg.is_whisper && msg.from_me && signing && profileName && (
                           <p className="text-[11px] font-medium text-[#06cf9c] mb-0.5">{profileName}</p>
                         )}
                         {msg.media_url && msg.media_type ? (
@@ -4793,6 +4866,34 @@ const Inbox = () => {
                     >
                       <Folder className="h-5 w-5" />
                     </Button>
+                    <Popover open={linkShortenerOpen} onOpenChange={setLinkShortenerOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="shrink-0 h-9 w-9 text-muted-foreground hover:text-blue-600 hover:bg-transparent"
+                          disabled={uploading}
+                          title="Encurtar link"
+                        >
+                          <Link2 className="h-5 w-5" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-80 p-3 space-y-2" align="start">
+                        <p className="text-sm font-medium">Encurtar e rastrear link</p>
+                        <input
+                          className="w-full border border-border rounded-md px-3 py-1.5 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                          placeholder="https://..."
+                          value={linkShortenerUrl}
+                          onChange={(e) => setLinkShortenerUrl(e.target.value)}
+                          onKeyDown={(e) => e.key === "Enter" && handleShortenLink()}
+                          autoFocus
+                        />
+                        <Button size="sm" className="w-full gap-2" onClick={handleShortenLink} disabled={linkShortening || !linkShortenerUrl.trim()}>
+                          {linkShortening ? <span className="h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
+                          Encurtar e inserir
+                        </Button>
+                      </PopoverContent>
+                    </Popover>
                     <Button
                       size="icon"
                       variant="ghost"
@@ -4823,8 +4924,34 @@ const Inbox = () => {
                     >
                       <ShoppingBag className="h-5 w-5" />
                     </Button>
+                    {/* Whisper button — only for supervisors and admins */}
+                    {(user?.role === 'supervisor' || user?.role === 'admin') && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className={cn(
+                          "shrink-0 h-9 w-9 hover:bg-transparent",
+                          whisperMode
+                            ? "text-amber-600 hover:text-amber-700"
+                            : "text-muted-foreground hover:text-amber-500"
+                        )}
+                        onClick={() => setWhisperMode(p => !p)}
+                        disabled={uploading}
+                        title={whisperMode ? "Modo sussurro ativo — clique para desativar" : "Ativar modo sussurro (só agentes veem)"}
+                      >
+                        <EyeOff className="h-5 w-5" />
+                      </Button>
+                    )}
                   </div>
                   <div className="relative flex-1">
+                    {/* Whisper mode indicator */}
+                    {whisperMode && (
+                      <div className="absolute bottom-full left-0 mb-1 flex items-center gap-1 px-2 py-0.5 bg-amber-100 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 rounded-md text-xs text-amber-700 dark:text-amber-400 z-40">
+                        <EyeOff className="h-3 w-3" />
+                        Mensagem privada — só o agente vê
+                      </div>
+                    )}
+
                     {slashQuery !== null && slashResults.length > 0 && (
                       <div className="absolute bottom-full left-0 right-0 mb-1 bg-popover border border-border rounded-lg shadow-lg z-50 overflow-hidden max-h-64 overflow-y-auto">
                         {slashResults.map((reply, idx) => (
@@ -4909,8 +5036,8 @@ const Inbox = () => {
                     ) : (
                       <Input
                         data-msg-input
-                        placeholder={uploading ? "Enviando arquivo..." : "Digite uma mensagem ou / para respostas rápidas"}
-                        className="w-full bg-muted border-0 text-foreground placeholder:text-muted-foreground rounded-lg h-10 focus-visible:ring-0 focus-visible:ring-offset-0"
+                        placeholder={uploading ? "Enviando arquivo..." : whisperMode ? "Mensagem privada (só agentes veem)..." : "Digite uma mensagem ou / para respostas rápidas"}
+                        className={cn("w-full border-0 text-foreground placeholder:text-muted-foreground rounded-lg h-10 focus-visible:ring-0 focus-visible:ring-offset-0", whisperMode ? "bg-amber-50 dark:bg-amber-900/20 placeholder:text-amber-500" : "bg-muted")}
                         value={messageInput}
                         onChange={(e) => {
                           const newValue = e.target.value;

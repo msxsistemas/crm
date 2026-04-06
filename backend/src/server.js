@@ -413,6 +413,130 @@ try {
   process.exit(1);
 }
 
+// Recurring campaigns worker — runs every hour
+setInterval(async () => {
+  try {
+    const { rows: campaigns } = await pool.query("SELECT * FROM recurring_campaigns WHERE active = true");
+    if (!campaigns.length) return;
+
+    const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const todayMD = todayStr.slice(5); // MM-DD
+
+    for (const campaign of campaigns) {
+      try {
+        if (campaign.type === 'birthday') {
+          // Find contacts whose birthday matches today's month-day
+          const { rows: contacts } = await pool.query(`
+            SELECT c.* FROM contacts c
+            WHERE c.birthday IS NOT NULL
+              AND TO_CHAR(c.birthday::date, 'MM-DD') = $1
+              AND NOT EXISTS (
+                SELECT 1 FROM recurring_campaign_logs rl
+                WHERE rl.campaign_id = $2 AND rl.contact_id = c.id
+                  AND DATE(rl.sent_at) = CURRENT_DATE
+              )
+          `, [todayMD, campaign.id]);
+
+          for (const contact of contacts) {
+            try {
+              const message = campaign.message
+                .replace(/\{\{nome\}\}/g, contact.name || '')
+                .replace(/\{\{empresa\}\}/g, contact.company || '');
+              await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${campaign.connection_name}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+                body: JSON.stringify({ number: contact.phone, text: message })
+              });
+              await pool.query(
+                'INSERT INTO recurring_campaign_logs (campaign_id, contact_id, status) VALUES ($1,$2,$3)',
+                [campaign.id, contact.id, 'sent']
+              );
+            } catch(e) {
+              await pool.query(
+                'INSERT INTO recurring_campaign_logs (campaign_id, contact_id, status) VALUES ($1,$2,$3)',
+                [campaign.id, contact.id, 'error']
+              ).catch(() => {});
+            }
+          }
+        } else if (campaign.type === 'followup') {
+          // Find conversations closed exactly delay_days days ago
+          const delayDays = parseInt(campaign.delay_days) || 1;
+          const { rows: convos } = await pool.query(`
+            SELECT cv.*, ct.phone, ct.name AS contact_name, ct.company AS contact_company, ct.id AS contact_id
+            FROM conversations cv
+            JOIN contacts ct ON ct.id = cv.contact_id
+            WHERE cv.status = 'closed'
+              AND DATE(cv.closed_at) = CURRENT_DATE - INTERVAL '${delayDays} days'
+              AND NOT EXISTS (
+                SELECT 1 FROM recurring_campaign_logs rl
+                WHERE rl.campaign_id = $1 AND rl.contact_id = ct.id
+                  AND DATE(rl.sent_at) = CURRENT_DATE
+              )
+          `, [campaign.id]);
+
+          for (const conv of convos) {
+            try {
+              const message = campaign.message
+                .replace(/\{\{nome\}\}/g, conv.contact_name || '')
+                .replace(/\{\{empresa\}\}/g, conv.contact_company || '');
+              await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${campaign.connection_name}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+                body: JSON.stringify({ number: conv.phone, text: message })
+              });
+              await pool.query(
+                'INSERT INTO recurring_campaign_logs (campaign_id, contact_id, status) VALUES ($1,$2,$3)',
+                [campaign.id, conv.contact_id, 'sent']
+              );
+            } catch(e) {
+              await pool.query(
+                'INSERT INTO recurring_campaign_logs (campaign_id, contact_id, status) VALUES ($1,$2,$3)',
+                [campaign.id, conv.contact_id, 'error']
+              ).catch(() => {});
+            }
+          }
+        } else if (campaign.type === 'date_field') {
+          // Find contacts whose custom_field matches today
+          if (!campaign.custom_field_key) continue;
+          const { rows: contacts } = await pool.query(`
+            SELECT c.* FROM contacts c
+            WHERE c.custom_fields IS NOT NULL
+              AND c.custom_fields->>'${campaign.custom_field_key}' IS NOT NULL
+              AND LEFT(c.custom_fields->>'${campaign.custom_field_key}', 10) = $1
+              AND NOT EXISTS (
+                SELECT 1 FROM recurring_campaign_logs rl
+                WHERE rl.campaign_id = $2 AND rl.contact_id = c.id
+                  AND DATE(rl.sent_at) = CURRENT_DATE
+              )
+          `, [todayStr, campaign.id]);
+
+          for (const contact of contacts) {
+            try {
+              const message = campaign.message
+                .replace(/\{\{nome\}\}/g, contact.name || '')
+                .replace(/\{\{empresa\}\}/g, contact.company || '');
+              await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${campaign.connection_name}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+                body: JSON.stringify({ number: contact.phone, text: message })
+              });
+              await pool.query(
+                'INSERT INTO recurring_campaign_logs (campaign_id, contact_id, status) VALUES ($1,$2,$3)',
+                [campaign.id, contact.id, 'sent']
+              );
+            } catch(e) {
+              await pool.query(
+                'INSERT INTO recurring_campaign_logs (campaign_id, contact_id, status) VALUES ($1,$2,$3)',
+                [campaign.id, contact.id, 'error']
+              ).catch(() => {});
+            }
+          }
+        }
+      } catch(e) { console.error('[recurring-campaigns] Campaign error:', campaign.id, e.message); }
+    }
+  } catch(e) { /* silent */ }
+}, 3600000); // every hour
+
 // Appointment reminders — runs every minute
 setInterval(async () => {
   try {

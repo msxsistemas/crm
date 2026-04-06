@@ -3,7 +3,8 @@ import {
   Settings as SettingsIcon, User, Lock, Eye, EyeOff, Save, Tag, Search, Plus,
   Building2, Zap, CheckCircle, Clock, Users2, X, Info, Pencil,
   Shuffle, UserPlus, Building, Camera, Loader2, Globe, Play, XCircle, RefreshCw, Trash2,
-  Key, Copy, ChevronDown, ChevronUp, ShieldAlert, ShieldCheck, Monitor, TrendingUp, Star, Cake, Ban, Bell
+  Key, Copy, ChevronDown, ChevronUp, ShieldAlert, ShieldCheck, Monitor, TrendingUp, Star, Cake, Ban, Bell,
+  Bot, Send
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -2886,8 +2887,10 @@ const PixConfigTab = () => {
     try { return JSON.parse(localStorage.getItem("pix_config") || "{}").merchantCity || ""; } catch { return ""; }
   });
 
-  const handleSave = () => {
+  const handleSave = async () => {
     localStorage.setItem("pix_config", JSON.stringify({ pixKey, pixKeyType, merchantName, merchantCity }));
+    // Also save to backend so server-side Pix generation uses the key
+    await api.put('/settings/pix-key', { pix_key: pixKey, pix_merchant_name: merchantName, pix_merchant_city: merchantCity }).catch(() => {});
     toast.success("Configurações de cobrança salvas!");
   };
 
@@ -5656,6 +5659,435 @@ const EscalationRulesTab = () => {
   );
 };
 
+// ─── AI Chatbot Tab ───────────────────────────────────────────────────────────
+const AIChatbotTab = () => {
+  const [enabled, setEnabled] = useState(false);
+  const [systemPrompt, setSystemPrompt] = useState("Você é um assistente virtual prestativo. Responda de forma clara e educada em português.");
+  const [maxHistory, setMaxHistory] = useState(10);
+  const [triggerKeywords, setTriggerKeywords] = useState<string[]>([]);
+  const [handoffKeywords, setHandoffKeywords] = useState<string[]>(["humano", "atendente", "pessoa"]);
+  const [newTriggerKw, setNewTriggerKw] = useState("");
+  const [newHandoffKw, setNewHandoffKw] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [previewMsg, setPreviewMsg] = useState("");
+  const [previewReply, setPreviewReply] = useState("");
+  const [previewing, setPreviewing] = useState(false);
+
+  useEffect(() => {
+    api.get<any>('/ai-chatbot-config').then(data => {
+      if (data) {
+        setEnabled(data.enabled ?? false);
+        setSystemPrompt(data.system_prompt || "");
+        setMaxHistory(data.max_history_messages ?? 10);
+        setTriggerKeywords(data.trigger_keywords || []);
+        setHandoffKeywords(data.handoff_keywords || []);
+      }
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.put('/ai-chatbot-config', {
+        enabled, system_prompt: systemPrompt, max_history_messages: maxHistory,
+        trigger_keywords: triggerKeywords, handoff_keywords: handoffKeywords,
+      });
+      toast.success("Configuração do chatbot salva!");
+    } catch { toast.error("Erro ao salvar configuração"); }
+    setSaving(false);
+  };
+
+  const handlePreview = async () => {
+    if (!previewMsg.trim()) return;
+    setPreviewing(true);
+    setPreviewReply("");
+    try {
+      const data = await api.post<any>('/ai-chatbot-preview', { message: previewMsg, system_prompt: systemPrompt });
+      setPreviewReply(data.reply || "(sem resposta)");
+    } catch (e: any) {
+      setPreviewReply("Erro: " + (e?.message || "Verifique se ANTHROPIC_API_KEY está configurada no servidor"));
+    }
+    setPreviewing(false);
+  };
+
+  if (loading) return <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Carregando...</div>;
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <Card className="p-6 space-y-5">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
+            <Bot className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-foreground">Chatbot IA Generativo</h3>
+            <p className="text-sm text-muted-foreground">Usa Claude para responder clientes automaticamente</p>
+          </div>
+        </div>
+
+        {/* Enable toggle */}
+        <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/20">
+          <div>
+            <p className="font-medium text-sm">Ativar chatbot IA</p>
+            <p className="text-xs text-muted-foreground">Quando ativo, responde conversas sem agente humano</p>
+          </div>
+          <Switch checked={enabled} onCheckedChange={setEnabled} />
+        </div>
+
+        {/* System Prompt */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Prompt do sistema</label>
+          <Textarea
+            value={systemPrompt}
+            onChange={e => setSystemPrompt(e.target.value)}
+            rows={5}
+            placeholder="Ex: Você é assistente da empresa X, responda em português sobre nossos produtos..."
+            className="resize-none"
+          />
+          <p className="text-xs text-muted-foreground">Define a personalidade e contexto do bot. Inclua informações sobre sua empresa.</p>
+        </div>
+
+        {/* Max History */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Máx. mensagens de histórico: <strong>{maxHistory}</strong></label>
+          <input
+            type="range" min={5} max={20} value={maxHistory}
+            onChange={e => setMaxHistory(parseInt(e.target.value))}
+            className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-primary/20 accent-primary"
+          />
+          <div className="flex justify-between text-xs text-muted-foreground"><span>5</span><span>20</span></div>
+        </div>
+
+        {/* Trigger keywords */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Palavras-chave de acionamento</label>
+          <p className="text-xs text-muted-foreground">Se vazia, o bot responde sempre. Se preenchida, só responde quando a mensagem contiver uma dessas palavras.</p>
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {triggerKeywords.map((kw, i) => (
+              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs">
+                {kw}
+                <button onClick={() => setTriggerKeywords(prev => prev.filter((_, j) => j !== i))}><X className="h-3 w-3" /></button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Input value={newTriggerKw} onChange={e => setNewTriggerKw(e.target.value)} placeholder="Nova palavra-chave" className="h-8 text-sm"
+              onKeyDown={e => { if (e.key === 'Enter' && newTriggerKw.trim()) { setTriggerKeywords(prev => [...prev, newTriggerKw.trim()]); setNewTriggerKw(""); }}} />
+            <Button size="sm" variant="outline" onClick={() => { if (newTriggerKw.trim()) { setTriggerKeywords(prev => [...prev, newTriggerKw.trim()]); setNewTriggerKw(""); }}}>
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Handoff keywords */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Palavras-chave de handoff para humano</label>
+          <p className="text-xs text-muted-foreground">Se a resposta do bot contiver alguma dessas palavras, a conversa é transferida para um agente humano.</p>
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {handoffKeywords.map((kw, i) => (
+              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 text-xs">
+                {kw}
+                <button onClick={() => setHandoffKeywords(prev => prev.filter((_, j) => j !== i))}><X className="h-3 w-3" /></button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Input value={newHandoffKw} onChange={e => setNewHandoffKw(e.target.value)} placeholder="Ex: humano, atendente" className="h-8 text-sm"
+              onKeyDown={e => { if (e.key === 'Enter' && newHandoffKw.trim()) { setHandoffKeywords(prev => [...prev, newHandoffKw.trim()]); setNewHandoffKw(""); }}} />
+            <Button size="sm" variant="outline" onClick={() => { if (newHandoffKw.trim()) { setHandoffKeywords(prev => [...prev, newHandoffKw.trim()]); setNewHandoffKw(""); }}}>
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+
+        <Button onClick={handleSave} disabled={saving} className="w-full">
+          {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+          Salvar Configuração
+        </Button>
+      </Card>
+
+      {/* Preview / Test */}
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-2 mb-1">
+          <Play className="h-4 w-4 text-primary" />
+          <h4 className="font-semibold text-sm">Testar resposta do bot</h4>
+        </div>
+        <p className="text-xs text-muted-foreground">Simule uma mensagem de cliente e veja a resposta do bot em tempo real. Requer ANTHROPIC_API_KEY configurada no servidor.</p>
+        <div className="flex gap-2">
+          <Input value={previewMsg} onChange={e => setPreviewMsg(e.target.value)} placeholder="Digite uma mensagem de teste..."
+            onKeyDown={e => { if (e.key === 'Enter') handlePreview(); }} />
+          <Button onClick={handlePreview} disabled={previewing || !previewMsg.trim()} size="sm">
+            {previewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </Button>
+        </div>
+        {previewReply && (
+          <div className="p-3 rounded-lg bg-muted border border-border text-sm whitespace-pre-wrap">
+            <span className="text-xs font-semibold text-muted-foreground block mb-1">Resposta do bot:</span>
+            {previewReply}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+// ─── Custom Surveys Tab ───
+const CustomSurveysTab = () => {
+  const [surveys, setSurveys] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editingSurvey, setEditingSurvey] = useState<any | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [responsesModal, setResponsesModal] = useState<any | null>(null);
+  const [responses, setResponses] = useState<any[]>([]);
+  const [responsesLoading, setResponsesLoading] = useState(false);
+
+  // Form state
+  const [formName, setFormName] = useState("");
+  const [formTriggerOnClose, setFormTriggerOnClose] = useState(false);
+  const [formConnectionName, setFormConnectionName] = useState("");
+  const [formActive, setFormActive] = useState(true);
+  const [formQuestions, setFormQuestions] = useState<any[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get<any[]>('/custom-surveys').then(data => setSurveys(data || [])).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const openCreate = () => {
+    setEditingSurvey(null);
+    setFormName(""); setFormTriggerOnClose(false); setFormConnectionName(""); setFormActive(true); setFormQuestions([]);
+    setShowModal(true);
+  };
+
+  const openEdit = (s: any) => {
+    setEditingSurvey(s);
+    setFormName(s.name || ""); setFormTriggerOnClose(s.trigger_on_close || false);
+    setFormConnectionName(s.connection_name || ""); setFormActive(s.active !== false);
+    setFormQuestions(Array.isArray(s.questions) ? s.questions : []);
+    setShowModal(true);
+  };
+
+  const handleSave = async () => {
+    if (!formName.trim()) { toast.error("Nome obrigatório"); return; }
+    setSaving(true);
+    try {
+      const body = { name: formName, trigger_on_close: formTriggerOnClose, connection_name: formConnectionName || null, active: formActive, questions: formQuestions };
+      if (editingSurvey) {
+        const data = await api.put<any>(`/custom-surveys/${editingSurvey.id}`, body);
+        setSurveys(prev => prev.map(s => s.id === editingSurvey.id ? data : s));
+      } else {
+        const data = await api.post<any>('/custom-surveys', body);
+        setSurveys(prev => [data, ...prev]);
+      }
+      setShowModal(false);
+      toast.success("Pesquisa salva!");
+    } catch { toast.error("Erro ao salvar pesquisa"); }
+    setSaving(false);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Excluir esta pesquisa?")) return;
+    await api.delete(`/custom-surveys/${id}`).catch(() => {});
+    setSurveys(prev => prev.filter(s => s.id !== id));
+    toast.success("Pesquisa excluída");
+  };
+
+  const handleToggle = async (s: any) => {
+    const data = await api.put<any>(`/custom-surveys/${s.id}`, { active: !s.active }).catch(() => null);
+    if (data) setSurveys(prev => prev.map(x => x.id === s.id ? data : x));
+  };
+
+  const openResponses = async (s: any) => {
+    setResponsesModal(s);
+    setResponsesLoading(true);
+    setResponses([]);
+    try {
+      const data = await api.get<any>(`/custom-surveys/${s.id}/responses`);
+      setResponses(data.data || []);
+    } catch { toast.error("Erro ao carregar respostas"); }
+    setResponsesLoading(false);
+  };
+
+  const addQuestion = () => {
+    setFormQuestions(prev => [...prev, { id: Date.now().toString(), text: "", type: "text", required: false }]);
+  };
+
+  const updateQuestion = (idx: number, field: string, value: any) => {
+    setFormQuestions(prev => prev.map((q, i) => i === idx ? { ...q, [field]: value } : q));
+  };
+
+  const removeQuestion = (idx: number) => {
+    setFormQuestions(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-foreground">Pesquisas Customizadas</h3>
+          <p className="text-sm text-muted-foreground">Envie pesquisas de satisfação ao fechar uma conversa</p>
+        </div>
+        <Button onClick={openCreate} className="gap-2"><Plus className="h-4 w-4" /> Nova Pesquisa</Button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Carregando...</div>
+      ) : surveys.length === 0 ? (
+        <Card className="p-8 text-center text-muted-foreground">
+          <p className="text-sm">Nenhuma pesquisa criada ainda</p>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {surveys.map(s => (
+            <Card key={s.id} className="p-4 flex items-center gap-4">
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-foreground">{s.name}</p>
+                <div className="flex items-center gap-3 mt-1 flex-wrap">
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${s.active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
+                    {s.active ? "Ativa" : "Inativa"}
+                  </span>
+                  {s.trigger_on_close && <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Ao fechar conversa</span>}
+                  {s.connection_name && <span className="text-xs text-muted-foreground">📱 {s.connection_name}</span>}
+                  <span className="text-xs text-muted-foreground">{Array.isArray(s.questions) ? s.questions.length : 0} pergunta(s)</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Switch checked={s.active !== false} onCheckedChange={() => handleToggle(s)} />
+                <Button size="sm" variant="outline" onClick={() => openResponses(s)}>Ver respostas</Button>
+                <Button size="sm" variant="ghost" onClick={() => openEdit(s)}>Editar</Button>
+                <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => handleDelete(s.id)}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Create/Edit Modal */}
+      <Dialog open={showModal} onOpenChange={setShowModal}>
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingSurvey ? "Editar Pesquisa" : "Nova Pesquisa"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Nome da pesquisa</label>
+              <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ex: Pesquisa de Satisfação" />
+            </div>
+            <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+              <div>
+                <p className="text-sm font-medium">Enviar ao fechar conversa</p>
+                <p className="text-xs text-muted-foreground">Link da pesquisa enviado automaticamente via WhatsApp</p>
+              </div>
+              <Switch checked={formTriggerOnClose} onCheckedChange={setFormTriggerOnClose} />
+            </div>
+            {formTriggerOnClose && (
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Conexão (deixe vazio para todas)</label>
+                <Input value={formConnectionName} onChange={e => setFormConnectionName(e.target.value)} placeholder="Nome da instância (ex: instancia1)" />
+              </div>
+            )}
+            <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+              <p className="text-sm font-medium">Pesquisa ativa</p>
+              <Switch checked={formActive} onCheckedChange={setFormActive} />
+            </div>
+
+            {/* Questions */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium">Perguntas</label>
+                <Button size="sm" variant="outline" onClick={addQuestion} className="gap-1"><Plus className="h-3.5 w-3.5" /> Adicionar</Button>
+              </div>
+              {formQuestions.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-3">Nenhuma pergunta adicionada</p>
+              )}
+              {formQuestions.map((q, idx) => (
+                <div key={q.id || idx} className="p-3 border border-border rounded-lg space-y-2">
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Texto da pergunta"
+                      value={q.text}
+                      onChange={e => updateQuestion(idx, 'text', e.target.value)}
+                      className="flex-1"
+                    />
+                    <button type="button" onClick={() => removeQuestion(idx)} className="text-muted-foreground hover:text-destructive">
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <select
+                      value={q.type}
+                      onChange={e => updateQuestion(idx, 'type', e.target.value)}
+                      className="border border-border rounded-md px-2 py-1 text-sm bg-background text-foreground flex-1"
+                    >
+                      <option value="text">Texto livre</option>
+                      <option value="rating">Avaliação (estrelas 1-5)</option>
+                      <option value="yesno">Sim / Não</option>
+                    </select>
+                    <label className="flex items-center gap-1.5 text-sm text-muted-foreground cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={q.required || false}
+                        onChange={e => updateQuestion(idx, 'required', e.target.checked)}
+                        className="rounded"
+                      />
+                      Obrigatória
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowModal(false)}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Responses Modal */}
+      {responsesModal && (
+        <Dialog open={!!responsesModal} onOpenChange={v => { if (!v) setResponsesModal(null); }}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Respostas — {responsesModal.name}</DialogTitle>
+            </DialogHeader>
+            {responsesLoading ? (
+              <div className="py-6 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+            ) : responses.length === 0 ? (
+              <p className="text-center text-sm text-muted-foreground py-8">Nenhuma resposta recebida ainda</p>
+            ) : (
+              <div className="space-y-3">
+                {responses.map(r => (
+                  <div key={r.id} className="border border-border rounded-lg p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">{r.contact_name || r.contact_phone || 'Contato anônimo'}</p>
+                      <p className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString('pt-BR')}</p>
+                    </div>
+                    <div className="space-y-1">
+                      {(Array.isArray(r.answers) ? r.answers : []).map((a: any, i: number) => (
+                        <div key={i} className="text-xs text-muted-foreground">
+                          <span className="font-medium text-foreground">{a.question_text}: </span>
+                          {a.type === 'rating' ? `${'⭐'.repeat(Number(a.answer) || 0)} (${a.answer})` : String(a.answer)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  );
+};
+
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("geral");
 
@@ -5701,6 +6133,8 @@ const Settings = () => {
             <TabsTrigger value="organizacao" className="gap-1.5"><Building className="h-3.5 w-3.5" /> Organização</TabsTrigger>
             <TabsTrigger value="escalacao" className="gap-1.5"><ShieldAlert className="h-3.5 w-3.5" /> Escalação</TabsTrigger>
             <TabsTrigger value="notificacoes_email" className="gap-1.5"><Bell className="h-3.5 w-3.5" /> Notificações E-mail</TabsTrigger>
+            <TabsTrigger value="pesquisas_custom" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Pesquisas</TabsTrigger>
+            <TabsTrigger value="ai_chatbot" className="gap-1.5"><Bot className="h-3.5 w-3.5" /> Chatbot IA</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -5736,6 +6170,8 @@ const Settings = () => {
           <TabsContent value="organizacao"><OrganizacaoTab /></TabsContent>
           <TabsContent value="escalacao"><EscalationRulesTab /></TabsContent>
           <TabsContent value="notificacoes_email"><Suspense fallback={<TabFallback />}><EmailNotificationsTabLazy /></Suspense></TabsContent>
+          <TabsContent value="pesquisas_custom"><CustomSurveysTab /></TabsContent>
+          <TabsContent value="ai_chatbot"><AIChatbotTab /></TabsContent>
         </Tabs>
       </div>
     </div>

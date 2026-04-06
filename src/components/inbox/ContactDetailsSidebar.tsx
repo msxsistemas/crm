@@ -182,6 +182,39 @@ const ContactDetailsSidebar = ({
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, string>>({});
   const [savingCustomField, setSavingCustomField] = useState<Record<string, boolean>>({});
 
+  // Pix charges state
+  interface PixCharge {
+    id: string;
+    amount: number;
+    description: string | null;
+    qr_code_text: string;
+    status: string;
+    paid_at: string | null;
+    created_at: string;
+    created_by_name: string | null;
+  }
+  const [pixCharges, setPixCharges] = useState<PixCharge[]>([]);
+  const [pixChargesOpen, setPixChargesOpen] = useState(false);
+  const [pixChargesLoaded, setPixChargesLoaded] = useState(false);
+  const [markingPaid, setMarkingPaid] = useState<string | null>(null);
+
+  const loadPixCharges = async () => {
+    try {
+      const data = await api.get<PixCharge[]>(`/pix-charges?conversation_id=${conversationId}`);
+      setPixCharges(data || []);
+      setPixChargesLoaded(true);
+    } catch { setPixChargesLoaded(true); }
+  };
+
+  const handleMarkPaid = async (chargeId: string) => {
+    setMarkingPaid(chargeId);
+    try {
+      const updated = await api.patch<PixCharge>(`/pix-charges/${chargeId}/mark-paid`, {});
+      setPixCharges(prev => prev.map(c => c.id === chargeId ? updated : c));
+    } catch { /* ignore */ }
+    setMarkingPaid(null);
+  };
+
   // Documents state
   interface ContactDocument {
     id: string;
@@ -1914,6 +1947,66 @@ const ContactDetailsSidebar = ({
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Pix Charges Section */}
+      <div className="border-b border-border">
+        <button
+          type="button"
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/50 transition-colors"
+          onClick={() => {
+            setPixChargesOpen(v => !v);
+            if (!pixChargesLoaded) loadPixCharges();
+          }}
+        >
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <CreditCard className="h-4 w-4 text-green-500" />
+            Cobranças Pix
+            {pixCharges.length > 0 && (
+              <span className="text-[11px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">{pixCharges.length}</span>
+            )}
+          </div>
+          {pixChargesOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </button>
+        {pixChargesOpen && (
+          <div className="px-4 pb-4 space-y-2">
+            {!pixChargesLoaded ? (
+              <p className="text-xs text-muted-foreground text-center py-2">Carregando...</p>
+            ) : pixCharges.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-3">Sem cobranças Pix</p>
+            ) : (
+              <div className="space-y-2">
+                {pixCharges.map(charge => (
+                  <div key={charge.id} className="rounded-lg border border-border bg-muted/30 p-3 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-foreground">
+                        R$ {Number(charge.amount).toFixed(2).replace('.', ',')}
+                      </span>
+                      <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${charge.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                        {charge.status === 'paid' ? '✅ Pago' : '⏳ Pendente'}
+                      </span>
+                    </div>
+                    {charge.description && <p className="text-xs text-muted-foreground">{charge.description}</p>}
+                    <p className="text-[11px] text-muted-foreground">
+                      {new Date(charge.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      {charge.created_by_name ? ` · ${charge.created_by_name}` : ''}
+                    </p>
+                    {charge.status !== 'paid' && (
+                      <button
+                        type="button"
+                        onClick={() => handleMarkPaid(charge.id)}
+                        disabled={markingPaid === charge.id}
+                        className="w-full mt-1 text-[11px] py-1 px-2 rounded border border-green-500 text-green-600 hover:bg-green-50 dark:hover:bg-green-950 transition-colors disabled:opacity-50"
+                      >
+                        {markingPaid === charge.id ? 'Marcando...' : 'Marcar como pago'}
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>

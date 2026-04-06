@@ -126,6 +126,10 @@ const WordCloud = lazy(() => import("./pages/WordCloud"));
 const PublicAgentProfile = lazy(() => import("./pages/PublicAgentProfile"));
 const ContactSegments = lazy(() => import("./pages/ContactSegments"));
 const ContactGrowth = lazy(() => import("./pages/ContactGrowth"));
+const RecurringCampaigns = lazy(() => import("./pages/RecurringCampaigns"));
+const MyProductivity = lazy(() => import("./pages/MyProductivity"));
+const SurveyResponse = lazy(() => import("./pages/SurveyResponse"));
+const LinkTracker = lazy(() => import("./pages/LinkTracker"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -246,6 +250,9 @@ const App = () => (
                     <Route path="/word-cloud" element={<WordCloud />} />
                     <Route path="/segmentos-dinamicos" element={<ContactSegments />} />
                     <Route path="/crescimento-contatos" element={<ContactGrowth />} />
+                    <Route path="/campanhas-recorrentes" element={<RecurringCampaigns />} />
+                    <Route path="/minha-produtividade" element={<MyProductivity />} />
+                    <Route path="/rastrear-links" element={<LinkTracker />} />
                   </Route>
                   <Route
                     element={
@@ -280,6 +287,7 @@ const App = () => (
                   <Route path="/f/:slug" element={<PublicCaptureForm />} />
                   <Route path="/agente/:id" element={<PublicAgentProfile />} />
                   <Route path="/status" element={<StatusPage />} />
+                  <Route path="/pesquisa/:surveyId" element={<SurveyResponse />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
