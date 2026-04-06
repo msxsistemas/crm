@@ -681,6 +681,65 @@ export default async function statsRoutes(fastify) {
     };
   });
 
+  // ── Response Time Report ──────────────────────────────────────────────────
+  fastify.get('/stats/response-time', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { start, end } = req.query;
+    const startDate = start || new Date(Date.now() - 30*24*60*60*1000).toISOString();
+    const endDate = end || new Date().toISOString();
+
+    // By agent
+    const { rows: byAgent } = await query(`
+      SELECT
+        p.full_name as name,
+        COUNT(c.id) as total,
+        ROUND(AVG(EXTRACT(EPOCH FROM (c.closed_at - c.created_at))/60)::numeric, 1) as avg_handling_min,
+        ROUND(AVG(EXTRACT(EPOCH FROM (c.first_response_at - c.created_at))/60)::numeric, 1) as avg_first_response_min,
+        ROUND(MIN(EXTRACT(EPOCH FROM (c.closed_at - c.created_at))/60)::numeric, 1) as min_handling_min,
+        ROUND(MAX(EXTRACT(EPOCH FROM (c.closed_at - c.created_at))/60)::numeric, 1) as max_handling_min
+      FROM conversations c
+      JOIN profiles p ON p.id = c.assigned_to
+      WHERE c.status='closed' AND c.closed_at IS NOT NULL AND c.created_at BETWEEN $1 AND $2
+      GROUP BY p.id, p.full_name ORDER BY avg_handling_min ASC
+    `, [startDate, endDate]);
+
+    // By team
+    const { rows: byTeam } = await query(`
+      SELECT
+        COALESCE(t.name, 'Sem time') as name,
+        COUNT(c.id) as total,
+        ROUND(AVG(EXTRACT(EPOCH FROM (c.closed_at - c.created_at))/60)::numeric, 1) as avg_handling_min,
+        ROUND(AVG(EXTRACT(EPOCH FROM (c.first_response_at - c.created_at))/60)::numeric, 1) as avg_first_response_min
+      FROM conversations c
+      LEFT JOIN teams t ON t.id = c.assigned_team_id
+      WHERE c.status='closed' AND c.closed_at IS NOT NULL AND c.created_at BETWEEN $1 AND $2
+      GROUP BY t.id, t.name ORDER BY avg_handling_min ASC
+    `, [startDate, endDate]);
+
+    // By channel
+    const { rows: byChannel } = await query(`
+      SELECT
+        COALESCE(c.connection_name, 'web') as name,
+        COUNT(c.id) as total,
+        ROUND(AVG(EXTRACT(EPOCH FROM (c.closed_at - c.created_at))/60)::numeric, 1) as avg_handling_min
+      FROM conversations c
+      WHERE c.status='closed' AND c.closed_at IS NOT NULL AND c.created_at BETWEEN $1 AND $2
+      GROUP BY c.connection_name ORDER BY avg_handling_min ASC
+    `, [startDate, endDate]);
+
+    // Weekly trend
+    const { rows: trend } = await query(`
+      SELECT
+        DATE_TRUNC('week', c.closed_at) as week,
+        ROUND(AVG(EXTRACT(EPOCH FROM (c.closed_at - c.created_at))/60)::numeric, 1) as avg_handling_min,
+        COUNT(*) as count
+      FROM conversations c
+      WHERE c.status='closed' AND c.closed_at IS NOT NULL AND c.created_at BETWEEN $1 AND $2
+      GROUP BY DATE_TRUNC('week', c.closed_at) ORDER BY week ASC
+    `, [startDate, endDate]);
+
+    return { byAgent, byTeam, byChannel, trend };
+  });
+
   // ── SLA by Team ────────────────────────────────────────────────────────────
   fastify.get('/stats/sla-by-team', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const { rows } = await query(`

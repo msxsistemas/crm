@@ -196,6 +196,7 @@ const userNavSections: NavSection[] = [
       { to: "/channel-report", icon: Radio, label: "Relatório por Canal" },
       { to: "/sla-dashboard", icon: Timer, label: "Painel SLA" },
       { to: "/sentiment-dashboard", icon: TrendingUp, label: "Análise de Sentimento" },
+      { to: "/response-time-report", icon: Clock, label: "Tempo de Atendimento" },
     ],
   },
   {

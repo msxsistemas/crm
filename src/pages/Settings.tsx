@@ -43,6 +43,121 @@ const colorPalette = [
   "bg-gray-600",
 ];
 
+// ─── Sessions Section ───
+function parseUserAgent(ua: string): string {
+  if (!ua) return 'Dispositivo desconhecido';
+  const browser = ua.includes('Chrome') && !ua.includes('Edg') ? 'Chrome'
+    : ua.includes('Firefox') ? 'Firefox'
+    : ua.includes('Safari') && !ua.includes('Chrome') ? 'Safari'
+    : ua.includes('Edg') ? 'Edge'
+    : 'Navegador';
+  const os = ua.includes('Windows') ? 'Windows'
+    : ua.includes('Mac') ? 'macOS'
+    : ua.includes('Linux') ? 'Linux'
+    : ua.includes('Android') ? 'Android'
+    : ua.includes('iPhone') || ua.includes('iPad') ? 'iOS'
+    : 'SO desconhecido';
+  return `${browser} — ${os}`;
+}
+
+const SessionsSection = () => {
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(true);
+  const [terminating, setTerminating] = useState<string | null>(null);
+  const [terminatingAll, setTerminatingAll] = useState(false);
+
+  const loadSessions = useCallback(async () => {
+    setLoadingSessions(true);
+    try {
+      const data = await api.get<any[]>('/auth/sessions');
+      setSessions(data || []);
+    } catch {}
+    setLoadingSessions(false);
+  }, []);
+
+  useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  const handleTerminate = async (id: string) => {
+    setTerminating(id);
+    try {
+      await api.delete(`/auth/sessions/${id}`);
+      setSessions(prev => prev.map(s => s.id === id ? { ...s, logged_out_at: new Date().toISOString() } : s));
+      toast.success('Sessão encerrada');
+    } catch { toast.error('Erro ao encerrar sessão'); }
+    setTerminating(null);
+  };
+
+  const handleTerminateAll = async () => {
+    setTerminatingAll(true);
+    try {
+      await api.delete('/auth/sessions');
+      loadSessions();
+      toast.success('Todas as outras sessões encerradas');
+    } catch { toast.error('Erro ao encerrar sessões'); }
+    setTerminatingAll(false);
+  };
+
+  const activeSessions = sessions.filter(s => !s.logged_out_at);
+  const currentSession = activeSessions[0];
+
+  return (
+    <Card className="p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
+            <Monitor className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-foreground">Sessões Ativas</h3>
+            <p className="text-sm text-muted-foreground">Gerencie os dispositivos com acesso à sua conta</p>
+          </div>
+        </div>
+        {activeSessions.length > 1 && (
+          <Button variant="outline" size="sm" className="text-destructive border-destructive/30 hover:bg-destructive/10" onClick={handleTerminateAll} disabled={terminatingAll}>
+            {terminatingAll ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : null}
+            Encerrar todas as outras
+          </Button>
+        )}
+      </div>
+      {loadingSessions ? (
+        <div className="flex items-center gap-2 text-muted-foreground text-sm"><Loader2 className="h-4 w-4 animate-spin" /> Carregando sessões...</div>
+      ) : sessions.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nenhuma sessão registrada.</p>
+      ) : (
+        <div className="space-y-2">
+          {sessions.map((s) => {
+            const isActive = !s.logged_out_at;
+            const isCurrent = isActive && s.id === currentSession?.id;
+            return (
+              <div key={s.id} className={cn("flex items-center gap-3 p-3 rounded-lg border",
+                isCurrent ? "border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-800" : isActive ? "border-border bg-muted/30" : "border-border bg-muted/10 opacity-60")}>
+                <div className={cn("h-2.5 w-2.5 rounded-full shrink-0", isCurrent ? "bg-green-500" : isActive ? "bg-yellow-400" : "bg-muted-foreground/30")} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {parseUserAgent(s.user_agent)}
+                    {isCurrent && <span className="ml-2 text-xs text-green-600 font-semibold">Sessão atual</span>}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{s.ip_address || 'IP desconhecido'} · {new Date(s.created_at).toLocaleString('pt-BR')}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", isActive ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground")}>
+                    {isActive ? 'Ativa' : 'Encerrada'}
+                  </span>
+                  {isActive && !isCurrent && (
+                    <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:bg-destructive/10" onClick={() => handleTerminate(s.id)} disabled={terminating === s.id}>
+                      {terminating === s.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Encerrar'}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Card>
+  );
+};
+
 // ─── Two-Factor Section ───
 const TwoFactorSection = ({ userId }: { userId: string | null }) => {
   const [enabled, setEnabled] = useState(false);
@@ -83,19 +198,6 @@ const TwoFactorSection = ({ userId }: { userId: string | null }) => {
   const confirmEnable = async () => {
     setConfirmOpen(false);
     await saveEnabled(true);
-  };
-
-  // Active session info (current)
-  const sessionInfo = {
-    browser: navigator.userAgent.includes("Chrome")
-      ? "Chrome"
-      : navigator.userAgent.includes("Firefox")
-      ? "Firefox"
-      : navigator.userAgent.includes("Safari")
-      ? "Safari"
-      : "Navegador",
-    os: navigator.platform || "Desconhecido",
-    lastAccess: new Date().toLocaleString("pt-BR"),
   };
 
   return (
@@ -176,25 +278,7 @@ const TwoFactorSection = ({ userId }: { userId: string | null }) => {
       </Card>
 
       {/* Active Sessions */}
-      <Card className="p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
-            <Monitor className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <h3 className="font-semibold text-foreground">Sessões Ativas</h3>
-            <p className="text-sm text-muted-foreground">Dispositivos com acesso à sua conta</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-green-50 border-green-200">
-          <div className="h-2.5 w-2.5 rounded-full bg-green-500 shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-foreground">{sessionInfo.browser} — Sessão atual</p>
-            <p className="text-xs text-muted-foreground">{sessionInfo.os}</p>
-          </div>
-          <p className="text-xs text-muted-foreground shrink-0">{sessionInfo.lastAccess}</p>
-        </div>
-      </Card>
+      <SessionsSection />
 
       {/* Confirmation Dialog */}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
@@ -1068,7 +1152,8 @@ const HorariosTab = () => {
   const [enabled, setEnabled] = useState(true);
   const [offMessage, setOffMessage] = useState("No momento estamos fora do horário de atendimento. Retornaremos em breve!");
   const [csatEnabled, setCsatEnabled] = useState(false);
-  const [csatMessage, setCsatMessage] = useState("Como você avalia nosso atendimento? Responda com um número de 1 a 5 (1=péssimo, 5=ótimo)");
+  const [csatMessage, setCsatMessage] = useState("⭐ Como foi seu atendimento?\nAvalie de 1 a 5:");
+  const [csatDelayMinutes, setCsatDelayMinutes] = useState(0);
   const [npsEnabled, setNpsEnabled] = useState(false);
   const [npsMessage, setNpsMessage] = useState("Em uma escala de 0 a 10, quanto você recomendaria nosso atendimento? Responda apenas com o número.");
   const [schedule, setSchedule] = useState(DEFAULT_DAYS);
@@ -1084,6 +1169,7 @@ const HorariosTab = () => {
       if (data.auto_csat_enabled !== undefined) setCsatEnabled(data.auto_csat_enabled);
       if (data.csat_enabled !== undefined) setCsatEnabled(data.csat_enabled);
       if (data.csat_message) setCsatMessage(data.csat_message);
+      if (data.csat_delay_minutes !== undefined) setCsatDelayMinutes(parseInt(data.csat_delay_minutes) || 0);
       if (data.nps_enabled !== undefined) setNpsEnabled(data.nps_enabled);
       if (data.nps_message) setNpsMessage(data.nps_message);
       if (data.auto_assign_enabled !== undefined) setAutoAssignEnabled(data.auto_assign_enabled);
@@ -1111,6 +1197,7 @@ const HorariosTab = () => {
         auto_csat_enabled: csatEnabled,
         csat_enabled: csatEnabled,
         csat_message: csatMessage,
+        csat_delay_minutes: csatDelayMinutes,
         nps_enabled: npsEnabled,
         nps_message: npsMessage,
         auto_assign_enabled: autoAssignEnabled,
@@ -1158,15 +1245,41 @@ const HorariosTab = () => {
           <Switch checked={csatEnabled} onCheckedChange={handleCsatToggle} />
         </div>
         {csatEnabled && (
-          <div className="mt-3 space-y-2">
-            <label className="text-sm font-medium text-foreground">Mensagem de avaliação</label>
-            <Textarea
-              value={csatMessage}
-              onChange={e => setCsatMessage(e.target.value)}
-              rows={3}
-              placeholder="Mensagem enviada ao cliente ao encerrar a conversa..."
-            />
-            <p className="text-xs text-muted-foreground">O cliente deve responder com um número de 1 a 5</p>
+          <div className="mt-3 space-y-3">
+            <div>
+              <label className="text-sm font-medium text-foreground">Mensagem de avaliação</label>
+              <Textarea
+                className="mt-1"
+                value={csatMessage}
+                onChange={e => setCsatMessage(e.target.value)}
+                rows={3}
+                placeholder="Mensagem enviada ao cliente ao encerrar a conversa..."
+              />
+              <p className="text-xs text-muted-foreground mt-1">O cliente receberá botões interativos (1–3) ou poderá digitar um número de 1 a 5</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">Enviar após</label>
+              <select
+                className="mt-1 block w-full border border-border rounded-md px-3 py-2 text-sm bg-background text-foreground"
+                value={csatDelayMinutes}
+                onChange={e => setCsatDelayMinutes(parseInt(e.target.value))}
+              >
+                <option value={0}>Imediato</option>
+                <option value={5}>5 minutos</option>
+                <option value={15}>15 minutos</option>
+                <option value={30}>30 minutos</option>
+                <option value={60}>1 hora</option>
+              </select>
+            </div>
+            <div className="rounded-lg bg-muted p-3 text-xs space-y-1">
+              <p className="font-medium text-foreground">Preview:</p>
+              <p className="text-muted-foreground whitespace-pre-wrap">{csatMessage}</p>
+              <div className="flex gap-1 mt-2">
+                <span className="px-2 py-0.5 rounded border border-border bg-background text-foreground">⭐ 1</span>
+                <span className="px-2 py-0.5 rounded border border-border bg-background text-foreground">⭐⭐ 2</span>
+                <span className="px-2 py-0.5 rounded border border-border bg-background text-foreground">⭐⭐⭐ 3</span>
+              </div>
+            </div>
           </div>
         )}
       </Card>

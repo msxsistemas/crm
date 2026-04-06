@@ -1578,4 +1578,137 @@ export default async function misc3Routes(fastify) {
     return { success: true };
   });
 
+  // ── Template Approval Workflow ────────────────────────────────────────────
+  fastify.get('/templates/pending', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    if (!['admin','supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { rows } = await query(
+      "SELECT t.*, p.full_name as created_by_name FROM quick_replies t LEFT JOIN profiles p ON p.id=t.created_by WHERE t.approval_status='pending' ORDER BY t.created_at DESC"
+    );
+    return rows;
+  });
+
+  fastify.patch('/templates/:id/approve', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    if (!['admin','supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { approved, rejection_reason } = req.body;
+    const status = approved ? 'approved' : 'rejected';
+    await query(
+      "UPDATE quick_replies SET approval_status=$1, approved_by=$2, approved_at=NOW(), rejection_reason=$3 WHERE id=$4",
+      [status, req.user.id, rejection_reason || null, req.params.id]
+    );
+    if (fastify.io) fastify.io.emit('template:approval_updated', { id: req.params.id, status });
+    return { success: true, status };
+  });
+
+  fastify.get('/settings/template-approval', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query("SELECT template_approval_required FROM settings WHERE id=1");
+    return { enabled: rows[0]?.template_approval_required || false };
+  });
+
+  fastify.patch('/settings/template-approval', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    if (req.user.role !== 'admin') return reply.status(403).send({ error: 'Forbidden' });
+    await query("UPDATE settings SET template_approval_required=$1 WHERE id=1", [req.body.enabled]);
+    return { success: true };
+  });
+
+  // ── Login Sessions ────────────────────────────────────────────────────────
+  fastify.get('/auth/sessions', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query(
+      "SELECT id, ip_address, user_agent, created_at, logged_out_at FROM login_sessions WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
+      [req.user.id]
+    );
+    return rows;
+  });
+
+  fastify.delete('/auth/sessions/:id', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    await query("UPDATE login_sessions SET logged_out_at=NOW() WHERE id=$1 AND user_id=$2", [req.params.id, req.user.id]);
+    return { success: true };
+  });
+
+  fastify.delete('/auth/sessions', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    await query("UPDATE login_sessions SET logged_out_at=NOW() WHERE user_id=$1 AND logged_out_at IS NULL", [req.user.id]);
+    return { success: true };
+  });
+
+  // ── CSAT Config ────────────────────────────────────────────────────────────
+  fastify.get('/settings/csat-config', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query("SELECT csat_enabled, csat_message, csat_delay_minutes FROM settings WHERE id=1");
+    return rows[0] || {};
+  });
+
+  fastify.patch('/settings/csat-config', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { csat_message, csat_delay_minutes } = req.body;
+    await query(
+      "UPDATE settings SET csat_message=COALESCE($1,csat_message), csat_delay_minutes=COALESCE($2,csat_delay_minutes) WHERE id=1",
+      [csat_message, csat_delay_minutes]
+    );
+    return { success: true };
+  });
+
+  // ── Shifts (Turnos) ───────────────────────────────────────────────────────
+  fastify.get('/shifts', auth, async (req, reply) => {
+    const { rows } = await query(`
+      SELECT s.*,
+        json_agg(json_build_object('id', p.id, 'name', p.full_name) ORDER BY p.full_name) FILTER (WHERE p.id IS NOT NULL) as agents
+      FROM shifts s
+      LEFT JOIN shift_agents sa ON sa.shift_id = s.id
+      LEFT JOIN profiles p ON p.id = sa.agent_id
+      GROUP BY s.id ORDER BY s.start_time ASC
+    `);
+    return rows;
+  });
+
+  fastify.post('/shifts', auth, async (req, reply) => {
+    if (!['admin','supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { name, start_time, end_time, days, agent_ids } = req.body;
+    const { rows } = await query(
+      'INSERT INTO shifts (name, start_time, end_time, days) VALUES ($1,$2,$3,$4) RETURNING *',
+      [name, start_time, end_time, days || [1,2,3,4,5]]
+    );
+    const shift = rows[0];
+    if (agent_ids && agent_ids.length > 0) {
+      for (const aid of agent_ids) {
+        await query('INSERT INTO shift_agents (shift_id, agent_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [shift.id, aid]);
+      }
+    }
+    return reply.status(201).send(shift);
+  });
+
+  fastify.patch('/shifts/:id', auth, async (req, reply) => {
+    if (!['admin','supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { name, start_time, end_time, days, agent_ids, is_active } = req.body;
+    const { rows } = await query(
+      'UPDATE shifts SET name=COALESCE($1,name), start_time=COALESCE($2,start_time), end_time=COALESCE($3,end_time), days=COALESCE($4,days), is_active=COALESCE($5,is_active) WHERE id=$6 RETURNING *',
+      [name, start_time, end_time, days, is_active, req.params.id]
+    );
+    if (agent_ids !== undefined) {
+      await query('DELETE FROM shift_agents WHERE shift_id=$1', [req.params.id]);
+      for (const aid of agent_ids) {
+        await query('INSERT INTO shift_agents (shift_id, agent_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.params.id, aid]);
+      }
+    }
+    return rows[0];
+  });
+
+  fastify.delete('/shifts/:id', auth, async (req, reply) => {
+    if (!['admin','supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    await query('DELETE FROM shifts WHERE id=$1', [req.params.id]);
+    return { success: true };
+  });
+
+  fastify.get('/shifts/current', auth, async (req, reply) => {
+    const now = new Date();
+    const currentDay = now.getDay();
+    const currentTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    const { rows } = await query(`
+      SELECT s.*,
+        json_agg(json_build_object('id', p.id, 'name', p.full_name)) FILTER (WHERE p.id IS NOT NULL) as agents
+      FROM shifts s
+      LEFT JOIN shift_agents sa ON sa.shift_id = s.id
+      LEFT JOIN profiles p ON p.id = sa.agent_id
+      WHERE s.is_active = true AND $1 = ANY(s.days) AND s.start_time <= $2 AND s.end_time >= $2
+      GROUP BY s.id
+    `, [currentDay, currentTime]);
+    return rows[0] || null;
+  });
+
 }

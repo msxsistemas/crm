@@ -941,6 +941,26 @@ const ContactDetailsSidebar = ({
             {formattedAddress && (
               <p className="text-[10px] text-muted-foreground">{formattedAddress}</p>
             )}
+            {(addrStreet && addrCity) && (
+              <a
+                href={`https://www.openstreetmap.org/search?query=${encodeURIComponent(`${addrStreet}${addrNumber ? ', ' + addrNumber : ''}, ${addrCity}${addrState ? ', ' + addrState : ''}, Brasil`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-primary hover:underline flex items-center gap-1"
+              >
+                <MapPin className="h-3 w-3" /> Ver no mapa
+              </a>
+            )}
+            {(!addrStreet && addrCep && addrCep.replace(/\D/g, '').length === 8) && (
+              <a
+                href={`https://www.openstreetmap.org/search?query=${addrCep.replace(/\D/g, '')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-primary hover:underline flex items-center gap-1"
+              >
+                <MapPin className="h-3 w-3" /> Ver localização pelo CEP
+              </a>
+            )}
           </div>
         )}
       </div>

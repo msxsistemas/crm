@@ -295,22 +295,54 @@ export default async function conversationRoutes(fastify) {
 
     // CSAT automático: enviar mensagem CSAT ao fechar conversa se csat_enabled=true
     if (req.body.status === 'closed') {
-      const { rows: sRows } = await query('SELECT csat_enabled, csat_message FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+      const { rows: sRows } = await query('SELECT csat_enabled, csat_message, csat_delay_minutes FROM settings WHERE id=1').catch(() => ({ rows: [] }));
       if (sRows[0]?.csat_enabled) {
         const { rows: cRows } = await query(
           'SELECT c.connection_name, ct.phone FROM conversations c JOIN contacts ct ON ct.id=c.contact_id WHERE c.id=$1',
           [req.params.id]
         ).catch(() => ({ rows: [] }));
         if (cRows[0]) {
-          const csatMsg = sRows[0].csat_message || 'Como você avalia nosso atendimento? Responda com um número de 1 a 5 (1=péssimo, 5=ótimo)';
+          const csatMsg = sRows[0].csat_message || '⭐ Como foi seu atendimento?\nAvalie de 1 a 5:';
           const { rows: sEvo } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1').catch(() => ({ rows: [] }));
           if (sEvo[0]?.evolution_url) {
-            fetch(`${sEvo[0].evolution_url}/message/sendText/${cRows[0].connection_name}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'apikey': sEvo[0].evolution_key },
-              body: JSON.stringify({ number: cRows[0].phone, text: csatMsg })
-            }).catch(() => {});
-            query('UPDATE conversations SET csat_sent_at=NOW() WHERE id=$1', [req.params.id]).catch(() => {});
+            const instanceName = cRows[0].connection_name;
+            const contactPhone = cRows[0].phone;
+            const evolutionUrl = sEvo[0].evolution_url;
+            const evolutionKey = sEvo[0].evolution_key;
+
+            const sendCsat = async () => {
+              const buttons = [
+                { buttonId: 'csat_1', buttonText: { displayText: '⭐ 1' }, type: 1 },
+                { buttonId: 'csat_2', buttonText: { displayText: '⭐⭐ 2' }, type: 1 },
+                { buttonId: 'csat_3', buttonText: { displayText: '⭐⭐⭐ 3' }, type: 1 },
+              ];
+              try {
+                const btnRes = await fetch(`${evolutionUrl}/message/sendButtons/${instanceName}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
+                  body: JSON.stringify({
+                    number: contactPhone,
+                    buttonMessage: { text: csatMsg, buttons, headerType: 1 }
+                  })
+                });
+                if (!btnRes.ok) throw new Error('buttons failed');
+              } catch {
+                // Fallback to plain text
+                await fetch(`${evolutionUrl}/message/sendText/${instanceName}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
+                  body: JSON.stringify({ number: contactPhone, text: `${csatMsg}\nDigite um número de 1 a 5.` })
+                }).catch(() => {});
+              }
+              query('UPDATE conversations SET csat_sent_at=NOW() WHERE id=$1', [req.params.id]).catch(() => {});
+            };
+
+            const delayMs = (sRows[0].csat_delay_minutes || 0) * 60 * 1000;
+            if (delayMs > 0) {
+              setTimeout(sendCsat, delayMs);
+            } else {
+              sendCsat().catch(() => {});
+            }
           }
         }
       }
