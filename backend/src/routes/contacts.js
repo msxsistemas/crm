@@ -89,6 +89,24 @@ export default async function contactRoutes(fastify) {
 
   // Update contact
   fastify.patch('/contacts/:id', auth, async (req, reply) => {
+    // Save version before updating
+    const { rows: current } = await query('SELECT * FROM contacts WHERE id=$1', [req.params.id]);
+    if (current[0]) {
+      const changed = {};
+      const versionFields = ['name','phone','email','organization','tags','notes'];
+      for (const f of versionFields) {
+        if (req.body[f] !== undefined && JSON.stringify(req.body[f]) !== JSON.stringify(current[0][f])) {
+          changed[f] = { old: current[0][f], new: req.body[f] };
+        }
+      }
+      if (Object.keys(changed).length > 0) {
+        await query(
+          'INSERT INTO contact_versions (contact_id, changed_fields, changed_by) VALUES ($1,$2,$3)',
+          [req.params.id, JSON.stringify(changed), req.user?.id]
+        ).catch(() => {});
+      }
+    }
+
     const fields = ['name','phone','email','tags','notes','birthday','custom_fields','lead_score','disable_chatbot','avatar_url'];
     const updates = [];
     const params = [];
@@ -109,6 +127,20 @@ export default async function contactRoutes(fastify) {
     if (!rows[0]) return reply.status(404).send({ error: 'Contato não encontrado' });
     invalidate('contacts:list:*').catch(() => {});
     return rows[0];
+  });
+
+  // Contact version history
+  fastify.get('/contacts/:id/history', auth, async (req, reply) => {
+    const { rows } = await query(
+      `SELECT cv.*, p.full_name as changed_by_name
+       FROM contact_versions cv
+       LEFT JOIN profiles p ON p.id=cv.changed_by
+       WHERE cv.contact_id=$1
+       ORDER BY cv.created_at DESC
+       LIMIT 50`,
+      [req.params.id]
+    );
+    return rows;
   });
 
   // Delete contact

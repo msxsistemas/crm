@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clock, TrendingUp, Send, ChevronDown, ChevronUp, Cake, Star, CheckSquare, Trash2 } from "lucide-react";
+import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clock, TrendingUp, Send, ChevronDown, ChevronUp, Cake, Star, CheckSquare, Trash2, CreditCard } from "lucide-react";
 import TagSelector from "@/components/shared/TagSelector";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -127,6 +127,11 @@ const ContactDetailsSidebar = ({
   const [auditEvents, setAuditEvents] = useState<{ id: string; event_type: string; actor_name: string | null; old_value: string | null; new_value: string | null; created_at: string }[]>([]);
   const [auditOpen, setAuditOpen] = useState(false);
 
+  // Contact version history
+  const [contactVersions, setContactVersions] = useState<{ id: string; changed_fields: Record<string, { old: unknown; new: unknown }>; changed_by_name: string | null; created_at: string }[]>([]);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [versionsLoaded, setVersionsLoaded] = useState(false);
+
   // Contact conversation history
   const [contactHistory, setContactHistory] = useState<any[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -136,6 +141,11 @@ const ContactDetailsSidebar = ({
   const [checklistItems, setChecklistItems] = useState<{ id: string; text: string; done: boolean }[]>([]);
   const [newChecklistText, setNewChecklistText] = useState("");
   const [addingChecklist, setAddingChecklist] = useState(false);
+
+  // Payment links
+  const [paymentLinks, setPaymentLinks] = useState<{ id: string; amount: string; description: string; provider: string; status: string; created_at: string; external_url: string | null }[]>([]);
+  const [paymentLinksOpen, setPaymentLinksOpen] = useState(false);
+  const [paymentLinksLoaded, setPaymentLinksLoaded] = useState(false);
 
   // Co-atendentes (collaborators)
   const [collaborators, setCollaborators] = useState<{ agent_id: string; name: string | null; full_name: string | null; avatar_url: string | null }[]>([]);
@@ -181,6 +191,17 @@ const ContactDetailsSidebar = ({
       .then(data => setContactHistory(data || []))
       .catch(() => {});
   }, [contactId]);
+
+  // Load contact versions on demand
+  const loadContactVersions = useCallback(() => {
+    if (versionsLoaded) return;
+    api.get<any[]>(`/contacts/${contactId}/history`)
+      .then(data => {
+        setContactVersions(data || []);
+        setVersionsLoaded(true);
+      })
+      .catch(() => setVersionsLoaded(true));
+  }, [contactId, versionsLoaded]);
 
   // Filter mention results when mentionQuery changes
   useEffect(() => {
@@ -1132,6 +1153,59 @@ const ContactDetailsSidebar = ({
           </div>
         </div>
       )}
+
+      {/* Histórico de Alterações */}
+      <div className="px-4 py-3 border-t border-border">
+        <button
+          className="flex items-center justify-between w-full"
+          onClick={() => {
+            const next = !versionsOpen;
+            setVersionsOpen(next);
+            if (next) loadContactVersions();
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <History className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-semibold text-foreground">Histórico de Alterações</span>
+          </div>
+          {versionsOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </button>
+        {versionsOpen && (
+          <div className="mt-2 space-y-2 max-h-64 overflow-y-auto">
+            {!versionsLoaded ? (
+              <p className="text-xs text-muted-foreground ml-6">Carregando...</p>
+            ) : contactVersions.length === 0 ? (
+              <p className="text-xs text-muted-foreground ml-6">Nenhuma alteração registrada</p>
+            ) : (
+              contactVersions.map(v => (
+                <div key={v.id} className="ml-6 border-l-2 border-border pl-3 py-1">
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(v.created_at).toLocaleString('pt-BR')}
+                    {v.changed_by_name ? ` · ${v.changed_by_name}` : ''}
+                  </p>
+                  {Object.entries(v.changed_fields || {}).map(([field, change]) => {
+                    const fieldLabels: Record<string, string> = {
+                      name: 'Nome', phone: 'Telefone', email: 'E-mail',
+                      organization: 'Empresa', tags: 'Tags', notes: 'Notas'
+                    };
+                    const label = fieldLabels[field] || field;
+                    const oldVal = Array.isArray(change.old) ? (change.old as string[]).join(', ') : String(change.old ?? '');
+                    const newVal = Array.isArray(change.new) ? (change.new as string[]).join(', ') : String(change.new ?? '');
+                    return (
+                      <p key={field} className="text-xs text-foreground mt-0.5">
+                        <span className="font-medium">{label}:</span>{' '}
+                        <span className="text-red-500 line-through">{oldVal || '—'}</span>
+                        {' → '}
+                        <span className="text-green-600">{newVal || '—'}</span>
+                      </p>
+                    );
+                  })}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Co-atendentes */}
       <div className="px-4 py-3 border-t border-border">

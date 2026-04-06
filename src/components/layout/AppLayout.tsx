@@ -9,6 +9,7 @@ import { useOnboardingTour } from "@/hooks/useOnboardingTour";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import OnboardingTour from "@/components/onboarding/OnboardingTour";
 import GlobalSearch from "@/components/GlobalSearch";
+import { SessionTimeoutWarning } from "@/components/SessionTimeoutWarning";
 
 const AppLayout = () => {
   const { user } = useAuth();
@@ -75,6 +76,7 @@ const AppLayout = () => {
         onEnd={endTour}
       />
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <SessionTimeoutWarning />
     </div>
   );
 };
