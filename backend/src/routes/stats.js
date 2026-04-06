@@ -580,6 +580,63 @@ export default async function statsRoutes(fastify) {
     return { contactTags, convTags, trend };
   });
 
+  // ── Sentiment Analysis Dashboard ─────────────────────────────────────────
+  fastify.get('/stats/sentiment', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { start, end, agent_id } = req.query;
+    const startDate = start || new Date(Date.now() - 30*24*60*60*1000).toISOString();
+    const endDate = end || new Date().toISOString();
+
+    let agentFilter = '';
+    const params = [startDate, endDate];
+    if (agent_id) { params.push(agent_id); agentFilter = `AND c.assigned_to=$${params.length}`; }
+
+    const { rows: overall } = await query(`
+      SELECT
+        COUNT(*) FILTER (WHERE c.sentiment='positivo') as positive,
+        COUNT(*) FILTER (WHERE c.sentiment='negativo') as negative,
+        COUNT(*) FILTER (WHERE c.sentiment='neutro') as neutral,
+        COUNT(*) FILTER (WHERE c.sentiment IS NOT NULL) as total_analyzed
+      FROM conversations c
+      WHERE c.created_at BETWEEN $1 AND $2 ${agentFilter}
+    `, params);
+
+    const { rows: byAgent } = await query(`
+      SELECT
+        p.full_name as agent_name,
+        COUNT(*) FILTER (WHERE c.sentiment='positivo') as positive,
+        COUNT(*) FILTER (WHERE c.sentiment='negativo') as negative,
+        COUNT(*) FILTER (WHERE c.sentiment='neutro') as neutral,
+        COUNT(*) as total
+      FROM conversations c
+      JOIN profiles p ON p.id=c.assigned_to
+      WHERE c.created_at BETWEEN $1 AND $2 AND c.sentiment IS NOT NULL
+      GROUP BY p.id, p.full_name ORDER BY negative DESC
+    `, [startDate, endDate]);
+
+    const { rows: trend } = await query(`
+      SELECT
+        DATE(c.created_at) as date,
+        COUNT(*) FILTER (WHERE c.sentiment='positivo') as positive,
+        COUNT(*) FILTER (WHERE c.sentiment='negativo') as negative,
+        COUNT(*) FILTER (WHERE c.sentiment='neutro') as neutral
+      FROM conversations c
+      WHERE c.created_at BETWEEN $1 AND $2 AND c.sentiment IS NOT NULL
+      GROUP BY DATE(c.created_at) ORDER BY date ASC
+    `, [startDate, endDate]);
+
+    // Recent negative conversations (for alerts)
+    const { rows: alerts } = await query(`
+      SELECT c.id, ct.name as contact_name, c.created_at, p.full_name as agent_name
+      FROM conversations c
+      JOIN contacts ct ON ct.id=c.contact_id
+      LEFT JOIN profiles p ON p.id=c.assigned_to
+      WHERE c.sentiment='negativo' AND c.status='open' AND c.created_at BETWEEN $1 AND $2
+      ORDER BY c.created_at DESC LIMIT 10
+    `, [startDate, endDate]);
+
+    return { overall: overall[0], byAgent, trend, alerts };
+  });
+
   // ── SLA by Team ────────────────────────────────────────────────────────────
   fastify.get('/stats/sla-by-team', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const { rows } = await query(`

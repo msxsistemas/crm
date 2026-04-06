@@ -4311,6 +4311,16 @@ const Inbox = () => {
                     <Button
                       size="icon"
                       variant="ghost"
+                      className="shrink-0 h-9 w-9 text-muted-foreground hover:text-blue-600 hover:bg-transparent"
+                      onClick={() => setPaymentDialogOpen(true)}
+                      disabled={uploading}
+                      title="Enviar link de pagamento"
+                    >
+                      <CreditCard className="h-5 w-5" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
                       className="shrink-0 h-9 w-9 text-muted-foreground hover:text-orange-600 hover:bg-transparent"
                       onClick={openCatalogDialog}
                       disabled={uploading}
@@ -4617,6 +4627,69 @@ const Inbox = () => {
         onGenerate={handleGeneratePixPayload}
         onSend={handleSendPixMessage}
       />
+
+      {/* Payment Link Dialog */}
+      <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5" />
+              Enviar Link de Pagamento
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-sm font-medium mb-1.5 block">Descrição *</Label>
+              <Input
+                placeholder="Ex: Consultoria, Produto X..."
+                value={paymentDescription}
+                onChange={e => setPaymentDescription(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label className="text-sm font-medium mb-1.5 block">Valor (R$) *</Label>
+              <Input
+                type="number"
+                placeholder="0,00"
+                value={paymentAmount}
+                onChange={e => setPaymentAmount(e.target.value)}
+                min="0"
+                step="0.01"
+              />
+            </div>
+            <div>
+              <Label className="text-sm font-medium mb-1.5 block">Plataforma</Label>
+              <Select value={paymentProvider} onValueChange={setPaymentProvider}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="manual">Manual</SelectItem>
+                  <SelectItem value="mercadopago">Mercado Pago</SelectItem>
+                  <SelectItem value="stripe">Stripe</SelectItem>
+                  <SelectItem value="pagseguro">PagSeguro</SelectItem>
+                  <SelectItem value="pix">PIX</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-sm font-medium mb-1.5 block">URL do pagamento</Label>
+              <Input
+                placeholder="https://..."
+                value={paymentUrl}
+                onChange={e => setPaymentUrl(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPaymentDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSendPaymentLink} disabled={paymentSending} className="gap-2">
+              <CreditCard className="h-4 w-4" />
+              {paymentSending ? "Enviando..." : "Enviar Link"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* New Conversation Dialog */}
       <Dialog open={showNewConvo} onOpenChange={setShowNewConvo}>

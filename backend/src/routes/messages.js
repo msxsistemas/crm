@@ -399,6 +399,54 @@ async function handleEvolutionWebhook(payload, fastify) {
     fastify.io?.emit('message:new', { ...msgRow, conversation_id: conv.id });
     fastify.io?.emit('conversation:updated', { id: conv.id });
 
+    // ── AI intelligent routing — non-blocking ────────────────────────────
+    (async () => {
+      try {
+        const { rows: routingSettings } = await pool.query("SELECT ai_routing_enabled FROM settings WHERE id=1");
+        if (!routingSettings[0]?.ai_routing_enabled) return;
+        const anthropicKeyRouting = process.env.ANTHROPIC_API_KEY;
+        if (!anthropicKeyRouting) return;
+        const { rows: isNew } = await pool.query(
+          "SELECT COUNT(*) as cnt FROM messages WHERE conversation_id=$1",
+          [conv.id]
+        );
+        const { rows: hasTeam } = await pool.query(
+          "SELECT assigned_team_id FROM conversations WHERE id=$1",
+          [conv.id]
+        );
+        // Only route on first message if no team is assigned
+        if (parseInt(isNew[0]?.cnt) <= 1 && !hasTeam[0]?.assigned_team_id) {
+          const { rows: teams } = await pool.query("SELECT id, name FROM teams");
+          if (teams.length > 1) {
+            const teamNames = teams.map(t => t.name).join(', ');
+            const response = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': anthropicKeyRouting,
+                'anthropic-version': '2023-06-01'
+              },
+              body: JSON.stringify({
+                model: 'claude-haiku-4-5-20251001',
+                max_tokens: 30,
+                messages: [{
+                  role: 'user',
+                  content: `Com base nesta mensagem de cliente, qual time deve atender? Times disponíveis: ${teamNames}. Responda APENAS com o nome exato de um time da lista.\n\nMensagem: "${(content||'').substring(0,200)}"`
+                }]
+              })
+            });
+            const ai = await response.json();
+            const suggestedTeam = (ai.content?.[0]?.text || '').trim();
+            const matched = teams.find(t => t.name.toLowerCase() === suggestedTeam.toLowerCase());
+            if (matched) {
+              await pool.query('UPDATE conversations SET assigned_team_id=$1 WHERE id=$2', [matched.id, conv.id]);
+              if (fastify.io) fastify.io.emit('conversation:updated', { id: conv.id, assigned_team_id: matched.id });
+            }
+          }
+        }
+      } catch(e) { /* AI routing error — silent */ }
+    })();
+
     // ── Automation rules execution ─────────────────────────────────────────
     try {
       const { rows: rules } = await pool.query(

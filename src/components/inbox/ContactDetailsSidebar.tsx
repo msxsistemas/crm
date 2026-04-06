@@ -192,6 +192,14 @@ const ContactDetailsSidebar = ({
       .catch(() => {});
   }, [contactId]);
 
+  // Load payment links on demand
+  useEffect(() => {
+    if (!paymentLinksOpen || paymentLinksLoaded || !conversationId) return;
+    api.get<any[]>(`/payment-links?conversation_id=${conversationId}`)
+      .then(data => { setPaymentLinks(data || []); setPaymentLinksLoaded(true); })
+      .catch(() => setPaymentLinksLoaded(true));
+  }, [paymentLinksOpen, paymentLinksLoaded, conversationId]);
+
   // Load contact versions on demand
   const loadContactVersions = useCallback(() => {
     if (versionsLoaded) return;
@@ -1266,6 +1274,43 @@ const ContactDetailsSidebar = ({
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Payment Links Section */}
+      <div className="border-t border-border pt-3 space-y-2">
+        <button
+          className="w-full flex items-center gap-2 text-sm font-medium text-foreground hover:text-primary transition-colors"
+          onClick={() => setPaymentLinksOpen(p => !p)}
+        >
+          <CreditCard className="h-4 w-4 text-muted-foreground" />
+          <span className="flex-1 text-left">Links de Pagamento</span>
+          {paymentLinksOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </button>
+        {paymentLinksOpen && (
+          <div className="space-y-2 ml-6">
+            {!paymentLinksLoaded ? (
+              <p className="text-xs text-muted-foreground">Carregando...</p>
+            ) : paymentLinks.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Nenhum link de pagamento</p>
+            ) : paymentLinks.map(pl => (
+              <div key={pl.id} className="rounded-lg border border-border bg-muted/20 p-2.5 space-y-1">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-xs font-medium text-foreground leading-snug">{pl.description}</p>
+                  <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${pl.status === 'paid' ? 'bg-green-100 text-green-700' : pl.status === 'cancelled' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                    {pl.status === 'paid' ? 'Pago' : pl.status === 'cancelled' ? 'Cancelado' : 'Pendente'}
+                  </span>
+                </div>
+                <p className="text-sm font-bold text-foreground">R$ {parseFloat(pl.amount).toFixed(2)}</p>
+                <p className="text-[10px] text-muted-foreground">{pl.provider} · {new Date(pl.created_at).toLocaleDateString("pt-BR")}</p>
+                {pl.external_url && (
+                  <a href={pl.external_url} target="_blank" rel="noopener noreferrer" className="text-[10px] text-primary hover:underline truncate block">
+                    {pl.external_url}
+                  </a>
+                )}
               </div>
             ))}
           </div>

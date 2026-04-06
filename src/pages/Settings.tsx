@@ -3556,6 +3556,73 @@ const AILabelsTab = () => {
   );
 };
 
+// ─── AI Routing Tab (inside AILabelsTab appended section) ───
+const AIRoutingSection = () => {
+  const [enabled, setEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get<any>('/settings/ai-routing').then(d => {
+      setEnabled(d?.enabled ?? false);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  const handleToggle = async (val: boolean) => {
+    setSaving(true);
+    try {
+      await api.patch('/settings/ai-routing', { enabled: val });
+      setEnabled(val);
+      toast.success(val ? "Roteamento inteligente ativado!" : "Roteamento inteligente desativado");
+    } catch {
+      toast.error("Erro ao salvar configuração");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <Card className="p-6 space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
+          <TrendingUp className="h-5 w-5 text-primary" />
+        </div>
+        <div>
+          <h3 className="font-semibold text-foreground">Roteamento Inteligente com IA</h3>
+          <p className="text-sm text-muted-foreground">
+            A IA analisa a primeira mensagem do cliente e atribui automaticamente ao time mais adequado
+          </p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-muted-foreground text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" /> Carregando...
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/20">
+            <div>
+              <p className="text-sm font-medium text-foreground">Ativar roteamento automático por IA</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Atribui a primeira mensagem ao time correto com base no conteúdo
+              </p>
+            </div>
+            <Switch checked={enabled} onCheckedChange={handleToggle} disabled={saving} />
+          </div>
+
+          <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 p-4 text-sm">
+            <p className="font-medium text-amber-800 dark:text-amber-200 mb-1">Requisito</p>
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              Requer ANTHROPIC_API_KEY configurada no servidor e pelo menos 2 times cadastrados.
+            </p>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+};
+
 // ─── Out-of-Hours Bot Tab ───
 const OutOfHoursBotTab = () => {
   const [enabled, setEnabled] = useState(false);
@@ -3966,7 +4033,7 @@ const Settings = () => {
           <TabsContent value="api_publica"><Suspense fallback={<TabFallback />}><ApiKeysTabLazy /></Suspense></TabsContent>
           <TabsContent value="bot_faq"><BotFaqTab /></TabsContent>
           <TabsContent value="inbound_webhooks"><InboundWebhooksTab /></TabsContent>
-          <TabsContent value="ai_labels"><AILabelsTab /></TabsContent>
+          <TabsContent value="ai_labels"><div className="space-y-4"><AILabelsTab /><AIRoutingSection /></div></TabsContent>
           <TabsContent value="out_of_hours"><OutOfHoursBotTab /></TabsContent>
           <TabsContent value="roteamento"><RotamentoTab /></TabsContent>
         </Tabs>
