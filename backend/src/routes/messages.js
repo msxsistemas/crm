@@ -163,7 +163,7 @@ export default async function messageRoutes(fastify) {
 
     // Get conversation + contact + connection settings + meta connection
     const { rows: convRows } = await query(`
-      SELECT c.*, ct.phone, s.evolution_url, s.evolution_key,
+      SELECT c.*, ct.phone, ct.telegram_id, s.evolution_url, s.evolution_key,
              mc.phone_number_id as meta_phone_number_id, mc.access_token as meta_access_token
       FROM conversations c
       JOIN contacts ct ON ct.id = c.contact_id
@@ -186,8 +186,23 @@ export default async function messageRoutes(fastify) {
 
     // Whisper messages are NOT sent to the client via Evolution/Meta API
     if (!whisper) {
+      // ── Telegram channel ──────────────────────────────────────────────────
+      if (conv.channel === 'telegram' && conv.connection_name?.startsWith('telegram_')) {
+        const botId = conv.connection_name.replace('telegram_', '');
+        const chatId = conv.telegram_id;
+        if (chatId) {
+          query('SELECT token FROM telegram_bots WHERE id=$1 AND active=true', [botId])
+            .then(async ({ rows: botRows }) => {
+              if (!botRows[0]) return;
+              await fetch(`https://api.telegram.org/bot${botRows[0].token}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: chatId, text: content }),
+              }).catch(e => console.error('Telegram send error:', e.message));
+            }).catch(e => console.error('Telegram bot lookup error:', e.message));
+        }
       // Enqueue send (with automatic retry on failure)
-      if (conv.meta_phone_number_id && conv.meta_access_token) {
+      } else if (conv.meta_phone_number_id && conv.meta_access_token) {
         await enqueueSend({
           conversationId: convId,
           messageId: message.id,
@@ -252,6 +267,56 @@ export default async function messageRoutes(fastify) {
     }
     return reply.status(200).send({ ok: true });
   });
+}
+
+// Recalculate lead score for a contact (non-blocking helper)
+async function recalculateLeadScore(contactId) {
+  const { rows: convRows } = await pool.query('SELECT id FROM conversations WHERE contact_id=$1', [contactId]);
+  const convIds = convRows.map(r => r.id);
+  const convPts = Math.min(convIds.length * 4, 20);
+
+  let inboundPts = 0;
+  if (convIds.length > 0) {
+    const ph = convIds.map((_, i) => `$${i + 1}`).join(',');
+    const { rows } = await pool.query(`SELECT COUNT(*) as cnt FROM messages WHERE conversation_id IN (${ph}) AND direction='inbound'`, convIds);
+    inboundPts = Math.min(parseInt(rows[0]?.cnt || '0') * 2, 20);
+  }
+
+  let responsePts = 0;
+  if (convIds.length > 0) {
+    const ph = convIds.map((_, i) => `$${i + 1}`).join(',');
+    const { rows } = await pool.query(
+      `SELECT AVG(EXTRACT(EPOCH FROM (m2.created_at - m1.created_at))/60) as avg_min
+       FROM messages m1
+       JOIN messages m2 ON m2.conversation_id=m1.conversation_id AND m2.direction='outbound' AND m2.created_at>m1.created_at
+       WHERE m1.conversation_id IN (${ph}) AND m1.direction='inbound'`, convIds);
+    const avgMin = parseFloat(rows[0]?.avg_min || '999');
+    if (avgMin < 5) responsePts = 15;
+    else if (avgMin < 15) responsePts = 10;
+    else if (avgMin < 30) responsePts = 5;
+  }
+
+  const { rows: recentRows } = await pool.query(
+    `SELECT id FROM conversations WHERE contact_id=$1 AND created_at > NOW() - INTERVAL '30 days' LIMIT 1`, [contactId]);
+  const recentPts = recentRows.length > 0 ? 15 : 0;
+
+  const { rows: pixRows } = await pool.query('SELECT id FROM pix_charges WHERE contact_id=$1 LIMIT 1', [contactId]);
+  const pixPts = pixRows.length > 0 ? 10 : 0;
+
+  let csatPts = 0;
+  if (convIds.length > 0) {
+    const ph = convIds.map((_, i) => `$${i + 1}`).join(',');
+    const { rows } = await pool.query(`SELECT AVG(csat_score) as avg FROM conversations WHERE id IN (${ph}) AND csat_score IS NOT NULL`, convIds);
+    if (rows[0]?.avg != null && parseFloat(rows[0].avg) >= 4) csatPts = 10;
+  }
+
+  const { rows: ctRows } = await pool.query('SELECT email, company FROM contacts WHERE id=$1', [contactId]);
+  const ct = ctRows[0];
+  const emailPts = ct?.email ? 5 : 0;
+  const companyPts = ct?.company ? 5 : 0;
+
+  const score = Math.min(100, convPts + inboundPts + responsePts + recentPts + pixPts + csatPts + emailPts + companyPts);
+  await pool.query('UPDATE contacts SET lead_score=$1, lead_score_updated_at=NOW() WHERE id=$2', [score, contactId]);
 }
 
 async function sendEvolutionMessage({ evolutionUrl, evolutionKey, instance, phone, content, type, media_url }) {
@@ -423,6 +488,14 @@ async function handleEvolutionWebhook(payload, fastify) {
 
     fastify.io?.emit('message:new', { ...msgRow, conversation_id: conv.id });
     fastify.io?.emit('conversation:updated', { id: conv.id });
+
+    // ── Recalculate lead score asynchronously ─────────────────────────────
+    const contactIdForScore = contact.id;
+    (async () => {
+      try {
+        await recalculateLeadScore(contactIdForScore);
+      } catch(e) { /* silent */ }
+    })();
 
     // ── Queue position message — send on new conversation ─────────────────
     if (!conv.assigned_to) {

@@ -179,6 +179,7 @@ const Contacts = () => {
   const [filterState, setFilterState] = useState("");
   const [filterCity, setFilterCity] = useState("");
   const [filterPeriod, setFilterPeriod] = useState("all");
+  const [filterScore, setFilterScore] = useState("all"); // all | cold | warm | hot | very_hot
   const [showFilters, setShowFilters] = useState(false);
 
   // New/Edit contact dialog
@@ -292,18 +293,14 @@ const Contacts = () => {
     let current = 0;
     for (const id of allContactIds) {
       try {
-        const score = await calculateContactScore(id);
-        await db.from('contacts').update({
-          lead_score: score,
-          lead_score_updated_at: new Date().toISOString(),
-        } as any).eq('id', id);
+        const result = await api.post<{ score: number }>(`/contacts/${id}/calculate-score`, {});
+        setContacts(prev => prev.map(c => c.id === id ? { ...c, lead_score: result.score, lead_score_updated_at: new Date().toISOString() } : c));
       } catch { /* ignore per-contact errors */ }
       current++;
       setScoreProgress({ current, total: allContactIds.length });
     }
     setCalculatingScores(false);
     toast.success('Scores atualizados!');
-    fetchContacts();
   };
 
   const fetchContactsQuery = useQuery({
@@ -464,6 +461,13 @@ const Contacts = () => {
         if (filterPeriod === "week" && !isThisWeek(d)) return false;
         if (filterPeriod === "month" && !isThisMonth(d)) return false;
       }
+      if (filterScore !== "all") {
+        const s = c.lead_score ?? 0;
+        if (filterScore === "cold" && s > 25) return false;
+        if (filterScore === "warm" && (s < 26 || s > 50)) return false;
+        if (filterScore === "hot" && (s < 51 || s > 75)) return false;
+        if (filterScore === "very_hot" && s < 76) return false;
+      }
       return true;
     });
     return [...base].sort((a, b) => {
@@ -477,13 +481,13 @@ const Contacts = () => {
       if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [contacts, debouncedSearch, filterState, filterCity, filterPeriod, sortField, sortDir]);
+  }, [contacts, debouncedSearch, filterState, filterCity, filterPeriod, filterScore, sortField, sortDir]);
 
   const paginated = useMemo(() => filtered.slice(0, page * PAGE_SIZE), [filtered, page]);
 
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch, filterState, filterCity, filterPeriod]);
+  }, [debouncedSearch, filterState, filterCity, filterPeriod, filterScore]);
 
   const stats = useMemo(() => {
     const today = contacts.filter((c) => isToday(new Date(c.created_at))).length;
@@ -1168,10 +1172,10 @@ const Contacts = () => {
                 <Filter className="h-4 w-4" />
                 Filtros
               </Button>
-              {(filterState || filterCity || filterPeriod !== "all") && (
+              {(filterState || filterCity || filterPeriod !== "all" || filterScore !== "all") && (
                 <button
                   className="text-xs text-blue-600 hover:underline"
-                  onClick={() => { setFilterState(""); setFilterCity(""); setFilterPeriod("all"); }}
+                  onClick={() => { setFilterState(""); setFilterCity(""); setFilterPeriod("all"); setFilterScore("all"); }}
                 >
                   Limpar filtros
                 </button>
@@ -1271,6 +1275,17 @@ const Contacts = () => {
               <option value="today">Hoje</option>
               <option value="week">Esta semana</option>
               <option value="month">Este mês</option>
+            </select>
+            <select
+              value={filterScore}
+              onChange={(e) => setFilterScore(e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            >
+              <option value="all">Score: Todos</option>
+              <option value="cold">🔵 Frio (0-25)</option>
+              <option value="warm">🟡 Morno (26-50)</option>
+              <option value="hot">🟢 Quente (51-75)</option>
+              <option value="very_hot">🔥 Muito Quente (76-100)</option>
             </select>
           </div>
         )}

@@ -88,6 +88,7 @@ import {
   Filter,
   Target,
   Link2,
+  Flame,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -116,6 +117,7 @@ const userNavSections: NavSection[] = [
     title: "CHATS",
     items: [
       { to: "/inbox", icon: MessageSquare, label: "Chats" },
+      { to: "/foco", icon: Target, label: "Modo Foco" },
       { to: "/pesquisar", icon: Search, label: "Pesquisar" },
       { to: "/message-search", icon: Search, label: "Busca Avançada" },
       { to: "/contatos", icon: Contact, label: "Contatos" },
@@ -147,6 +149,7 @@ const userNavSections: NavSection[] = [
           { to: "/metas", icon: TrendingUp, label: "Metas de Vendas" },
           { to: "/propostas", icon: FileText, label: "Propostas Comerciais" },
           { to: "/financeiro", icon: BarChart3, label: "Financeiro" },
+          { to: "/top-leads", icon: Flame, label: "Top Leads" },
         ],
       },
     ],
@@ -158,6 +161,7 @@ const userNavSections: NavSection[] = [
       { to: "/segmentos", icon: ListFilter, label: "Segmentos" },
       { to: "/segmentos-dinamicos", icon: Filter, label: "Segmentação Dinâmica" },
       { to: "/respostas-rapidas", icon: Zap, label: "Respostas Rápidas" },
+      { to: "/biblioteca-templates", icon: LayoutTemplate, label: "Biblioteca de Templates" },
       { to: "/chat-interno", icon: MessagesSquare, label: "Chat Interno" },
       { to: "/central-ajuda", icon: HelpCircle, label: "Central de Ajuda" },
       { to: "/deduplicacao", icon: GitMerge, label: "Deduplicação" },
@@ -189,6 +193,7 @@ const userNavSections: NavSection[] = [
       { to: "/campanhas", icon: Send, label: "Campanhas" },
       { to: "/campanhas-recorrentes", icon: Repeat2, label: "Campanhas Recorrentes" },
       { to: "/campaigns-dashboard", icon: BarChart3, label: "Métricas de Campanha" },
+      { to: "/roi-campanhas", icon: TrendingUp, label: "ROI de Campanhas" },
     ],
   },
   {
@@ -221,12 +226,19 @@ const userNavSections: NavSection[] = [
       { to: "/word-cloud", icon: Cloud, label: "Nuvem de Palavras" },
       { to: "/crescimento-contatos", icon: TrendingUp, label: "Crescimento de Contatos" },
       { to: "/minha-produtividade", icon: Target, label: "Minha Produtividade" },
+      { to: "/roi-campanhas", icon: DollarSign, label: "ROI de Campanhas" },
     ],
   },
   {
     title: "WHATSAPP",
     items: [
       { to: "/status-whatsapp", icon: Radio, label: "Status do WhatsApp" },
+    ],
+  },
+  {
+    title: "TELEGRAM",
+    items: [
+      { to: "/telegram-bots", icon: Send, label: "Bots Telegram" },
     ],
   },
   {

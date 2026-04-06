@@ -2615,4 +2615,322 @@ ${conversationContext ? `Contexto da conversa atual:\n${conversationContext}\n\n
     return rows[0];
   });
 
+  // ── Template Library ──────────────────────────────────────────────────────
+  fastify.get('/template-library', auth, async (req) => {
+    const { category, search } = req.query;
+    const params = [];
+    let p = 1;
+    let conditions = [];
+
+    if (category && category !== 'all') {
+      conditions.push(`tl.category = $${p++}`);
+      params.push(category);
+    }
+    if (search) {
+      conditions.push(`(tl.title ILIKE $${p} OR tl.content ILIKE $${p} OR $${p} = ANY(tl.tags))`);
+      params.push(`%${search}%`);
+      p++;
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const { rows } = await query(
+      `SELECT tl.*, pr.full_name as created_by_name
+       FROM template_library tl
+       LEFT JOIN profiles pr ON pr.id = tl.created_by
+       ${where}
+       ORDER BY tl.is_default DESC, tl.created_at DESC`,
+      params
+    );
+    return rows;
+  });
+
+  fastify.post('/template-library', auth, async (req, reply) => {
+    const { title, content, category, tags, variables } = req.body;
+    if (!title || !content || !category) return reply.status(400).send({ error: 'Campos obrigatórios: title, content, category' });
+    const { rows } = await query(
+      'INSERT INTO template_library (title, content, category, tags, variables, is_default, created_by) VALUES ($1,$2,$3,$4,$5,false,$6) RETURNING *',
+      [title, content, category, tags || [], variables || [], req.user.id]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.put('/template-library/:id', auth, async (req, reply) => {
+    const { title, content, category, tags, variables } = req.body;
+    const { rows } = await query(
+      'UPDATE template_library SET title=$1, content=$2, category=$3, tags=$4, variables=$5 WHERE id=$6 AND (created_by=$7 OR is_default=false) RETURNING *',
+      [title, content, category, tags || [], variables || [], req.params.id, req.user.id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Template não encontrado ou sem permissão' });
+    return rows[0];
+  });
+
+  fastify.delete('/template-library/:id', auth, async (req, reply) => {
+    const { rows } = await query(
+      'DELETE FROM template_library WHERE id=$1 AND is_default=false AND created_by=$2 RETURNING id',
+      [req.params.id, req.user.id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Template não encontrado ou sem permissão' });
+    return { ok: true };
+  });
+
+  fastify.post('/template-library/:id/import', auth, async (req, reply) => {
+    const { rows: tmpl } = await query('SELECT * FROM template_library WHERE id=$1', [req.params.id]);
+    if (!tmpl[0]) return reply.status(404).send({ error: 'Template não encontrado' });
+    const t = tmpl[0];
+    // Derive shortcut from title (first word, lowercase, max 20 chars)
+    const baseShortcut = t.title.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 20) || 'template';
+    // Ensure unique shortcut
+    const { rows: existing } = await query('SELECT shortcut FROM quick_replies WHERE shortcut ILIKE $1', [`${baseShortcut}%`]);
+    const shortcut = existing.length === 0 ? baseShortcut : `${baseShortcut}${existing.length}`;
+    const { rows } = await query(
+      'INSERT INTO quick_replies (shortcut, title, content, is_global, created_by) VALUES ($1,$2,$3,true,$4) RETURNING *',
+      [shortcut, t.title, t.content, req.user.id]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  // ── Lead Score endpoints ──────────────────────────────────────────────────
+
+  // Calculate and save lead score for a contact
+  fastify.post('/contacts/:id/calculate-score', auth, async (req, reply) => {
+    const contactId = req.params.id;
+
+    // Fetch data needed to compute score
+    const { rows: convRows } = await query(
+      'SELECT id, created_at FROM conversations WHERE contact_id=$1',
+      [contactId]
+    );
+    const convIds = convRows.map(r => r.id);
+
+    // nº de conversas (max 20pts)
+    const convCount = convIds.length;
+    const convPts = Math.min(convCount * 4, 20);
+
+    // nº de mensagens inbound (max 20pts)
+    let inboundPts = 0;
+    if (convIds.length > 0) {
+      const ph = convIds.map((_, i) => `$${i + 1}`).join(',');
+      const { rows: msgRows } = await query(
+        `SELECT COUNT(*) as cnt FROM messages WHERE conversation_id IN (${ph}) AND direction='inbound'`,
+        convIds
+      );
+      const inboundCount = parseInt(msgRows[0]?.cnt || '0');
+      inboundPts = Math.min(inboundCount * 2, 20);
+    }
+
+    // tempo médio de resposta rápido (max 15pts) — avg gap < 5min = 15, < 15min = 10, < 30min = 5
+    let responsePts = 0;
+    if (convIds.length > 0) {
+      const ph = convIds.map((_, i) => `$${i + 1}`).join(',');
+      const { rows: respRows } = await query(
+        `SELECT AVG(EXTRACT(EPOCH FROM (m2.created_at - m1.created_at))/60) as avg_min
+         FROM messages m1
+         JOIN messages m2 ON m2.conversation_id = m1.conversation_id
+           AND m2.direction = 'outbound'
+           AND m2.created_at > m1.created_at
+         WHERE m1.conversation_id IN (${ph})
+           AND m1.direction = 'inbound'`,
+        convIds
+      );
+      const avgMin = parseFloat(respRows[0]?.avg_min || '999');
+      if (avgMin < 5) responsePts = 15;
+      else if (avgMin < 15) responsePts = 10;
+      else if (avgMin < 30) responsePts = 5;
+    }
+
+    // conversa nos últimos 30 dias (15pts)
+    const { rows: recentRows } = await query(
+      `SELECT id FROM conversations WHERE contact_id=$1 AND created_at > NOW() - INTERVAL '30 days' LIMIT 1`,
+      [contactId]
+    );
+    const recentPts = recentRows.length > 0 ? 15 : 0;
+
+    // cobrança Pix criada (10pts)
+    const { rows: pixRows } = await query(
+      'SELECT id FROM pix_charges WHERE contact_id=$1 LIMIT 1',
+      [contactId]
+    );
+    const pixPts = pixRows.length > 0 ? 10 : 0;
+
+    // CSAT positivo (10pts) — avg_csat >= 4
+    let csatPts = 0;
+    if (convIds.length > 0) {
+      const ph = convIds.map((_, i) => `$${i + 1}`).join(',');
+      const { rows: csatRows } = await query(
+        `SELECT AVG(csat_score) as avg FROM conversations WHERE id IN (${ph}) AND csat_score IS NOT NULL`,
+        convIds
+      );
+      if (csatRows[0]?.avg != null && parseFloat(csatRows[0].avg) >= 4) csatPts = 10;
+    }
+
+    // tem e-mail (5pts)
+    const { rows: ctRows } = await query(
+      'SELECT email, company FROM contacts WHERE id=$1',
+      [contactId]
+    );
+    const ct = ctRows[0];
+    const emailPts = ct?.email ? 5 : 0;
+    const companyPts = ct?.company ? 5 : 0;
+
+    const score = Math.min(100, convPts + inboundPts + responsePts + recentPts + pixPts + csatPts + emailPts + companyPts);
+
+    await query(
+      'UPDATE contacts SET lead_score=$1, lead_score_updated_at=NOW() WHERE id=$2',
+      [score, contactId]
+    );
+
+    return { score, factors: { convPts, inboundPts, responsePts, recentPts, pixPts, csatPts, emailPts, companyPts } };
+  });
+
+  // Top leads
+  fastify.get('/contacts/top-leads', auth, async (req) => {
+    const limit = Math.min(parseInt(req.query.limit || '20'), 100);
+    const { rows } = await query(
+      `SELECT id, name, phone, email, company, avatar_url, lead_score, lead_score_updated_at
+       FROM contacts
+       WHERE lead_score IS NOT NULL
+       ORDER BY lead_score DESC
+       LIMIT $1`,
+      [limit]
+    );
+    return rows;
+  });
+
+  // ── Telegram Bots ─────────────────────────────────────────────────────────
+
+  // Listar bots
+  fastify.get('/telegram-bots', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM telegram_bots ORDER BY created_at DESC');
+    return rows;
+  });
+
+  // Criar bot e configurar webhook
+  fastify.post('/telegram-bots', auth, async (req, reply) => {
+    const { name, token, org_id } = req.body;
+    if (!name || !token) return reply.status(400).send({ error: 'name e token são obrigatórios' });
+
+    const { rows } = await query(
+      'INSERT INTO telegram_bots (name, token, org_id) VALUES ($1,$2,$3) RETURNING *',
+      [name, token, org_id || null]
+    );
+    const bot = rows[0];
+    const baseUrl = process.env.BACKEND_URL || 'https://api.msxzap.pro';
+    const webhookUrl = `${baseUrl}/webhook/telegram/${bot.id}`;
+
+    // Configurar webhook no Telegram
+    try {
+      const tgRes = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: webhookUrl, allowed_updates: ['message'] }),
+      });
+      const tgData = await tgRes.json();
+      if (!tgData.ok) {
+        console.warn('Telegram setWebhook warning:', tgData.description);
+      }
+    } catch (e) {
+      console.error('Telegram setWebhook error:', e.message);
+    }
+
+    await query('UPDATE telegram_bots SET webhook_url=$1 WHERE id=$2', [webhookUrl, bot.id]);
+    bot.webhook_url = webhookUrl;
+    return reply.status(201).send(bot);
+  });
+
+  // Deletar bot
+  fastify.delete('/telegram-bots/:id', auth, async (req, reply) => {
+    const { rows } = await query('SELECT token FROM telegram_bots WHERE id=$1', [req.params.id]);
+    if (rows[0]) {
+      fetch(`https://api.telegram.org/bot${rows[0].token}/deleteWebhook`).catch(() => {});
+    }
+    await query('DELETE FROM telegram_bots WHERE id=$1', [req.params.id]);
+    return { ok: true };
+  });
+
+  // Enviar mensagem via Telegram
+  fastify.post('/telegram-bots/:id/send', auth, async (req, reply) => {
+    const { chat_id, text } = req.body;
+    const { rows } = await query('SELECT token FROM telegram_bots WHERE id=$1 AND active=true', [req.params.id]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Bot não encontrado' });
+    const tgRes = await fetch(`https://api.telegram.org/bot${rows[0].token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id, text }),
+    });
+    const tgData = await tgRes.json();
+    return tgData;
+  });
+
+  // Webhook público do Telegram (sem autenticação JWT)
+  fastify.post('/webhook/telegram/:botId', async (req, reply) => {
+    const { botId } = req.params;
+    const update = req.body;
+
+    try {
+      const { rows: botRows } = await query(
+        'SELECT * FROM telegram_bots WHERE id=$1 AND active=true',
+        [botId]
+      );
+      if (!botRows[0]) return reply.status(200).send({ ok: true });
+
+      const msg = update?.message;
+      if (!msg || !msg.text) return reply.status(200).send({ ok: true });
+
+      const from = msg.from || {};
+      const telegramId = String(from.id);
+      const firstName = from.first_name || '';
+      const lastName = from.last_name || '';
+      const username = from.username || null;
+      const chatId = String(msg.chat?.id || from.id);
+      const text = msg.text;
+
+      // Buscar ou criar contato pelo telegram_id
+      let { rows: contactRows } = await query(
+        'SELECT * FROM contacts WHERE telegram_id=$1 LIMIT 1',
+        [chatId]
+      );
+      if (!contactRows[0]) {
+        const contactName = [firstName, lastName].filter(Boolean).join(' ') || username || `Telegram ${telegramId}`;
+        const ins = await query(
+          'INSERT INTO contacts (name, telegram_id, phone) VALUES ($1,$2,$3) RETURNING *',
+          [contactName, chatId, username ? `@${username}` : null]
+        );
+        contactRows = ins.rows;
+      }
+      const contact = contactRows[0];
+
+      // Buscar ou criar conversa com channel='telegram'
+      const connectionName = `telegram_${botId}`;
+      let { rows: convRows } = await query(
+        `SELECT * FROM conversations WHERE contact_id=$1 AND connection_name=$2 AND status != 'closed' LIMIT 1`,
+        [contact.id, connectionName]
+      );
+      if (!convRows[0]) {
+        const ins = await query(
+          `INSERT INTO conversations (contact_id, connection_name, channel, status) VALUES ($1,$2,'telegram','open') RETURNING *`,
+          [contact.id, connectionName]
+        );
+        convRows = ins.rows;
+      }
+      const conv = convRows[0];
+
+      // Salvar mensagem
+      const { rows: newMsg } = await query(
+        `INSERT INTO messages (conversation_id, content, direction, type) VALUES ($1,$2,'inbound','text') RETURNING *, content as body, (direction='outbound') as from_me`,
+        [conv.id, text]
+      );
+      await query(
+        'UPDATE conversations SET last_message_at=NOW(), updated_at=NOW(), unread_count=COALESCE(unread_count,0)+1 WHERE id=$1',
+        [conv.id]
+      );
+
+      fastify.io?.to(`conversation:${conv.id}`).emit('message:new', newMsg[0]);
+      fastify.io?.emit('conversation:updated', { ...conv, last_message_at: new Date().toISOString() });
+    } catch (e) {
+      console.error('Telegram webhook error:', e.message);
+    }
+
+    return reply.status(200).send({ ok: true });
+  });
+
 }

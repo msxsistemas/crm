@@ -6,6 +6,8 @@ import {
   Key, Copy, ChevronDown, ChevronUp, ShieldAlert, ShieldCheck, Monitor, TrendingUp, Star, Cake, Ban, Bell,
   Bot, Send
 } from "lucide-react";
+import { useI18n } from "@/i18n/I18nContext";
+import type { Language } from "@/i18n/index";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,6 +63,43 @@ function parseUserAgent(ua: string): string {
     : 'SO desconhecido';
   return `${browser} — ${os}`;
 }
+
+// ── Language Preference Selector (i18n) ──
+const LANG_OPTIONS: { code: Language; label: string; flag: string }[] = [
+  { code: 'pt', label: 'Português (BR)', flag: '🇧🇷' },
+  { code: 'en', label: 'English', flag: '🇺🇸' },
+  { code: 'es', label: 'Español', flag: '🇪🇸' },
+];
+
+const LanguagePreferenceSelector = () => {
+  const { language, setLanguage } = useI18n();
+
+  const handleChange = (lang: Language) => {
+    setLanguage(lang);
+    api.patch('/auth/me', { language_preference: lang }).catch(() => {});
+    toast.success('Idioma atualizado!');
+  };
+
+  return (
+    <div className="flex flex-wrap gap-3">
+      {LANG_OPTIONS.map(opt => (
+        <button
+          key={opt.code}
+          onClick={() => handleChange(opt.code)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
+            language === opt.code
+              ? 'border-primary bg-primary/10 text-primary'
+              : 'border-border bg-background text-foreground hover:bg-muted'
+          }`}
+        >
+          <span className="text-lg">{opt.flag}</span>
+          {opt.label}
+          {language === opt.code && <span className="ml-1 text-primary text-xs">✓</span>}
+        </button>
+      ))}
+    </div>
+  );
+};
 
 const SessionsSection = () => {
   const [sessions, setSessions] = useState<any[]>([]);
@@ -277,6 +316,20 @@ const TwoFactorSection = ({ userId }: { userId: string | null }) => {
             </div>
           </div>
         )}
+      </Card>
+
+      {/* Language Preference */}
+      <Card className="p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
+            <Globe className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-foreground">Idioma da Interface</h3>
+            <p className="text-sm text-muted-foreground">Escolha o idioma exibido na plataforma</p>
+          </div>
+        </div>
+        <LanguagePreferenceSelector />
       </Card>
 
       {/* Active Sessions */}

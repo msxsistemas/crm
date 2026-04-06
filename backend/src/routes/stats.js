@@ -1156,6 +1156,153 @@ export default async function statsRoutes(fastify) {
     return rows[0];
   });
 
+  // ── Campaign ROI ──────────────────────────────────────────────────────────
+  fastify.get('/stats/campaign-roi/:campaignId', auth, async (req) => {
+    const { campaignId } = req.params;
+
+    // Buscar campanha
+    const { rows: campaigns } = await query(
+      'SELECT id, name, created_at, dispatched_at FROM campaigns WHERE id=$1',
+      [campaignId]
+    );
+    if (!campaigns[0]) return { error: 'Campanha não encontrada' };
+    const campaign = campaigns[0];
+    const sentAt = campaign.dispatched_at || campaign.created_at;
+
+    // Contar total enviado (recipients)
+    const { rows: sentRows } = await query(
+      'SELECT COUNT(*) as cnt FROM campaign_recipients WHERE campaign_id=$1',
+      [campaignId]
+    );
+    const sent_count = parseInt(sentRows[0]?.cnt || '0');
+
+    // Contatos da campanha
+    const { rows: contactRows } = await query(
+      'SELECT DISTINCT contact_id FROM campaign_recipients WHERE campaign_id=$1',
+      [campaignId]
+    );
+    const contactIds = contactRows.map(r => r.contact_id).filter(Boolean);
+
+    let response_count = 0;
+    let conversations_opened = 0;
+    let pix_charges_count = 0;
+    let pix_revenue = 0;
+
+    if (contactIds.length > 0) {
+      const idList = contactIds.map((_, i) => `$${i + 2}`).join(',');
+
+      // Contar quem respondeu (mensagem inbound após o envio)
+      const { rows: respRows } = await query(
+        `SELECT COUNT(DISTINCT c.contact_id) as cnt
+         FROM conversations c
+         JOIN messages m ON m.conversation_id = c.id
+         WHERE c.contact_id IN (${idList})
+           AND m.direction = 'inbound'
+           AND m.created_at > $1`,
+        [sentAt, ...contactIds]
+      );
+      response_count = parseInt(respRows[0]?.cnt || '0');
+
+      // Conversas abertas após a campanha
+      const { rows: convRows } = await query(
+        `SELECT COUNT(*) as cnt FROM conversations
+         WHERE contact_id IN (${idList}) AND created_at > $1`,
+        [sentAt, ...contactIds]
+      );
+      conversations_opened = parseInt(convRows[0]?.cnt || '0');
+
+      // Cobranças Pix criadas após a campanha
+      const { rows: pixRows } = await query(
+        `SELECT COUNT(*) as cnt, COALESCE(SUM(CASE WHEN status='paid' THEN amount ELSE 0 END), 0) as revenue
+         FROM pix_charges
+         WHERE contact_id IN (${idList}) AND created_at > $1`,
+        [sentAt, ...contactIds]
+      );
+      pix_charges_count = parseInt(pixRows[0]?.cnt || '0');
+      pix_revenue = parseFloat(pixRows[0]?.revenue || '0');
+    }
+
+    const response_rate = sent_count > 0 ? Math.round((response_count / sent_count) * 100) : 0;
+
+    return {
+      campaign_id: campaign.id,
+      campaign_name: campaign.name,
+      sent_count,
+      response_count,
+      response_rate,
+      conversations_opened,
+      pix_charges_count,
+      pix_revenue,
+      period: { start: sentAt, end: new Date().toISOString() },
+    };
+  });
+
+  fastify.get('/stats/campaigns-roi-summary', auth, async (req) => {
+    const days = parseInt(req.query.days) || 30;
+    const { rows: campaigns } = await query(
+      `SELECT id, name, created_at, dispatched_at
+       FROM campaigns
+       WHERE (dispatched_at IS NOT NULL OR status='sent')
+         AND COALESCE(dispatched_at, created_at) >= NOW() - ($1 || ' days')::interval
+       ORDER BY COALESCE(dispatched_at, created_at) DESC
+       LIMIT 50`,
+      [days]
+    );
+
+    const results = await Promise.all(campaigns.map(async (campaign) => {
+      const sentAt = campaign.dispatched_at || campaign.created_at;
+
+      const { rows: sentRows } = await query(
+        'SELECT COUNT(*) as cnt FROM campaign_recipients WHERE campaign_id=$1',
+        [campaign.id]
+      );
+      const sent_count = parseInt(sentRows[0]?.cnt || '0');
+
+      const { rows: contactRows } = await query(
+        'SELECT DISTINCT contact_id FROM campaign_recipients WHERE campaign_id=$1',
+        [campaign.id]
+      );
+      const contactIds = contactRows.map(r => r.contact_id).filter(Boolean);
+
+      let response_count = 0;
+      let pix_revenue = 0;
+      let pix_charges_count = 0;
+
+      if (contactIds.length > 0) {
+        const idList = contactIds.map((_, i) => `$${i + 2}`).join(',');
+
+        const { rows: rr } = await query(
+          `SELECT COUNT(DISTINCT c.contact_id) as cnt FROM conversations c
+           JOIN messages m ON m.conversation_id = c.id
+           WHERE c.contact_id IN (${idList}) AND m.direction='inbound' AND m.created_at > $1`,
+          [sentAt, ...contactIds]
+        );
+        response_count = parseInt(rr[0]?.cnt || '0');
+
+        const { rows: pr } = await query(
+          `SELECT COUNT(*) as cnt, COALESCE(SUM(CASE WHEN status='paid' THEN amount ELSE 0 END),0) as revenue
+           FROM pix_charges WHERE contact_id IN (${idList}) AND created_at > $1`,
+          [sentAt, ...contactIds]
+        );
+        pix_charges_count = parseInt(pr[0]?.cnt || '0');
+        pix_revenue = parseFloat(pr[0]?.revenue || '0');
+      }
+
+      return {
+        campaign_id: campaign.id,
+        campaign_name: campaign.name,
+        sent_at: sentAt,
+        sent_count,
+        response_count,
+        response_rate: sent_count > 0 ? Math.round((response_count / sent_count) * 100) : 0,
+        pix_charges_count,
+        pix_revenue,
+      };
+    }));
+
+    return results;
+  });
+
   // ── Public Agent Profile ──────────────────────────────────────────────────
   fastify.get('/public/agent/:id', async (req, reply) => {
     const { rows } = await query(`

@@ -445,7 +445,124 @@ export default async function conversationRoutes(fastify) {
       } catch (e) { /* silent */ }
     }
 
+    // ── Resumo automático por IA ao fechar conversa ───────────────────────────
+    if (req.body.status === 'closed' && process.env.ANTHROPIC_API_KEY) {
+      (async () => {
+        try {
+          const { rows: msgs } = await query(
+            `SELECT direction, content FROM messages WHERE conversation_id=$1 AND content IS NOT NULL AND content != '' ORDER BY created_at DESC LIMIT 50`,
+            [req.params.id]
+          );
+          if (!msgs.length) return;
+          const transcript = msgs.reverse().map(m =>
+            `${m.direction === 'outbound' ? 'Agente' : 'Cliente'}: ${m.content}`
+          ).join('\n');
+
+          const aiRes = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': process.env.ANTHROPIC_API_KEY,
+              'anthropic-version': '2023-06-01',
+            },
+            body: JSON.stringify({
+              model: 'claude-haiku-4-5-20251001',
+              max_tokens: 512,
+              messages: [{
+                role: 'user',
+                content: `Analise esta conversa de atendimento e responda APENAS em JSON válido, sem markdown, sem explicações extras:\n\nConversa:\n${transcript}\n\nResponda exatamente neste formato JSON:\n{"summary":"Resumo em 3 linhas da conversa","next_steps":["passo 1","passo 2","passo 3"],"suggested_tags":["tag1","tag2","tag3","tag4","tag5"]}`
+              }],
+            }),
+          });
+
+          if (!aiRes.ok) return;
+          const aiData = await aiRes.json();
+          const rawText = aiData?.content?.[0]?.text || '';
+          let parsed;
+          try { parsed = JSON.parse(rawText); } catch { return; }
+
+          await query(
+            `INSERT INTO conversation_summaries (conversation_id, summary, next_steps, suggested_tags, generated_at)
+             VALUES ($1, $2, $3, $4, NOW())
+             ON CONFLICT (conversation_id) DO UPDATE SET summary=$2, next_steps=$3, suggested_tags=$4, generated_at=NOW()`,
+            [req.params.id, parsed.summary || '', JSON.stringify(parsed.next_steps || []), JSON.stringify(parsed.suggested_tags || [])]
+          );
+          fastify.io?.emit('conversation:summary_ready', { conversation_id: req.params.id });
+        } catch (e) {
+          console.error('AI summary error:', e.message);
+        }
+      })();
+    }
+
     return rows[0];
+  });
+
+  // ── Resumo de conversa gerado por IA ─────────────────────────────────────
+  fastify.get('/conversations/:id/summary', auth, async (req, reply) => {
+    const { rows } = await query(
+      'SELECT * FROM conversation_summaries WHERE conversation_id=$1',
+      [req.params.id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Resumo não encontrado' });
+    return rows[0];
+  });
+
+  // Gerar resumo manualmente (ou re-gerar)
+  fastify.post('/conversations/:id/summary/generate', auth, async (req, reply) => {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return reply.status(400).send({ error: 'ANTHROPIC_API_KEY não configurada' });
+    }
+    try {
+      const { rows: msgs } = await query(
+        `SELECT direction, content FROM messages WHERE conversation_id=$1 AND content IS NOT NULL AND content != '' ORDER BY created_at DESC LIMIT 50`,
+        [req.params.id]
+      );
+      if (!msgs.length) return reply.status(400).send({ error: 'Sem mensagens para resumir' });
+
+      const transcript = msgs.reverse().map(m =>
+        `${m.direction === 'outbound' ? 'Agente' : 'Cliente'}: ${m.content}`
+      ).join('\n');
+
+      const aiRes = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 512,
+          messages: [{
+            role: 'user',
+            content: `Analise esta conversa de atendimento e responda APENAS em JSON válido, sem markdown, sem explicações extras:\n\nConversa:\n${transcript}\n\nResponda exatamente neste formato JSON:\n{"summary":"Resumo em 3 linhas da conversa","next_steps":["passo 1","passo 2","passo 3"],"suggested_tags":["tag1","tag2","tag3","tag4","tag5"]}`,
+          }],
+        }),
+      });
+
+      if (!aiRes.ok) {
+        const err = await aiRes.text();
+        return reply.status(502).send({ error: 'Erro na API Claude', detail: err });
+      }
+      const aiData = await aiRes.json();
+      const rawText = aiData?.content?.[0]?.text || '';
+      let parsed;
+      try { parsed = JSON.parse(rawText); } catch {
+        return reply.status(502).send({ error: 'Resposta inválida da IA', raw: rawText });
+      }
+
+      const { rows } = await query(
+        `INSERT INTO conversation_summaries (conversation_id, summary, next_steps, suggested_tags, generated_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (conversation_id) DO UPDATE SET summary=$2, next_steps=$3, suggested_tags=$4, generated_at=NOW()
+         RETURNING *`,
+        [req.params.id, parsed.summary || '', JSON.stringify(parsed.next_steps || []), JSON.stringify(parsed.suggested_tags || [])]
+      );
+      fastify.io?.emit('conversation:summary_ready', { conversation_id: req.params.id });
+      return rows[0];
+    } catch (e) {
+      return reply.status(500).send({ error: e.message });
+    }
   });
 
   // Status counts

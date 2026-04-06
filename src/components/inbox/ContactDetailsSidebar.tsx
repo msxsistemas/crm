@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clock, TrendingUp, Send, ChevronDown, ChevronUp, Cake, Star, CheckSquare, Trash2, CreditCard, MapPin, ShieldOff, Shield, RefreshCw, Sliders, FolderOpen, FileText, Image, File, Download, RotateCcw } from "lucide-react";
+import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clock, TrendingUp, Send, ChevronDown, ChevronUp, Cake, Star, CheckSquare, Trash2, CreditCard, MapPin, ShieldOff, Shield, RefreshCw, Sliders, FolderOpen, FileText, Image, File, Download, RotateCcw, Sparkles, Loader2, Tag } from "lucide-react";
 import TagSelector from "@/components/shared/TagSelector";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,8 +15,18 @@ interface ContactDetailsSidebarProps {
   contactAvatar: string | null;
   conversationId: string;
   conversationCreatedAt: string;
+  conversationStatus?: string;
   onClose: () => void;
   customFields?: Record<string, string> | null;
+}
+
+interface ConversationSummary {
+  id: string;
+  conversation_id: string;
+  summary: string;
+  next_steps: string[];
+  suggested_tags: string[];
+  generated_at: string;
 }
 
 interface ConversationNote {
@@ -111,6 +121,7 @@ const ContactDetailsSidebar = ({
   contactAvatar,
   conversationId,
   conversationCreatedAt,
+  conversationStatus,
   onClose,
   customFields,
 }: ContactDetailsSidebarProps) => {
@@ -293,6 +304,53 @@ const ContactDetailsSidebar = ({
   const [collaborators, setCollaborators] = useState<{ agent_id: string; name: string | null; full_name: string | null; avatar_url: string | null }[]>([]);
   const [showAddCollab, setShowAddCollab] = useState(false);
   const [allAgents, setAllAgents] = useState<AgentProfile[]>([]);
+
+  // ── Resumo de conversa por IA ─────────────────────────────────────────────
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [summary, setSummary] = useState<ConversationSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryChecked, setSummaryChecked] = useState(false);
+  const [nextStepsDone, setNextStepsDone] = useState<Record<number, boolean>>({});
+
+  const loadSummary = useCallback(async () => {
+    setSummaryLoading(true);
+    try {
+      const data = await api.get<ConversationSummary>(`/conversations/${conversationId}/summary`);
+      setSummary(data);
+    } catch {
+      setSummary(null);
+    } finally {
+      setSummaryLoading(false);
+      setSummaryChecked(true);
+    }
+  }, [conversationId]);
+
+  const generateSummary = async () => {
+    setSummaryLoading(true);
+    try {
+      const data = await api.post<ConversationSummary>(`/conversations/${conversationId}/summary/generate`, {});
+      setSummary(data);
+      setSummaryChecked(true);
+    } catch {
+      /* ignore */
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
+
+  // Carregar resumo quando abrir e for conversa fechada
+  useEffect(() => {
+    if (summaryOpen && !summaryChecked) {
+      loadSummary();
+    }
+  }, [summaryOpen, summaryChecked, loadSummary]);
+
+  // Resetar ao mudar conversa
+  useEffect(() => {
+    setSummary(null);
+    setSummaryChecked(false);
+    setNextStepsDone({});
+  }, [conversationId]);
 
   // @mention states
   const [agents, setAgents] = useState<AgentProfile[]>([]);
@@ -832,16 +890,31 @@ const ContactDetailsSidebar = ({
             )}
           </span>
         )}
-        {leadScore != null && (() => {
-          const badge = getLeadScoreBadge(leadScore);
+        {(() => {
+          const score = leadScore ?? 0;
+          const badge = getLeadScoreBadge(score);
           if (!badge) return null;
           return (
-            <span
-              className={`mt-2 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full border ${badge.className}`}
-              title="Score calculado com base em engajamento"
-            >
-              {badge.emoji} Score: {leadScore} — {badge.label}
-            </span>
+            <div className="mt-2 flex items-center gap-2">
+              <span
+                className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full border ${badge.className}`}
+                title="Score calculado com base em engajamento: conversas, mensagens, tempo de resposta, recência, Pix, CSAT, e-mail e empresa"
+              >
+                {badge.emoji} Score: {score} — {badge.label}
+              </span>
+              <button
+                className="text-[10px] px-2 py-0.5 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-700 dark:hover:bg-blue-900/30 transition-colors"
+                onClick={async () => {
+                  try {
+                    const result = await api.post<{ score: number }>(`/contacts/${contactId}/calculate-score`, {});
+                    setLeadScore(result.score);
+                  } catch { /* ignore */ }
+                }}
+                title="Recalcular score de lead"
+              >
+                <RefreshCw className="h-2.5 w-2.5 inline mr-0.5" />Recalcular
+              </button>
+            </div>
           );
         })()}
         {/* Block / Unblock button */}
@@ -2012,6 +2085,95 @@ const ContactDetailsSidebar = ({
           </div>
         )}
       </div>
+
+      {/* ── Resumo da Conversa (IA) ── */}
+      {conversationStatus === 'closed' && (
+        <div className="border-t border-border">
+          <button
+            type="button"
+            onClick={() => setSummaryOpen(v => !v)}
+            className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/50 transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-violet-500" />
+              Resumo da Conversa (IA)
+            </span>
+            {summaryOpen ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+          </button>
+          {summaryOpen && (
+            <div className="px-4 pb-4 space-y-3">
+              {summaryLoading ? (
+                <div className="flex items-center gap-2 py-4 justify-center text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span className="text-xs">Gerando resumo...</span>
+                </div>
+              ) : summary ? (
+                <>
+                  {/* Resumo */}
+                  <div className="rounded-md bg-violet-50 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800 p-3">
+                    <p className="text-xs font-medium text-violet-800 dark:text-violet-300 mb-1">Resumo</p>
+                    <p className="text-xs text-violet-900 dark:text-violet-200 leading-relaxed">{summary.summary}</p>
+                  </div>
+                  {/* Próximos passos */}
+                  {summary.next_steps?.length > 0 && (
+                    <div>
+                      <p className="text-[11px] font-medium text-muted-foreground mb-1.5">Próximos passos</p>
+                      <ul className="space-y-1.5">
+                        {summary.next_steps.map((step, i) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              checked={!!nextStepsDone[i]}
+                              onChange={() => setNextStepsDone(prev => ({ ...prev, [i]: !prev[i] }))}
+                              className="mt-0.5 h-3.5 w-3.5 rounded accent-violet-600 cursor-pointer shrink-0"
+                            />
+                            <span className={`text-xs leading-relaxed ${nextStepsDone[i] ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
+                              {step}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {/* Tags sugeridas */}
+                  {summary.suggested_tags?.length > 0 && (
+                    <div>
+                      <p className="text-[11px] font-medium text-muted-foreground mb-1.5">Tags sugeridas</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {summary.suggested_tags.map((tag, i) => (
+                          <span
+                            key={i}
+                            className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-foreground border border-border"
+                          >
+                            <Tag className="h-2.5 w-2.5" />
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-[10px] text-muted-foreground">
+                    Gerado em {new Date(summary.generated_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                </>
+              ) : (
+                <div className="text-center py-3 space-y-2">
+                  <p className="text-xs text-muted-foreground">Nenhum resumo gerado ainda.</p>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={generateSummary}
+                disabled={summaryLoading}
+                className="w-full flex items-center justify-center gap-1.5 rounded-md border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 text-xs py-1.5 hover:bg-violet-50 dark:hover:bg-violet-950/40 transition-colors disabled:opacity-50"
+              >
+                {summaryLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+                {summary ? 'Gerar novamente' : 'Gerar resumo'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Note Versions Modal */}
       {noteVersionsModal && (

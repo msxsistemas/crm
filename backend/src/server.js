@@ -561,6 +561,70 @@ setInterval(async () => {
   } catch(e) {}
 }, 60000);
 
+// Lead Score recalculation worker — runs every 6 hours
+const recalculateAllLeadScores = async () => {
+  try {
+    const { rows: contacts } = await pool.query(`
+      SELECT DISTINCT c.contact_id as id
+      FROM conversations c
+      WHERE c.created_at > NOW() - INTERVAL '90 days'
+    `);
+    for (const ct of contacts) {
+      try {
+        // Reuse same logic as endpoint — fetch and compute inline
+        const { rows: convRows } = await pool.query('SELECT id FROM conversations WHERE contact_id=$1', [ct.id]);
+        const convIds = convRows.map(r => r.id);
+        const convPts = Math.min(convIds.length * 4, 20);
+
+        let inboundPts = 0;
+        if (convIds.length > 0) {
+          const ph = convIds.map((_, i) => `$${i + 1}`).join(',');
+          const { rows } = await pool.query(`SELECT COUNT(*) as cnt FROM messages WHERE conversation_id IN (${ph}) AND direction='inbound'`, convIds);
+          inboundPts = Math.min(parseInt(rows[0]?.cnt || '0') * 2, 20);
+        }
+
+        let responsePts = 0;
+        if (convIds.length > 0) {
+          const ph = convIds.map((_, i) => `$${i + 1}`).join(',');
+          const { rows } = await pool.query(
+            `SELECT AVG(EXTRACT(EPOCH FROM (m2.created_at - m1.created_at))/60) as avg_min
+             FROM messages m1
+             JOIN messages m2 ON m2.conversation_id=m1.conversation_id AND m2.direction='outbound' AND m2.created_at>m1.created_at
+             WHERE m1.conversation_id IN (${ph}) AND m1.direction='inbound'`, convIds);
+          const avgMin = parseFloat(rows[0]?.avg_min || '999');
+          if (avgMin < 5) responsePts = 15;
+          else if (avgMin < 15) responsePts = 10;
+          else if (avgMin < 30) responsePts = 5;
+        }
+
+        const { rows: recentRows } = await pool.query(
+          `SELECT id FROM conversations WHERE contact_id=$1 AND created_at > NOW() - INTERVAL '30 days' LIMIT 1`, [ct.id]);
+        const recentPts = recentRows.length > 0 ? 15 : 0;
+
+        const { rows: pixRows } = await pool.query('SELECT id FROM pix_charges WHERE contact_id=$1 LIMIT 1', [ct.id]).catch(() => ({ rows: [] }));
+        const pixPts = pixRows.length > 0 ? 10 : 0;
+
+        let csatPts = 0;
+        if (convIds.length > 0) {
+          const ph = convIds.map((_, i) => `$${i + 1}`).join(',');
+          const { rows } = await pool.query(`SELECT AVG(csat_score) as avg FROM conversations WHERE id IN (${ph}) AND csat_score IS NOT NULL`, convIds);
+          if (rows[0]?.avg != null && parseFloat(rows[0].avg) >= 4) csatPts = 10;
+        }
+
+        const { rows: ctData } = await pool.query('SELECT email, company FROM contacts WHERE id=$1', [ct.id]);
+        const ctInfo = ctData[0];
+        const emailPts = ctInfo?.email ? 5 : 0;
+        const companyPts = ctInfo?.company ? 5 : 0;
+
+        const score = Math.min(100, convPts + inboundPts + responsePts + recentPts + pixPts + csatPts + emailPts + companyPts);
+        await pool.query('UPDATE contacts SET lead_score=$1, lead_score_updated_at=NOW() WHERE id=$2', [score, ct.id]);
+      } catch(e) { /* individual contact error — silent */ }
+    }
+    console.log(`[lead-score] Recalculou scores de ${contacts.length} contatos`);
+  } catch(e) { /* silent */ }
+};
+setInterval(recalculateAllLeadScores, 6 * 60 * 60 * 1000); // a cada 6 horas
+
 // Graceful shutdown
 const shutdown = async () => {
   console.log('\nEncerrando servidor...');

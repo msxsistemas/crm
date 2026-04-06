@@ -11,6 +11,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import InstallPWA from "@/components/InstallPWA";
 import OfflineBanner from "@/components/OfflineBanner";
 import { Loader2 } from "lucide-react";
+import { I18nProvider } from "@/i18n/I18nContext";
 
 // Reseta o ErrorBoundary ao mudar de rota (sem isso, um erro numa página
 // deixa o app inteiro preso na tela de erro até o F5)
@@ -66,6 +67,7 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 const DashboardLegacy = lazy(() => import("./pages/DashboardLegacy"));
 const SearchPage = lazy(() => import("./pages/Search"));
 const Tasks = lazy(() => import("./pages/Tasks"));
+const TopLeads = lazy(() => import("./pages/TopLeads"));
 const Schedules = lazy(() => import("./pages/Schedules"));
 const KanbanGroups = lazy(() => import("./pages/KanbanGroups"));
 const KanbanOverview = lazy(() => import("./pages/KanbanOverview"));
@@ -130,6 +132,10 @@ const RecurringCampaigns = lazy(() => import("./pages/RecurringCampaigns"));
 const MyProductivity = lazy(() => import("./pages/MyProductivity"));
 const SurveyResponse = lazy(() => import("./pages/SurveyResponse"));
 const LinkTracker = lazy(() => import("./pages/LinkTracker"));
+const TelegramBots = lazy(() => import("./pages/TelegramBots"));
+const TemplateLibrary = lazy(() => import("./pages/TemplateLibrary"));
+const CampaignROI = lazy(() => import("./pages/CampaignROI"));
+const FocusMode = lazy(() => import("./pages/FocusMode"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -151,6 +157,7 @@ const PageLoader = () => (
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
+      <I18nProvider>
       <TooltipProvider>
         <Toaster />
         <Sonner />
@@ -183,6 +190,7 @@ const App = () => (
                     <Route path="/kanban/visao-geral" element={<KanbanOverview />} />
                     <Route path="/kanban/filas" element={<KanbanQueues />} />
                     <Route path="/contatos" element={<Contacts />} />
+                    <Route path="/top-leads" element={<TopLeads />} />
                     <Route path="/tarefas" element={<Tasks />} />
                     <Route path="/compromissos" element={<AppointmentsPage />} />
                     <Route path="/agendamentos" element={<Schedules />} />
@@ -253,7 +261,19 @@ const App = () => (
                     <Route path="/campanhas-recorrentes" element={<RecurringCampaigns />} />
                     <Route path="/minha-produtividade" element={<MyProductivity />} />
                     <Route path="/rastrear-links" element={<LinkTracker />} />
+                    <Route path="/telegram-bots" element={<TelegramBots />} />
+                    <Route path="/biblioteca-templates" element={<TemplateLibrary />} />
+                    <Route path="/roi-campanhas" element={<CampaignROI />} />
                   </Route>
+                  {/* Modo Foco — standalone, sem AppLayout */}
+                  <Route
+                    path="/foco"
+                    element={
+                      <ProtectedRoute requiredRole="user">
+                        <FocusMode />
+                      </ProtectedRoute>
+                    }
+                  />
                   <Route
                     element={
                       <ProtectedRoute requiredRole="admin">
@@ -295,6 +315,7 @@ const App = () => (
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>
+      </I18nProvider>
     </ThemeProvider>
   </QueryClientProvider>
 );

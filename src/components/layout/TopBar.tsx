@@ -32,6 +32,7 @@ import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useFollowupReminders } from "@/hooks/useFollowupReminders";
 import { FollowupPanel } from "@/components/followup/FollowupPanel";
 import { useTheme } from "next-themes";
+import { LanguageSwitcher } from "@/i18n/LanguageSwitcher";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -451,6 +452,22 @@ const TopBar = ({ onStartTour, onOpenSearch, onOpenShortcuts }: TopBarProps) => 
 
         <div className="w-px h-5 bg-white/20" />
 
+        {/* Modo Foco */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => navigate("/foco")}
+              className="hover:text-white/80 transition-colors p-1 flex items-center gap-1.5 bg-white/10 rounded-md px-2.5 py-1"
+            >
+              <MessageCircle className="h-[15px] w-[15px]" />
+              <span className="text-[11px] hidden sm:inline">Foco</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Modo Foco — apenas suas conversas</TooltipContent>
+        </Tooltip>
+
+        <div className="w-px h-5 bg-white/20" />
+
         {/* Theme toggle */}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -675,6 +692,11 @@ const TopBar = ({ onStartTour, onOpenSearch, onOpenShortcuts }: TopBarProps) => 
           </TooltipTrigger>
           <TooltipContent side="bottom">Formatação</TooltipContent>
         </Tooltip>
+
+        <div className="w-px h-5 bg-white/20" />
+
+        {/* Language Switcher */}
+        <LanguageSwitcher compact />
 
         <div className="w-px h-5 bg-white/20" />
 

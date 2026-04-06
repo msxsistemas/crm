@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Smartphone, Plus, QrCode, RefreshCw, Trash2, CheckCircle, XCircle,
-  Loader2, Wifi, WifiOff, Search, Key, Globe, Pencil, Signal, X, MessageSquare
+  Loader2, Wifi, WifiOff, Search, Key, Globe, Pencil, Signal, X, MessageSquare, Bot, ArrowRight
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,6 +85,7 @@ interface Instance {
 }
 
 const Connections = () => {
+  const navigate = useNavigate();
   // Evolution API state
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
@@ -553,6 +555,9 @@ const Connections = () => {
             <TabsTrigger value="meta" className="gap-2">
               <MessageSquare className="h-4 w-4" /> WhatsApp Oficial
             </TabsTrigger>
+            <TabsTrigger value="telegram" className="gap-2">
+              <Bot className="h-4 w-4 text-sky-500" /> Telegram
+            </TabsTrigger>
           </TabsList>
 
           {/* Evolution API Tab */}
@@ -755,6 +760,26 @@ const Connections = () => {
                 </div>
               </div>
             </div>
+          </TabsContent>
+
+          {/* Telegram Tab */}
+          <TabsContent value="telegram" className="space-y-4">
+            <Card className="p-6 flex flex-col items-center text-center gap-4">
+              <div className="h-16 w-16 rounded-full bg-sky-100 dark:bg-sky-900 flex items-center justify-center">
+                <Bot className="h-8 w-8 text-sky-500" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-base">Conectar Telegram</h3>
+                <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto">
+                  Conecte bots do Telegram para receber e responder mensagens diretamente no Inbox, da mesma forma que o WhatsApp.
+                </p>
+              </div>
+              <Button onClick={() => navigate("/telegram-bots")} className="gap-2">
+                <Bot className="h-4 w-4" />
+                Gerenciar Bots Telegram
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Card>
           </TabsContent>
         </Tabs>
       </div>
