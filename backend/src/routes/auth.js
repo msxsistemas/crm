@@ -145,7 +145,7 @@ export default async function authRoutes(fastify) {
   // Update profile
   // -- ALTER TABLE profiles ADD COLUMN IF NOT EXISTS theme_preference TEXT DEFAULT 'dark';
   fastify.patch('/auth/me', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { name, full_name, avatar_url, permissions, two_factor_enabled, signing_enabled, signature, signature_html, signature_enabled, status, max_conversations, absence_enabled, absence_start, absence_end, absence_message, theme_preference, onboarding_completed, shortcuts_config } = req.body;
+    const { name, full_name, avatar_url, permissions, two_factor_enabled, signing_enabled, signature, signature_html, signature_enabled, status, max_conversations, absence_enabled, absence_start, absence_end, absence_message, theme_preference, onboarding_completed, shortcuts_config, bio } = req.body;
     const updates = [];
     const params = [];
     let p = 1;
@@ -167,6 +167,7 @@ export default async function authRoutes(fastify) {
     if (theme_preference !== undefined && ['dark','light'].includes(theme_preference)) { updates.push(`theme_preference = $${p}`); params.push(theme_preference); p++; }
     if (onboarding_completed !== undefined) { updates.push(`onboarding_completed = $${p}`); params.push(onboarding_completed); p++; }
     if (shortcuts_config !== undefined) { updates.push(`shortcuts_config = $${p}`); params.push(JSON.stringify(shortcuts_config)); p++; }
+    if (bio !== undefined) { updates.push(`bio = $${p}`); params.push(bio); p++; }
     if (!updates.length) return reply.status(400).send({ error: 'Nada para atualizar' });
     updates.push(`updated_at = NOW()`);
     params.push(req.user.id);
@@ -224,6 +225,116 @@ export default async function authRoutes(fastify) {
     reply.clearCookie('access_token', { path: '/', httpOnly: true, secure, sameSite: 'lax' });
     reply.clearCookie('refresh_token', { path: '/auth/refresh', httpOnly: true, secure, sameSite: 'lax' });
     return { ok: true };
+  });
+
+  // Forgot password — gera token e envia e-mail
+  fastify.post('/auth/forgot-password', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({
+          error: 'Muitas tentativas. Tente novamente em 15 minutos.',
+        }),
+      },
+    },
+  }, async (req, reply) => {
+    const { email } = req.body || {};
+    if (!email) return reply.status(400).send({ error: 'Email obrigatório' });
+
+    const { rows } = await query('SELECT id, name FROM profiles WHERE email = $1 LIMIT 1', [email.toLowerCase()]);
+    // Sempre retornar sucesso para não revelar se o e-mail existe
+    if (!rows[0]) return { ok: true, message: 'Se o e-mail existir, você receberá as instruções.' };
+
+    const user = rows[0];
+
+    // Invalidar tokens anteriores do usuário
+    await query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user.id]).catch(() => {});
+
+    // Gerar token usando md5 sem gen_random_bytes
+    const { rows: tokenRows } = await query(
+      `INSERT INTO password_reset_tokens (user_id, token, expires_at)
+       VALUES ($1, md5(random()::text || clock_timestamp()::text), NOW() + INTERVAL '1 hour')
+       RETURNING token`,
+      [user.id]
+    );
+    const token = tokenRows[0].token;
+
+    const resetUrl = `${process.env.FRONTEND_URL || 'https://msxzap.pro'}/reset-password?token=${token}`;
+
+    // Enviar e-mail via Resend
+    try {
+      const resendKey = process.env.RESEND_API_KEY;
+      const fromEmail = process.env.REPORT_FROM_EMAIL || 'noreply@msxzap.pro';
+      if (resendKey) {
+        await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${resendKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: fromEmail,
+            to: email.toLowerCase(),
+            subject: 'Redefinição de senha — MSX CRM',
+            html: `
+              <p>Olá, <b>${user.name}</b>!</p>
+              <p>Recebemos uma solicitação para redefinir a senha da sua conta.</p>
+              <p><a href="${resetUrl}" style="background:#3b82f6;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;display:inline-block;">Redefinir minha senha</a></p>
+              <p>Ou copie o link: <code>${resetUrl}</code></p>
+              <p>Este link expira em <b>1 hora</b>.</p>
+              <p>Se você não solicitou isso, ignore este e-mail.</p>
+            `,
+          }),
+        });
+      }
+    } catch (e) {
+      console.error('Resend email error:', e.message);
+    }
+
+    return { ok: true, message: 'Se o e-mail existir, você receberá as instruções.' };
+  });
+
+  // Reset password — valida token e atualiza senha
+  fastify.post('/auth/reset-password', {
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '15 minutes',
+        errorResponseBuilder: () => ({
+          error: 'Muitas tentativas. Tente novamente em 15 minutos.',
+        }),
+      },
+    },
+  }, async (req, reply) => {
+    const { token, password } = req.body || {};
+    if (!token || !password) return reply.status(400).send({ error: 'Token e nova senha são obrigatórios' });
+    if (password.length < 6) return reply.status(400).send({ error: 'A senha deve ter pelo menos 6 caracteres' });
+
+    const { rows } = await query(
+      `SELECT prt.id, prt.user_id FROM password_reset_tokens prt
+       WHERE prt.token = $1
+         AND prt.expires_at > NOW()
+         AND prt.used_at IS NULL
+       LIMIT 1`,
+      [token]
+    );
+    if (!rows[0]) return reply.status(400).send({ error: 'Token inválido ou expirado' });
+
+    const { id: tokenId, user_id } = rows[0];
+    const hash = await bcrypt.hash(password, 10);
+
+    await query('UPDATE profiles SET password_hash = $1, updated_at = NOW() WHERE id = $2', [hash, user_id]);
+    await query('UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1', [tokenId]);
+
+    // Invalidar sessões ativas
+    try {
+      const { redis } = await import('../redis.js');
+      const logoutTs = Math.floor(Date.now() / 1000) + 1;
+      await redis.set(`logout:${user_id}`, logoutTs, 'EX', 60 * 60 * 24 * 30);
+    } catch {}
+
+    return { ok: true, message: 'Senha redefinida com sucesso' };
   });
 
   // Change password — máximo 10 tentativas por IP a cada 15 minutos

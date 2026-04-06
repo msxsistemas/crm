@@ -93,26 +93,6 @@ export default async function misc3Routes(fastify) {
     await query('DELETE FROM contact_group_members WHERE id=$1', [req.params.id]); return { ok: true };
   });
 
-  // ── Contact Segments ──────────────────────────────────────────────────────
-  fastify.get('/contact-segments', auth, async (req) => {
-    const { contact_id, segment_id } = req.query;
-    let q = 'SELECT * FROM contact_segments WHERE 1=1';
-    const vals = [];
-    let p = 1;
-    if (contact_id) { q += ` AND contact_id=$${p}`; vals.push(contact_id); p++; }
-    if (segment_id) { q += ` AND segment_id=$${p}`; vals.push(segment_id); p++; }
-    const { rows } = await query(q, vals);
-    return rows;
-  });
-  fastify.post('/contact-segments', auth, async (req, reply) => {
-    const { contact_id, segment_id } = req.body;
-    const { rows } = await query('INSERT INTO contact_segments (contact_id, segment_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING *', [contact_id, segment_id]);
-    return reply.status(201).send(rows[0] || {});
-  });
-  fastify.delete('/contact-segments/:id', auth, async (req) => {
-    await query('DELETE FROM contact_segments WHERE id=$1', [req.params.id]); return { ok: true };
-  });
-
   // ── HSM Templates ─────────────────────────────────────────────────────────
   fastify.get('/hsm-templates', auth, async (req) => {
     const limit = Math.min(parseInt(req.query.limit) || 200, 500);
@@ -2063,6 +2043,127 @@ ${conversationContext ? `Contexto da conversa atual:\n${conversationContext}\n\n
     return { success: true };
   });
 
+  // ── Contact Segments (Dynamic Segmentation) ──────────────────────────────
+
+  fastify.get('/contact-segments', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    try {
+      const { rows } = await query(`
+        SELECT cs.*, p.full_name as created_by_name
+        FROM dynamic_segments cs
+        LEFT JOIN profiles p ON p.id = cs.created_by
+        ORDER BY cs.created_at DESC
+      `);
+      return rows;
+    } catch (e) {
+      return reply.status(500).send({ error: 'Erro ao buscar segmentos', details: e.message });
+    }
+  });
+
+  fastify.post('/contact-segments', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { name, filters } = req.body;
+    if (!name) return reply.status(400).send({ error: 'name é obrigatório' });
+    try {
+      const { rows } = await query(
+        'INSERT INTO dynamic_segments (name, filters, created_by) VALUES ($1, $2, $3) RETURNING *',
+        [name, JSON.stringify(filters || []), req.user.id]
+      );
+      return reply.status(201).send(rows[0]);
+    } catch (e) {
+      return reply.status(500).send({ error: 'Erro ao criar segmento', details: e.message });
+    }
+  });
+
+  fastify.put('/contact-segments/:id', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { name, filters } = req.body;
+    try {
+      const { rows } = await query(
+        'UPDATE dynamic_segments SET name=COALESCE($1,name), filters=COALESCE($2,filters), updated_at=NOW() WHERE id=$3 RETURNING *',
+        [name, filters ? JSON.stringify(filters) : null, req.params.id]
+      );
+      if (!rows[0]) return reply.status(404).send({ error: 'Segmento não encontrado' });
+      return rows[0];
+    } catch (e) {
+      return reply.status(500).send({ error: 'Erro ao atualizar segmento', details: e.message });
+    }
+  });
+
+  fastify.delete('/contact-segments/:id', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    try {
+      await query('DELETE FROM dynamic_segments WHERE id=$1', [req.params.id]);
+      return { success: true };
+    } catch (e) {
+      return reply.status(500).send({ error: 'Erro ao deletar segmento', details: e.message });
+    }
+  });
+
+  function buildSegmentWhereClause(filters, params) {
+    const conditions = [];
+    for (const f of filters) {
+      if (f.type === 'tag') {
+        const tags = Array.isArray(f.value) ? f.value : [f.value];
+        const placeholders = tags.map((_, i) => '$' + (params.length + i + 1)).join(',');
+        tags.forEach(t => params.push(t));
+        conditions.push('EXISTS (SELECT 1 FROM contact_tags ctg JOIN tags tg ON tg.id=ctg.tag_id WHERE ctg.contact_id=ct.id AND tg.name IN (' + placeholders + '))');
+      } else if (f.type === 'custom_field') {
+        params.push(f.key);
+        params.push(String(f.value));
+        conditions.push('(ct.custom_fields->>$' + (params.length - 1) + ' = $' + params.length + ')');
+      } else if (f.type === 'created_at_before') {
+        params.push(f.value);
+        conditions.push('ct.created_at < $' + params.length + '::timestamptz');
+      } else if (f.type === 'created_at_after') {
+        params.push(f.value);
+        conditions.push('ct.created_at > $' + params.length + '::timestamptz');
+      } else if (f.type === 'phone_starts_with') {
+        params.push(f.value + '%');
+        conditions.push('ct.phone LIKE $' + params.length);
+      } else if (f.type === 'has_conversation') {
+        const has = f.value === true || f.value === 'true';
+        if (has) {
+          conditions.push('EXISTS (SELECT 1 FROM conversations cv WHERE cv.contact_id=ct.id)');
+        } else {
+          conditions.push('NOT EXISTS (SELECT 1 FROM conversations cv WHERE cv.contact_id=ct.id)');
+        }
+      } else if (f.type === 'last_message_before') {
+        params.push(parseInt(f.value, 10));
+        conditions.push("EXISTS (SELECT 1 FROM conversations cv WHERE cv.contact_id=ct.id AND cv.last_message_at < NOW() - ($" + params.length + " || ' days')::interval)");
+      }
+    }
+    return conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+  }
+
+  fastify.post('/contact-segments/:id/preview', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    try {
+      const { rows: seg } = await query('SELECT * FROM dynamic_segments WHERE id=$1', [req.params.id]);
+      if (!seg[0]) return reply.status(404).send({ error: 'Segmento não encontrado' });
+
+      const filters = Array.isArray(seg[0].filters) ? seg[0].filters : [];
+      const page = parseInt(req.query.page || '1', 10);
+      const limit = parseInt(req.query.limit || '50', 10);
+      const offset = (page - 1) * limit;
+
+      const countParams = [];
+      const whereClause = buildSegmentWhereClause(filters, countParams);
+      const { rows: countRows } = await query('SELECT COUNT(*) as total FROM contacts ct ' + whereClause, countParams);
+      const total = parseInt(countRows[0].total, 10);
+
+      const dataParams = [];
+      const whereClause2 = buildSegmentWhereClause(filters, dataParams);
+      dataParams.push(limit);
+      dataParams.push(offset);
+      const { rows: contacts } = await query(
+        'SELECT ct.id, ct.name, ct.phone, ct.email, ct.organization, ct.created_at FROM contacts ct ' + whereClause2 + ' ORDER BY ct.created_at DESC LIMIT $' + (dataParams.length - 1) + ' OFFSET $' + dataParams.length,
+        dataParams
+      );
+
+      await query('UPDATE dynamic_segments SET contact_count=$1, updated_at=NOW() WHERE id=$2', [total, req.params.id]).catch(() => {});
+
+      return { contacts, total, page, limit };
+    } catch (e) {
+      return reply.status(500).send({ error: 'Erro ao executar preview', details: e.message });
+    }
+  });
+
   // ── Google Sheets Export ──────────────────────────────────────────────────
   fastify.post('/integrations/google-sheets/export', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const { spreadsheet_id, sheet_name, access_token, data_type } = req.body;
@@ -2112,6 +2213,41 @@ ${conversationContext ? `Contexto da conversa atual:\n${conversationContext}\n\n
 
     const result = await response.json();
     return { success: true, updated_rows: result.updatedRows, spreadsheet_url: `https://docs.google.com/spreadsheets/d/${spreadsheet_id}` };
+  });
+
+  // ── Escalation Rules ──────────────────────────────────────────────────────
+  // Migration: see backend/migrations/032_escalation_rules.sql
+  fastify.get('/escalation-rules', auth, async (req, reply) => {
+    const { rows } = await query('SELECT * FROM escalation_rules ORDER BY created_at ASC');
+    return rows;
+  });
+
+  fastify.post('/escalation-rules', auth, async (req, reply) => {
+    if (!['admin', 'supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { name, idle_minutes, condition_type, target_role, enabled } = req.body;
+    if (!name || !idle_minutes) return reply.status(400).send({ error: 'name e idle_minutes são obrigatórios' });
+    const { rows } = await query(
+      'INSERT INTO escalation_rules (name, idle_minutes, condition_type, target_role, enabled) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [name, parseInt(idle_minutes), condition_type || 'idle', target_role || 'supervisor', enabled !== false]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.put('/escalation-rules/:id', auth, async (req, reply) => {
+    if (!['admin', 'supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { name, idle_minutes, condition_type, target_role, enabled } = req.body;
+    const { rows } = await query(
+      'UPDATE escalation_rules SET name=COALESCE($1,name), idle_minutes=COALESCE($2,idle_minutes), condition_type=COALESCE($3,condition_type), target_role=COALESCE($4,target_role), enabled=COALESCE($5,enabled) WHERE id=$6 RETURNING *',
+      [name, idle_minutes ? parseInt(idle_minutes) : null, condition_type, target_role, enabled !== undefined ? enabled : null, req.params.id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Regra não encontrada' });
+    return rows[0];
+  });
+
+  fastify.delete('/escalation-rules/:id', auth, async (req, reply) => {
+    if (!['admin', 'supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    await query('DELETE FROM escalation_rules WHERE id=$1', [req.params.id]);
+    return { success: true };
   });
 
 }

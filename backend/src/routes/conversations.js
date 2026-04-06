@@ -28,6 +28,7 @@ import { query, pool, withTransaction } from '../database.js';
 import { cached, invalidate } from '../redis.js';
 import { deliverWebhook } from '../jobs/webhookDelivery.js';
 import { notifyConversationAssigned } from '../notifications/email.js';
+import { sendEmailNotification } from '../notifications/emailNotifications.js';
 
 export default async function conversationRoutes(fastify) {
   const auth = { preHandler: fastify.authenticate };
@@ -312,6 +313,10 @@ export default async function conversationRoutes(fastify) {
         contactName,
         conversationId: req.params.id,
       }).catch(err => console.error('notifyConversationAssigned failed:', err.message));
+      sendEmailNotification(req.body.assigned_to, 'new_conversation', {
+        contactName,
+        conversationId: req.params.id,
+      }).catch(() => {});
     }
 
     // CSAT: send rating request when conversation closes with awaiting_csat=true
@@ -796,5 +801,83 @@ ${'─'.repeat(60)}
     const { rows } = await query('SELECT id, status, sent_count, failed_count, total_contacts, started_at, completed_at FROM campaigns WHERE id=$1', [req.params.id]);
     if (!rows[0]) return reply.code(404).send({ error: 'Not found' });
     return rows[0];
+  });
+
+  // ── Video Call Link ───────────────────────────────────────────────────────
+  fastify.post('/conversations/:id/video-call-link', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const convId = req.params.id;
+
+    // Load conversation + contact phone + evolution settings
+    const { rows: convRows } = await query(`
+      SELECT c.id, c.connection_name, ct.phone, ct.name as contact_name,
+             s.evolution_url, s.evolution_key
+      FROM conversations c
+      JOIN contacts ct ON ct.id = c.contact_id
+      LEFT JOIN settings s ON s.id = 1
+      WHERE c.id = $1
+    `, [convId]);
+
+    if (!convRows[0]) return reply.status(404).send({ error: 'Conversa não encontrada' });
+    const conv = convRows[0];
+
+    // Generate room name
+    const timestamp = Date.now();
+    const roomName = `msxcrm-${convId.replace(/-/g, '').substring(0, 8)}-${timestamp}`;
+
+    let videoLink;
+    if (process.env.GOOGLE_MEET_API_KEY) {
+      // Google Meet via API (if key configured)
+      try {
+        const gmRes = await fetch('https://meet.googleapis.com/v2/spaces', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.GOOGLE_MEET_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({}),
+        });
+        if (gmRes.ok) {
+          const gmData = await gmRes.json();
+          videoLink = gmData.meetingUri || `https://meet.google.com/${roomName}`;
+        } else {
+          videoLink = `https://meet.jit.si/${roomName}`;
+        }
+      } catch {
+        videoLink = `https://meet.jit.si/${roomName}`;
+      }
+    } else {
+      videoLink = `https://meet.jit.si/${roomName}`;
+    }
+
+    // Save link on conversation
+    await query(
+      'UPDATE conversations SET video_call_link=$1, updated_at=NOW() WHERE id=$2',
+      [videoLink, convId]
+    ).catch(() => {});
+
+    // Send WhatsApp message
+    const messageText = `📹 Link para videochamada: ${videoLink}`;
+
+    if (conv.evolution_url && conv.connection_name && conv.phone) {
+      try {
+        await fetch(`${conv.evolution_url}/message/sendText/${conv.connection_name}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': conv.evolution_key },
+          body: JSON.stringify({ number: conv.phone, text: messageText }),
+        });
+      } catch (e) {
+        console.error('Video call: failed to send WhatsApp message', e.message);
+      }
+    }
+
+    // Save message to DB
+    await query(
+      'INSERT INTO messages (conversation_id, content, direction, type) VALUES ($1,$2,$3,$4)',
+      [convId, messageText, 'outbound', 'text']
+    ).catch(() => {});
+
+    await query('UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1', [convId]).catch(() => {});
+
+    return { video_link: videoLink, room: roomName };
   });
 }

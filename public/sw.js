@@ -1,7 +1,19 @@
-const CACHE_NAME = 'msx-crm-v8'
+const CACHE_NAME = 'msx-crm-v9'
+const OFFLINE_URL = '/offline.html'
+
+// Assets estáticos a pré-cachear na instalação
+const PRECACHE_ASSETS = [
+  '/',
+  '/offline.html',
+  '/manifest.json',
+  '/favicon.ico',
+]
 
 self.addEventListener('install', e => {
   self.skipWaiting()
+  e.waitUntil(
+    caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE_ASSETS).catch(() => {}))
+  )
 })
 
 self.addEventListener('activate', e => {
@@ -35,23 +47,65 @@ self.addEventListener('fetch', e => {
 
   const url = new URL(e.request.url)
 
-  // Nunca cachear HTML — sempre buscar da rede
-  if (url.pathname === '/' || url.pathname.endsWith('.html')) {
-    e.respondWith(fetch(e.request))
+  // Nunca cachear HTML de navegação — sempre buscar da rede, fallback offline
+  if (e.request.mode === 'navigate') {
+    e.respondWith(
+      fetch(e.request).catch(() =>
+        caches.match(OFFLINE_URL).then(r => r || new Response('Offline', { status: 503 }))
+      )
+    )
     return
   }
 
-  // Não interceptar chamadas de API externas
+  // Não interceptar chamadas de domínios externos
   if (url.hostname !== self.location.hostname) return
 
-  // Assets com hash: cache first
+  // Network-first para chamadas de API (/api/* ou endpoints conhecidos)
+  if (url.pathname.startsWith('/api/') ||
+      url.pathname.startsWith('/auth/') ||
+      url.pathname.startsWith('/conversations') ||
+      url.pathname.startsWith('/messages') ||
+      url.pathname.startsWith('/contacts') ||
+      url.pathname.startsWith('/webhook')) {
+    e.respondWith(
+      fetch(e.request)
+        .then(res => res)
+        .catch(() => new Response(JSON.stringify({ error: 'Sem conexão' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+    )
+    return
+  }
+
+  // Cache-first para assets estáticos (js, css, imagens, fontes)
+  if (url.pathname.match(/\.(js|css|png|jpg|jpeg|svg|gif|webp|woff2?|ttf|eot|ico)$/)) {
+    e.respondWith(
+      caches.match(e.request).then(cached => {
+        if (cached) return cached
+        return fetch(e.request).then(res => {
+          if (res.ok) {
+            const clone = res.clone()
+            caches.open(CACHE_NAME).then(c => c.put(e.request, clone))
+          }
+          return res
+        }).catch(() => cached || new Response('', { status: 404 }))
+      })
+    )
+    return
+  }
+
+  // Demais requisições: stale-while-revalidate
   e.respondWith(
-    caches.match(e.request).then(cached => cached || fetch(e.request).then(res => {
-      if (res.ok && url.pathname.match(/\.(js|css|png|jpg|svg|woff2?)$/)) {
-        const clone = res.clone()
-        caches.open(CACHE_NAME).then(c => c.put(e.request, clone))
-      }
-      return res
-    }))
+    caches.match(e.request).then(cached => {
+      const fetchPromise = fetch(e.request).then(res => {
+        if (res.ok) {
+          const clone = res.clone()
+          caches.open(CACHE_NAME).then(c => c.put(e.request, clone))
+        }
+        return res
+      })
+      return cached || fetchPromise
+    })
   )
 })

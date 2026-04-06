@@ -126,6 +126,12 @@ const PortalLogin = ({ portal, title, subtitle, showRegisterLink = false }: Port
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Entrar
           </Button>
+
+          <div className="text-center">
+            <Link to="/forgot-password" className="text-sm text-muted-foreground hover:text-foreground hover:underline">
+              Esqueceu sua senha?
+            </Link>
+          </div>
         </form>
       </div>
 

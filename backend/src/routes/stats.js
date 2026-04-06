@@ -885,6 +885,58 @@ export default async function statsRoutes(fastify) {
     return { summary: retention[0], cohort, topReturning };
   });
 
+  // ── Contact Growth Report ─────────────────────────────────────────────────
+  fastify.get('/stats/contact-growth', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const period = parseInt(req.query.period || '30', 10);
+    const groupBy = req.query.group_by || 'day';
+
+    const validTrunc = { day: 'day', week: 'week', month: 'month' };
+    const truncFunc = validTrunc[groupBy] || 'day';
+
+    const { rows: growth } = await query(
+      "SELECT DATE_TRUNC('" + truncFunc + "', created_at) as date, COUNT(*) as new_contacts FROM contacts WHERE created_at >= NOW() - ($1 || ' days')::interval GROUP BY 1 ORDER BY 1 ASC",
+      [period]
+    );
+
+    const { rows: baseline } = await query(
+      "SELECT COUNT(*) as total FROM contacts WHERE created_at < NOW() - ($1 || ' days')::interval",
+      [period]
+    );
+    const baseCount = parseInt(baseline[0] ? baseline[0].total : '0', 10);
+
+    let running = baseCount;
+    const growthData = growth.map(function(row) {
+      running += parseInt(row.new_contacts, 10);
+      return { date: row.date, new_contacts: parseInt(row.new_contacts, 10), total_contacts: running };
+    });
+
+    const { rows: totalRow } = await query('SELECT COUNT(*) as total FROM contacts');
+    const totalContacts = parseInt(totalRow[0].total, 10);
+    const newInPeriod = growthData.reduce(function(s, r) { return s + r.new_contacts; }, 0);
+
+    const { rows: prevPeriod } = await query(
+      "SELECT COUNT(*) as total FROM contacts WHERE created_at >= NOW() - ($1 || ' days')::interval AND created_at < NOW() - ($2 || ' days')::interval",
+      [period * 2, period]
+    );
+    const prevCount = parseInt(prevPeriod[0] ? prevPeriod[0].total : '0', 10);
+    const growthRate = prevCount > 0 ? parseFloat(((newInPeriod - prevCount) / prevCount * 100).toFixed(1)) : 0;
+
+    const peak = growthData.reduce(function(best, r) { return (!best || r.new_contacts > best.new_contacts) ? r : best; }, null);
+
+    return {
+      data: growthData,
+      summary: {
+        total_contacts: totalContacts,
+        new_in_period: newInPeriod,
+        growth_rate: growthRate,
+        previous_period_count: prevCount,
+        peak: peak ? { date: peak.date, new_contacts: peak.new_contacts } : null,
+        period: period,
+        group_by: groupBy,
+      },
+    };
+  });
+
   // ── Gamification / Agent Ranking ─────────────────────────────────────────
   fastify.get('/stats/gamification', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const { rows } = await query(`
@@ -915,5 +967,89 @@ export default async function statsRoutes(fastify) {
     });
 
     return withBadges;
+  });
+
+  // ── Word Cloud ────────────────────────────────────────────────────────────
+  fastify.get('/stats/word-cloud', auth, async (req) => {
+    const { days = '30', channel = '', direction = 'inbound' } = req.query;
+    const daysInt = Math.min(Math.max(parseInt(days) || 30, 1), 365);
+
+    const stopwords = new Set([
+      'a','o','e','de','da','do','em','um','uma','para','por','com','que','se',
+      'na','no','ao','os','as','me','te','você','voce','não','nao','sim','é','e',
+      'são','sao','foi','ser','ter','mas','mas','ou','já','ja','também','tambem',
+      'bem','mais','muito','sua','seu','suas','seus','ela','ele','eles','elas',
+      'nos','num','numa','dum','duma','tudo','isso','este','esta','esse','essa',
+      'aqui','ali','lá','la','quando','como','onde','pelo','pela','pelos','pelas',
+      'desde','até','ate','sobre','entre','então','entao','depois','antes',
+      'agora','hoje','ontem','teu','tua','meu','minha','nosso','nossa','vou',
+      'vai','tem','têm','tem','estou','está','esta','estão','estar','faz','fazer',
+      'diz','disse','falar','pode','podia','vejo','ver','sei','sabe','sabia','boa',
+      'bom','obrigado','obrigada','ok','sim','não','tá','ta','né','ne','aí','ai',
+    ]);
+
+    const params = [daysInt];
+    let dirCond = '';
+    if (direction === 'inbound') dirCond = "AND m.sender_type = 'contact'";
+    else if (direction === 'outbound') dirCond = "AND m.sender_type IN ('agent','bot')";
+
+    let chanCond = '';
+    if (channel) { params.push(channel); chanCond = `AND c.connection_name = $${params.length}`; }
+
+    const { rows } = await query(`
+      SELECT m.content FROM messages m
+      JOIN conversations c ON c.id = m.conversation_id
+      WHERE m.created_at > NOW() - ($1 || ' days')::INTERVAL
+        AND m.content IS NOT NULL
+        AND m.sender_type != 'system'
+        ${dirCond}
+        ${chanCond}
+      LIMIT 50000
+    `, params);
+
+    const wordCount = {};
+    for (const row of rows) {
+      const words = (row.content || '').toLowerCase()
+        .replace(/[^a-záàâãéèêíïóôõöúüçñ\s]/gi, ' ')
+        .split(/\s+/);
+      for (const w of words) {
+        if (w.length < 3) continue;
+        if (stopwords.has(w)) continue;
+        wordCount[w] = (wordCount[w] || 0) + 1;
+      }
+    }
+
+    const result = Object.entries(wordCount)
+      .filter(([, count]) => count >= 3)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 100)
+      .map(([word, count]) => ({ word, count }));
+
+    return result;
+  });
+
+  // ── Public Agent Profile ──────────────────────────────────────────────────
+  fastify.get('/public/agent/:id', async (req, reply) => {
+    const { rows } = await query(`
+      SELECT
+        p.id, p.full_name, p.name, p.avatar_url, p.role, p.bio,
+        COUNT(c.id) FILTER (WHERE c.status = 'closed') AS total_conversations_closed,
+        ROUND(AVG(c.csat_score) FILTER (WHERE c.status = 'closed' AND c.csat_score IS NOT NULL)::numeric, 2) AS average_csat
+      FROM profiles p
+      LEFT JOIN conversations c ON c.assigned_to = p.id
+      WHERE p.id = $1
+      GROUP BY p.id
+    `, [req.params.id]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Agente não encontrado' });
+    const agent = rows[0];
+    return {
+      id: agent.id,
+      full_name: agent.full_name || agent.name,
+      avatar_url: agent.avatar_url,
+      role: agent.role,
+      bio: agent.bio,
+      average_csat: agent.average_csat ? parseFloat(agent.average_csat) : null,
+      total_conversations_closed: parseInt(agent.total_conversations_closed) || 0,
+    };
   });
 }

@@ -1,15 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { usePlatformName } from "@/hooks/usePlatformName";
-import { db } from "@/lib/db";
+import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MessageCircle, Loader2, Lock, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 
 const ResetPassword = () => {
   const { platformName } = usePlatformName();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get("token") || "";
+
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -17,13 +20,18 @@ const ResetPassword = () => {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const hash = window.location.hash;
-    if (!hash.includes("type=recovery")) {
-      toast.error("Link de recuperação inválido");
-      navigate("/login");
-    }
-  }, [navigate]);
+  if (!token) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-primary p-4">
+        <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-xl text-center">
+          <p className="text-red-600 font-semibold">Link de recuperação inválido ou expirado.</p>
+          <Link to="/forgot-password" className="mt-4 inline-block text-primary hover:underline">
+            Solicitar novo link
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,16 +45,11 @@ const ResetPassword = () => {
     }
     setLoading(true);
     try {
-      const { error } = await db.auth.updateUser({ password });
-      if (error) {
-        toast.error(error.message);
-      } else {
-        toast.success("Senha atualizada com sucesso!");
-        navigate("/");
-      }
-    } catch (err) {
-      console.error("Reset password error:", err);
-      toast.error("Erro inesperado ao redefinir senha");
+      await api.post("/auth/reset-password", { token, password });
+      toast.success("Senha redefinida com sucesso!");
+      navigate("/login");
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error || "Erro ao redefinir senha. O link pode ter expirado.");
     } finally {
       setLoading(false);
     }

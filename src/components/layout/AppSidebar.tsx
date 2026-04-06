@@ -78,11 +78,13 @@ import {
   X,
   FormInput,
   MessageSquarePlus,
+  Cloud,
   Timer,
   Shield,
   Grid3x3,
   Repeat,
   Trophy,
+  Filter,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -151,6 +153,7 @@ const userNavSections: NavSection[] = [
     items: [
       { to: "/tags", icon: Tag, label: "Tags" },
       { to: "/segmentos", icon: ListFilter, label: "Segmentos" },
+      { to: "/segmentos-dinamicos", icon: Filter, label: "Segmentação Dinâmica" },
       { to: "/respostas-rapidas", icon: Zap, label: "Respostas Rápidas" },
       { to: "/chat-interno", icon: MessagesSquare, label: "Chat Interno" },
       { to: "/central-ajuda", icon: HelpCircle, label: "Central de Ajuda" },
@@ -203,6 +206,8 @@ const userNavSections: NavSection[] = [
       { to: "/heatmap-report", icon: Grid3x3, label: "Mapa de Calor" },
       { to: "/retention-report", icon: Repeat, label: "Retenção de Clientes" },
       { to: "/gamification", icon: Trophy, label: "Ranking" },
+      { to: "/word-cloud", icon: Cloud, label: "Nuvem de Palavras" },
+      { to: "/crescimento-contatos", icon: TrendingUp, label: "Crescimento de Contatos" },
     ],
   },
   {

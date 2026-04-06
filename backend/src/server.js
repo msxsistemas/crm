@@ -58,6 +58,7 @@ import internalChatRoutes from './routes/internal-chat.js';
 import statsRoutes from './routes/stats.js';
 import metaWhatsAppRoutes from './routes/meta-whatsapp.js';
 import inboundWebhookRoutes from './routes/inbound-webhooks.js';
+import emailNotificationSettingsRoutes from './routes/email-notification-settings.js';
 import { startMessageWorker } from './jobs/messageQueue.js';
 import { startSchedulesWorker } from './jobs/schedulesWorker.js';
 import { deliverWebhook } from './jobs/webhookDelivery.js';
@@ -173,6 +174,7 @@ await fastify.register(statsRoutes);
 await fastify.register(import('./routes/pipeline.js'));
 await fastify.register(import('./routes/webhooks-out.js'));
 await fastify.register(inboundWebhookRoutes);
+await fastify.register(emailNotificationSettingsRoutes);
 
 // 404 handler
 fastify.setNotFoundHandler((req, reply) => {
@@ -203,17 +205,28 @@ startSchedulesWorker(io);
 deliverWebhook.startWorker();
 startSLAWorker();
 
-// SLA violation check — runs every 5 minutes, emits socket event
+// SLA violation check — runs every 5 minutes, emits socket event + e-mail
 setInterval(async () => {
   try {
     const { rows } = await pool.query(`
-      SELECT c.id, c.assigned_to FROM conversations c
+      SELECT c.id, c.assigned_to, ct.name as contact_name
+      FROM conversations c
+      LEFT JOIN contacts ct ON ct.id = c.contact_id
       WHERE c.status='open' AND c.sla_deadline IS NOT NULL
       AND c.sla_deadline < NOW() AND c.sla_alerted = false
     `);
+    const { sendEmailNotification } = await import('./notifications/emailNotifications.js').catch(() => ({ sendEmailNotification: null }));
     for (const c of rows) {
       await pool.query('UPDATE conversations SET sla_alerted=true WHERE id=$1', [c.id]);
       if (io) io.emit('sla:violated', { conversation_id: c.id, assigned_to: c.assigned_to });
+      // Enviar e-mail de SLA para o agente responsável
+      if (c.assigned_to && sendEmailNotification) {
+        sendEmailNotification(c.assigned_to, 'sla_expiring', {
+          contactName: c.contact_name || 'Contato',
+          conversationId: c.id,
+          minutesLeft: 0,
+        }).catch(() => {});
+      }
     }
   } catch(e) { /* silent */ }
 }, 300000);
@@ -323,6 +336,49 @@ setInterval(async () => {
     }
   } catch(e) { /* silent */ }
 }, 3600000); // every hour
+
+// Escalation rules worker — runs every 5 minutes
+setInterval(async () => {
+  try {
+    const { rows: rules } = await pool.query("SELECT * FROM escalation_rules WHERE enabled=true");
+    if (!rules.length) return;
+
+    for (const rule of rules) {
+      // Find open conversations idle longer than idle_minutes, not yet assigned to supervisor/admin
+      const { rows: convos } = await pool.query(`
+        SELECT c.id, c.assigned_to
+        FROM conversations c
+        LEFT JOIN profiles p ON p.id = c.assigned_to
+        WHERE c.status IN ('open','in_progress')
+          AND c.last_message_at < NOW() - ($1 || ' minutes')::INTERVAL
+          AND (p.role IS NULL OR p.role NOT IN ('supervisor','admin'))
+      `, [rule.idle_minutes]);
+
+      if (!convos.length) continue;
+
+      // Find target-role agent with least open conversations
+      const { rows: supervisors } = await pool.query(`
+        SELECT p.id, COUNT(c2.id) as open_count
+        FROM profiles p
+        LEFT JOIN conversations c2 ON c2.assigned_to = p.id AND c2.status IN ('open','in_progress')
+        WHERE p.role = $1 AND p.status = 'online'
+        GROUP BY p.id ORDER BY open_count ASC LIMIT 1
+      `, [rule.target_role]);
+
+      const target = supervisors[0];
+      if (!target) continue;
+
+      for (const conv of convos) {
+        await pool.query('UPDATE conversations SET assigned_to=$1 WHERE id=$2', [target.id, conv.id]);
+        await pool.query(
+          "INSERT INTO conversation_events (conversation_id, event_type, actor_name, new_value) VALUES ($1,'escalated','Sistema (escalação automática)',$2)",
+          [conv.id, `Regra: ${rule.name} — inativo por ${rule.idle_minutes} minutos`]
+        ).catch(() => {});
+        if (io) io.emit('conversation:escalated', { conversation_id: conv.id, rule_id: rule.id, assigned_to: target.id });
+      }
+    }
+  } catch(e) { /* silent */ }
+}, 300000);
 
 // Scheduled messages job — runs every minute
 setInterval(async () => {

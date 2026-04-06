@@ -57,6 +57,7 @@ const AdminLogin = lazy(() => import("./pages/AdminLogin"));
 const ResellerLogin = lazy(() => import("./pages/ResellerLogin"));
 const Register = lazy(() => import("./pages/Register"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const Tags = lazy(() => import("./pages/Tags"));
 const Categories = lazy(() => import("./pages/Categories"));
 const QuickReplies = lazy(() => import("./pages/QuickReplies"));
@@ -121,6 +122,10 @@ const HeatmapReport = lazy(() => import("./pages/HeatmapReport"));
 const RetentionReport = lazy(() => import("./pages/RetentionReport"));
 const Gamification = lazy(() => import("./pages/Gamification"));
 const StatusPage = lazy(() => import("./pages/StatusPage"));
+const WordCloud = lazy(() => import("./pages/WordCloud"));
+const PublicAgentProfile = lazy(() => import("./pages/PublicAgentProfile"));
+const ContactSegments = lazy(() => import("./pages/ContactSegments"));
+const ContactGrowth = lazy(() => import("./pages/ContactGrowth"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -157,6 +162,7 @@ const App = () => (
                   <Route path="/revenda/login" element={<ResellerLogin />} />
                   <Route path="/register" element={<Register />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
+                  <Route path="/forgot-password" element={<ForgotPassword />} />
                   <Route
                     element={
                       <ProtectedRoute requiredRole="user">
@@ -237,6 +243,9 @@ const App = () => (
                     <Route path="/heatmap-report" element={<HeatmapReport />} />
                     <Route path="/retention-report" element={<RetentionReport />} />
                     <Route path="/gamification" element={<Gamification />} />
+                    <Route path="/word-cloud" element={<WordCloud />} />
+                    <Route path="/segmentos-dinamicos" element={<ContactSegments />} />
+                    <Route path="/crescimento-contatos" element={<ContactGrowth />} />
                   </Route>
                   <Route
                     element={
@@ -269,6 +278,7 @@ const App = () => (
                   </Route>
                   <Route path="/form/:slug" element={<PublicContactForm />} />
                   <Route path="/f/:slug" element={<PublicCaptureForm />} />
+                  <Route path="/agente/:id" element={<PublicAgentProfile />} />
                   <Route path="/status" element={<StatusPage />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>

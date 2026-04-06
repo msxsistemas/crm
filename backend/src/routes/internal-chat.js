@@ -1,4 +1,5 @@
 import { query, withTransaction } from '../database.js';
+import { sendEmailNotification } from '../notifications/emailNotifications.js';
 
 export default async function internalChatRoutes(fastify) {
   const auth = { preHandler: fastify.authenticate };
@@ -63,6 +64,32 @@ export default async function internalChatRoutes(fastify) {
       return m;
     });
     if (fastify.io) fastify.io.emit(`chat:${conversation_id}`, msg);
+
+    // Detectar menções @nome e enviar notificação por e-mail
+    if (text && text.includes('@')) {
+      const mentionPattern = /@([a-zA-ZÀ-ÿ0-9_.\- ]+)/g;
+      const mentions = [];
+      let match;
+      while ((match = mentionPattern.exec(text)) !== null) {
+        mentions.push(match[1].trim());
+      }
+      if (mentions.length > 0) {
+        query(
+          `SELECT id FROM profiles WHERE name ILIKE ANY($1::text[])`,
+          [mentions]
+        ).then(({ rows: mentionedUsers }) => {
+          for (const u of mentionedUsers) {
+            if (u.id === req.user.id) continue; // não notificar a si mesmo
+            sendEmailNotification(u.id, 'mention', {
+              mentionedBy: req.user.name || 'Agente',
+              conversationId: conversation_id,
+              messagePreview: text.substring(0, 200),
+            }).catch(() => {});
+          }
+        }).catch(() => {});
+      }
+    }
+
     return reply.status(201).send(msg);
   });
 

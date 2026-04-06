@@ -3,7 +3,7 @@ import {
   Settings as SettingsIcon, User, Lock, Eye, EyeOff, Save, Tag, Search, Plus,
   Building2, Zap, CheckCircle, Clock, Users2, X, Info, Pencil,
   Shuffle, UserPlus, Building, Camera, Loader2, Globe, Play, XCircle, RefreshCw, Trash2,
-  Key, Copy, ChevronDown, ChevronUp, ShieldAlert, ShieldCheck, Monitor, TrendingUp, Star, Cake, Ban
+  Key, Copy, ChevronDown, ChevronUp, ShieldAlert, ShieldCheck, Monitor, TrendingUp, Star, Cake, Ban, Bell
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ const WebhooksTabLazy = lazy(() => import('./settings/WebhooksTab'));
 const ApiTokensTabLazy = lazy(() => import('./settings/ApiTokensTab'));
 const LeadScoringTabLazy = lazy(() => import('./settings/LeadScoringTab'));
 const ApiKeysTabLazy = lazy(() => import('./settings/ApiKeysTab'));
+const EmailNotificationsTabLazy = lazy(() => import('./settings/EmailNotificationsTab'));
 
 const TabFallback = () => (
   <div className="flex items-center justify-center py-12">
@@ -314,6 +315,7 @@ const TwoFactorSection = ({ userId }: { userId: string | null }) => {
 const GeralTab = () => {
   const { user, signOut } = useAuth();
   const [fullName, setFullName] = useState("");
+  const [bio, setBio] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -335,6 +337,7 @@ const GeralTab = () => {
       api.get<any>('/auth/me').then(data => {
         if (data?.name || data?.full_name) setFullName(data.name || data.full_name);
         if (data?.avatar_url) setAvatarUrl(data.avatar_url);
+        if (data?.bio !== undefined && data?.bio !== null) setBio(data.bio);
         if (data?.signature) setSignature(data.signature);
         if (data?.signature_html) {
           setSignatureHtml(data.signature_html);
@@ -375,7 +378,7 @@ const GeralTab = () => {
     setSaving(true);
     try {
       const currentHtml = signatureEditorRef.current?.innerHTML || signatureHtml;
-      await api.patch('/auth/me', { name: fullName, signature, signature_html: currentHtml, signature_enabled: signatureEnabled });
+      await api.patch('/auth/me', { name: fullName, bio, signature, signature_html: currentHtml, signature_enabled: signatureEnabled });
       toast.success("Perfil atualizado!");
     } catch {
       toast.error("Erro ao salvar perfil");
@@ -456,6 +459,18 @@ const GeralTab = () => {
               <label className="text-sm font-medium text-foreground">E-mail</label>
               <Input value={user?.email || ""} disabled />
               <p className="text-xs text-muted-foreground mt-1">O e-mail não pode ser alterado</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">Bio / Apresentação</label>
+              <Textarea
+                value={bio}
+                onChange={e => setBio(e.target.value)}
+                placeholder="Escreva uma breve apresentação sobre você..."
+                rows={2}
+                className="mt-1 text-sm"
+                maxLength={300}
+              />
+              <p className="text-xs text-muted-foreground mt-1">Exibida no seu perfil público ({bio.length}/300)</p>
             </div>
             <div>
               <label className="text-sm font-medium text-foreground">Assinatura de texto simples</label>
@@ -5491,6 +5506,156 @@ const IntegracaoTab = () => {
   );
 };
 
+// ─── Escalation Rules Tab ────────────────────────────────────────────────────
+const EscalationRulesTab = () => {
+  const { user } = useAuth();
+  const [rules, setRules] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ name: "", idle_minutes: 30, condition_type: "idle", target_role: "supervisor", enabled: true });
+
+  const canEdit = user && ['admin', 'supervisor'].includes((user as any).role);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await api.get<any[]>('/escalation-rules');
+      setRules(Array.isArray(data) ? data : []);
+    } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const openCreate = () => {
+    setEditing(null);
+    setForm({ name: "", idle_minutes: 30, condition_type: "idle", target_role: "supervisor", enabled: true });
+    setModalOpen(true);
+  };
+
+  const openEdit = (rule: any) => {
+    setEditing(rule);
+    setForm({ name: rule.name, idle_minutes: rule.idle_minutes, condition_type: rule.condition_type, target_role: rule.target_role, enabled: rule.enabled });
+    setModalOpen(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.name.trim()) { toast.error("Nome obrigatório"); return; }
+    setSaving(true);
+    try {
+      if (editing) {
+        await api.put(`/escalation-rules/${editing.id}`, form);
+        toast.success("Regra atualizada");
+      } else {
+        await api.post('/escalation-rules', form);
+        toast.success("Regra criada");
+      }
+      setModalOpen(false);
+      load();
+    } catch { toast.error("Erro ao salvar regra"); }
+    setSaving(false);
+  };
+
+  const handleToggle = async (rule: any) => {
+    try {
+      await api.put(`/escalation-rules/${rule.id}`, { enabled: !rule.enabled });
+      setRules(prev => prev.map(r => r.id === rule.id ? { ...r, enabled: !r.enabled } : r));
+    } catch { toast.error("Erro ao atualizar"); }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Excluir esta regra?")) return;
+    try {
+      await api.delete(`/escalation-rules/${id}`);
+      setRules(prev => prev.filter(r => r.id !== id));
+      toast.success("Regra excluída");
+    } catch { toast.error("Erro ao excluir"); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-foreground">Regras de Escalação Automática</h3>
+          <p className="text-sm text-muted-foreground">Define quando conversas inativas são encaminhadas para supervisores</p>
+        </div>
+        {canEdit && (
+          <Button size="sm" className="gap-1.5" onClick={openCreate}>
+            <Plus className="h-4 w-4" /> Nova Regra
+          </Button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+      ) : rules.length === 0 ? (
+        <Card className="p-8 text-center text-muted-foreground text-sm">Nenhuma regra cadastrada</Card>
+      ) : (
+        <div className="space-y-2">
+          {rules.map(rule => (
+            <Card key={rule.id} className="p-4 flex items-center gap-4">
+              <Switch checked={rule.enabled} onCheckedChange={() => canEdit && handleToggle(rule)} disabled={!canEdit} />
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm text-foreground">{rule.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  Inativo por <strong>{rule.idle_minutes} min</strong> → encaminhar para <strong>{rule.target_role}</strong>
+                </p>
+              </div>
+              {canEdit && (
+                <div className="flex gap-1">
+                  <Button size="sm" variant="ghost" onClick={() => openEdit(rule)}><Pencil className="h-3.5 w-3.5" /></Button>
+                  <Button size="sm" variant="ghost" className="text-destructive" onClick={() => handleDelete(rule.id)}><X className="h-3.5 w-3.5" /></Button>
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{editing ? "Editar Regra" : "Nova Regra de Escalação"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <label className="text-sm font-medium">Nome da Regra</label>
+              <Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="Ex: Escalar após 30min inativo" className="mt-1" />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Tempo de inatividade (minutos)</label>
+              <Input type="number" min={1} value={form.idle_minutes} onChange={e => setForm(p => ({ ...p, idle_minutes: parseInt(e.target.value) || 30 }))} className="mt-1" />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Encaminhar para</label>
+              <Select value={form.target_role} onValueChange={v => setForm(p => ({ ...p, target_role: v }))}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="supervisor">Supervisor</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={form.enabled} onCheckedChange={v => setForm(p => ({ ...p, enabled: v }))} />
+              <span className="text-sm">Regra ativa</span>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setModalOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("geral");
 
@@ -5534,6 +5699,8 @@ const Settings = () => {
             <TabsTrigger value="sla_categoria" className="gap-1.5"><Clock className="h-3.5 w-3.5" /> SLA por Categoria</TabsTrigger>
             <TabsTrigger value="integracoes" className="gap-1.5"><Globe className="h-3.5 w-3.5" /> Integrações</TabsTrigger>
             <TabsTrigger value="organizacao" className="gap-1.5"><Building className="h-3.5 w-3.5" /> Organização</TabsTrigger>
+            <TabsTrigger value="escalacao" className="gap-1.5"><ShieldAlert className="h-3.5 w-3.5" /> Escalação</TabsTrigger>
+            <TabsTrigger value="notificacoes_email" className="gap-1.5"><Bell className="h-3.5 w-3.5" /> Notificações E-mail</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -5567,6 +5734,8 @@ const Settings = () => {
           <TabsContent value="sla_categoria"><SlaCategoryTab /></TabsContent>
           <TabsContent value="integracoes"><IntegracaoTab /></TabsContent>
           <TabsContent value="organizacao"><OrganizacaoTab /></TabsContent>
+          <TabsContent value="escalacao"><EscalationRulesTab /></TabsContent>
+          <TabsContent value="notificacoes_email"><Suspense fallback={<TabFallback />}><EmailNotificationsTabLazy /></Suspense></TabsContent>
         </Tabs>
       </div>
     </div>

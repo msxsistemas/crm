@@ -12,7 +12,7 @@ import {
   Trash2, Copy, Forward, Reply, Pencil, Check, AlertCircle, Bot, Clock, Target, Sparkles,
   LayoutTemplate, Tag, History, Ban, LayoutList, List, GitMerge, ShoppingBag, Download,
   CheckSquare, Users, Languages, UserCheck, Archive, LayoutGrid, AlignJustify, CreditCard,
-  Pin, PinOff, Eye, EyeOff, Bold, Italic, Code,
+  Pin, PinOff, Eye, EyeOff, Bold, Italic, Code, Video,
 } from "lucide-react";
 import { useFollowupReminders } from "@/hooks/useFollowupReminders";
 import FollowupDialog from "@/components/followup/FollowupDialog";
@@ -533,6 +533,25 @@ const Inbox = () => {
   const [copilotMessages, setCopilotMessages] = useState<{role: 'user'|'ai', text: string}[]>([]);
   const [copilotInput, setCopilotInput] = useState('');
   const [copilotLoading, setCopilotLoading] = useState(false);
+
+  // Video call link state
+  const [videoCallDialogOpen, setVideoCallDialogOpen] = useState(false);
+  const [videoCallLoading, setVideoCallLoading] = useState(false);
+  const [videoCallLink, setVideoCallLink] = useState<string | null>(null);
+
+  const handleGenerateVideoCall = async () => {
+    if (!selectedConvo) return;
+    setVideoCallLoading(true);
+    try {
+      const result = await api.post(`/conversations/${selectedConvo.id}/video-call-link`, {}) as { video_link: string };
+      setVideoCallLink(result.video_link);
+      toast.success("Link enviado!");
+    } catch {
+      toast.error("Erro ao gerar link de videochamada");
+    } finally {
+      setVideoCallLoading(false);
+    }
+  };
 
   const handleAvatarError = useCallback((contactId: string) => {
     setAvatarErrorContacts((prev) => {
@@ -3886,6 +3905,16 @@ const Inbox = () => {
                       <GitMerge className="h-3.5 w-3.5" />
                       Mesclar
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="gap-1.5 h-8 rounded-full px-3 text-xs text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/20"
+                      onClick={() => { setVideoCallLink(null); setVideoCallDialogOpen(true); }}
+                      title="Gerar link de videochamada"
+                    >
+                      <Video className="h-3.5 w-3.5" />
+                      Videochamada
+                    </Button>
                   </>
                 ) : null}
                 <Button
@@ -6125,6 +6154,55 @@ const Inbox = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Video Call Link Dialog */}
+      <Dialog open={videoCallDialogOpen} onOpenChange={(open) => { setVideoCallDialogOpen(open); if (!open) setVideoCallLink(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Video className="h-5 w-5 text-blue-500" /> Videochamada
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {videoCallLink ? (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">Link gerado e enviado para o contato via WhatsApp.</p>
+                <div className="rounded-md bg-muted/50 border border-border p-3 flex items-center gap-2">
+                  <p className="text-xs text-primary break-all font-mono flex-1">{videoCallLink}</p>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(videoCallLink); toast.success("Link copiado!"); }}
+                    className="shrink-0 p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                    title="Copiar link"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </button>
+                </div>
+                <a href={videoCallLink} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">
+                  Abrir videochamada →
+                </a>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Será gerado um link Jitsi Meet e enviado ao contato via WhatsApp. Deseja prosseguir?
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVideoCallDialogOpen(false)}>
+              {videoCallLink ? 'Fechar' : 'Cancelar'}
+            </Button>
+            {!videoCallLink && (
+              <Button
+                onClick={handleGenerateVideoCall}
+                disabled={videoCallLoading}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {videoCallLoading ? 'Gerando...' : 'Gerar e Enviar Link'}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       </div>
     </div>
   );
