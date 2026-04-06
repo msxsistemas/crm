@@ -796,6 +796,8 @@ const HorariosTab = () => {
   const [csatEnabled, setCsatEnabled] = useState(false);
   const [schedule, setSchedule] = useState(DEFAULT_DAYS);
   const [saving, setSaving] = useState(false);
+  const [autoAssignEnabled, setAutoAssignEnabled] = useState(false);
+  const [autoCloseDays, setAutoCloseDays] = useState(0);
 
   useEffect(() => {
     api.get<any>('/settings').then(data => {
@@ -803,6 +805,8 @@ const HorariosTab = () => {
       if (data.office_hours_off_message) setOffMessage(data.office_hours_off_message);
       if (data.office_hours_schedule?.length) setSchedule(data.office_hours_schedule);
       if (data.auto_csat_enabled !== undefined) setCsatEnabled(data.auto_csat_enabled);
+      if (data.auto_assign_enabled !== undefined) setAutoAssignEnabled(data.auto_assign_enabled);
+      if (data.auto_close_days !== undefined) setAutoCloseDays(parseInt(data.auto_close_days) || 0);
     }).catch(() => {});
   }, []);
 
@@ -824,6 +828,8 @@ const HorariosTab = () => {
         office_hours_off_message: offMessage,
         office_hours_schedule: schedule,
         auto_csat_enabled: csatEnabled,
+        auto_assign_enabled: autoAssignEnabled,
+        auto_close_days: autoCloseDays,
       });
       toast.success("Configurações salvas!");
     } catch {
@@ -873,6 +879,47 @@ const HorariosTab = () => {
           </div>
         )}
       </Card>
+
+      {/* Auto-assign round-robin */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center"><UserPlus className="h-5 w-5 text-primary" /></div>
+            <div>
+              <p className="font-semibold text-foreground">Auto-atribuição Round-Robin</p>
+              <p className="text-sm text-muted-foreground">Distribui novas conversas automaticamente entre agentes online</p>
+            </div>
+          </div>
+          <Switch checked={autoAssignEnabled} onCheckedChange={setAutoAssignEnabled} />
+        </div>
+      </Card>
+
+      {/* Auto-close inactive */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center"><Clock className="h-5 w-5 text-primary" /></div>
+            <div>
+              <p className="font-semibold text-foreground">Fechar Conversas Inativas</p>
+              <p className="text-sm text-muted-foreground">Fecha automaticamente conversas sem mensagem por N dias (0 = desativado)</p>
+            </div>
+          </div>
+          <input
+            type="number"
+            min={0}
+            max={365}
+            value={autoCloseDays}
+            onChange={e => setAutoCloseDays(parseInt(e.target.value) || 0)}
+            className="w-20 border border-border rounded-md px-2 py-1 text-sm text-center bg-background"
+          />
+        </div>
+      </Card>
+
+      <div className="flex justify-end">
+        <Button className="gap-2" onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Salvar Automação
+        </Button>
+      </div>
 
       {enabled && (
         <>

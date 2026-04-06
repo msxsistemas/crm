@@ -8,7 +8,7 @@ import {
   Phone, CheckCircle, Users, MessageSquare, BarChart3,
   Calendar as CalendarIcon, CalendarDays, CalendarRange, ChevronDown,
   User, Mail, MapPin, Info, Settings, Cake, Filter, Smartphone,
-  Layers, Calculator, Eye, RefreshCw, Tag, Clock
+  Layers, Calculator, Eye, RefreshCw, Tag, Clock, GitMerge
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -198,6 +198,31 @@ const Contacts = () => {
   // Duplicate detection
   const [duplicateWarning, setDuplicateWarning] = useState<{ id: string; name: string | null } | null>(null);
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
+  const [duplicatesDialog, setDuplicatesDialog] = useState(false);
+  const [duplicateGroups, setDuplicateGroups] = useState<{ phone: string; count: number; ids: string[]; names: (string | null)[] }[]>([]);
+  const [loadingDuplicates, setLoadingDuplicates] = useState(false);
+  const [mergingGroup, setMergingGroup] = useState<string | null>(null);
+
+  const openDuplicatesDialog = async () => {
+    setDuplicatesDialog(true);
+    setLoadingDuplicates(true);
+    try {
+      const data = await api.get<any[]>('/contacts/duplicates');
+      setDuplicateGroups(data || []);
+    } catch { toast.error("Erro ao buscar duplicados"); }
+    finally { setLoadingDuplicates(false); }
+  };
+
+  const handleMerge = async (keepId: string, mergeIds: string[], phone: string) => {
+    setMergingGroup(phone);
+    try {
+      await api.post('/contacts/merge', { keep_id: keepId, merge_ids: mergeIds });
+      toast.success(`${mergeIds.length} contato(s) mesclado(s)`);
+      setDuplicateGroups(prev => prev.filter(g => g.phone !== phone));
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+    } catch { toast.error("Erro ao mesclar contatos"); }
+    finally { setMergingGroup(null); }
+  };
 
   // CSV Import dialog
   type CsvImportStep = "upload" | "mapping" | "preview" | "result";
@@ -1131,6 +1156,9 @@ const Contacts = () => {
                     } catch (e: any) { toast.error(e.message || "Erro ao sincronizar"); }
                   }}>
                     <User className="h-4 w-4 text-blue-500" /> Sincronizar fotos WhatsApp
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="gap-2" onClick={openDuplicatesDialog}>
+                    <GitMerge className="h-4 w-4 text-orange-500" /> Detectar duplicados
                   </DropdownMenuItem>
                   {can("export_contacts") && (
                     <DropdownMenuItem className="gap-2" onClick={handleExportCSV}>
@@ -2282,6 +2310,51 @@ const Contacts = () => {
           <DialogFooter>
             <p className="text-xs text-muted-foreground flex-1">{previewContacts.length} contatos</p>
             <Button variant="outline" onClick={() => setPreviewSegmentOpen(false)}>Fechar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Duplicate Contacts Dialog */}
+      <Dialog open={duplicatesDialog} onOpenChange={setDuplicatesDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GitMerge className="h-5 w-5 text-orange-500" /> Contatos Duplicados
+            </DialogTitle>
+          </DialogHeader>
+          <div className="max-h-96 overflow-y-auto space-y-3 py-2">
+            {loadingDuplicates ? (
+              <p className="text-sm text-muted-foreground text-center py-6">Analisando...</p>
+            ) : duplicateGroups.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">Nenhum duplicado encontrado!</p>
+            ) : (
+              duplicateGroups.map((group) => (
+                <div key={group.phone} className="border border-border rounded-lg p-3 space-y-2">
+                  <p className="text-sm font-medium">{group.phone} <span className="text-muted-foreground font-normal">· {group.count} registros</span></p>
+                  <div className="space-y-1">
+                    {group.ids.map((id, i) => (
+                      <div key={id} className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span className={`w-2 h-2 rounded-full ${i === 0 ? "bg-green-500" : "bg-gray-400"}`} />
+                        <span className={i === 0 ? "text-green-600 font-medium" : ""}>{group.names[i] || "Sem nome"}</span>
+                        {i === 0 && <span className="text-[10px] bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300 px-1 rounded">manter</span>}
+                      </div>
+                    ))}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full text-xs"
+                    disabled={mergingGroup === group.phone}
+                    onClick={() => handleMerge(group.ids[0], group.ids.slice(1), group.phone)}
+                  >
+                    {mergingGroup === group.phone ? "Mesclando..." : `Mesclar ${group.count - 1} duplicado(s) no primeiro`}
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDuplicatesDialog(false)}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

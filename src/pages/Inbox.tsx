@@ -1909,25 +1909,39 @@ const Inbox = () => {
     }
   };
 
-  // Export conversation as CSV
-  function handleExportConversation() {
-    if (!selectedConvo || messages.length === 0) return;
-    const contactName = selectedConvo.contacts?.name || selectedConvo.contacts?.phone || "contato";
-    const rows = [["Data", "Remetente", "Mensagem"]];
-    for (const m of messages) {
-      const date = new Date(m.created_at).toLocaleString("pt-BR");
-      const sender = m.sender_type === "contact" ? contactName : (m.sender_name || "Agente");
-      const content = (m.content || "").replace(/"/g, '""');
-      rows.push([date, sender, `"${content}"`]);
+  // Export conversation as TXT (via backend — includes full history)
+  async function handleExportConversation() {
+    if (!selectedConvo) return;
+    try {
+      const { api } = await import("@/lib/api");
+      const response = await api.get(`/conversations/${selectedConvo.id}/export`, { responseType: "blob" } as any);
+      const blob = response instanceof Blob ? response : new Blob([response as any], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const contactName = selectedConvo.contacts?.name || selectedConvo.contacts?.phone || "contato";
+      a.download = `conversa_${contactName.replace(/\s+/g, "_")}_${new Date().toISOString().split("T")[0]}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Fallback: CSV from loaded messages
+      const contactName = selectedConvo.contacts?.name || selectedConvo.contacts?.phone || "contato";
+      const rows = [["Data", "Remetente", "Mensagem"]];
+      for (const m of messages) {
+        const date = new Date(m.created_at).toLocaleString("pt-BR");
+        const sender = m.from_me ? "Agente" : contactName;
+        const content = (m.body || m.content || "").replace(/"/g, '""');
+        rows.push([date, sender, `"${content}"`]);
+      }
+      const csv = rows.map(r => r.join(",")).join("\n");
+      const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `conversa_${contactName.replace(/\s+/g, "_")}_${new Date().toISOString().split("T")[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
     }
-    const csv = rows.map(r => r.join(",")).join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `conversa_${contactName.replace(/\s+/g, "_")}_${new Date().toISOString().split("T")[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
   // AI Conversation Summary handler

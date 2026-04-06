@@ -190,8 +190,26 @@ export default async function conversationRoutes(fastify) {
     updates.push(`updated_at = NOW()`);
     params.push(req.params.id);
 
+    // Snapshot old values for audit trail
+    const { rows: oldRows } = await query('SELECT status, assigned_to FROM conversations WHERE id=$1', [req.params.id]);
+    const oldConv = oldRows[0];
+
     const { rows } = await query(`UPDATE conversations SET ${updates.join(',')} WHERE id = $${p} RETURNING *`, params);
     if (!rows[0]) return reply.status(404).send({ error: 'Conversa não encontrada' });
+
+    // ── Audit trail ──────────────────────────────────────────────────────────
+    const actorName = req.user?.name || 'Sistema';
+    if (req.body.status && oldConv?.status !== req.body.status) {
+      query('INSERT INTO conversation_events (conversation_id, event_type, actor_id, actor_name, old_value, new_value) VALUES ($1,$2,$3,$4,$5,$6)',
+        [req.params.id, 'status_changed', req.user?.id || null, actorName, oldConv?.status, req.body.status]).catch(() => {});
+    }
+    if (req.body.assigned_to !== undefined && oldConv?.assigned_to !== req.body.assigned_to) {
+      const agentLabel = req.body.assigned_to
+        ? (await query('SELECT name FROM profiles WHERE id=$1', [req.body.assigned_to]).catch(() => ({ rows: [] }))).rows[0]?.name || req.body.assigned_to
+        : null;
+      query('INSERT INTO conversation_events (conversation_id, event_type, actor_id, actor_name, old_value, new_value) VALUES ($1,$2,$3,$4,$5,$6)',
+        [req.params.id, req.body.assigned_to ? 'assigned' : 'unassigned', req.user?.id || null, actorName, null, agentLabel]).catch(() => {});
+    }
 
     // Emit realtime update + invalidate cache
     fastify.io?.emit('conversation:updated', rows[0]);
@@ -263,9 +281,79 @@ export default async function conversationRoutes(fastify) {
         'INSERT INTO conversation_notes (conversation_id, content, author_id, author_name, is_internal) VALUES ($1,$2,$3,$4,$5) RETURNING *',
         [req.params.id, content, req.user.id, profile[0]?.name, is_internal]
       );
+      // Log audit event
+      client.query('INSERT INTO conversation_events (conversation_id, event_type, actor_id, actor_name, new_value) VALUES ($1,$2,$3,$4,$5)',
+        [req.params.id, 'note_added', req.user.id, profile[0]?.name, content.slice(0, 120)]).catch(() => {});
       return rows[0];
     });
+    // Parse @mentions and notify tagged agents
+    const mentions = [...(content.matchAll(/@(\w+[\w\s]*)/g) || [])].map(m => m[1].trim());
+    if (mentions.length) {
+      query(`SELECT id, name FROM profiles WHERE ${mentions.map((_, i) => `name ILIKE $${i+1}`).join(' OR ')}`,
+        mentions.map(m => `%${m}%`)).then(({ rows: agents }) => {
+        agents.forEach(agent => {
+          query("INSERT INTO notifications (user_id, type, title, message, metadata) VALUES ($1,'mention','Você foi mencionado em uma nota',$2,$3)",
+            [agent.id, `Mencionado na conversa ${req.params.id}`, JSON.stringify({ conversation_id: req.params.id, note: content.slice(0, 80) })]).then(({ rows: n }) => {
+            if (n[0]) fastify.io?.to(`user:${agent.id}`).emit('notification:new', n[0]);
+          }).catch(() => {});
+        });
+      }).catch(() => {});
+    }
     return reply.status(201).send(note);
+  });
+
+  // Conversation audit trail
+  fastify.get('/conversations/:id/events', auth, async (req) => {
+    const { rows } = await query(
+      'SELECT * FROM conversation_events WHERE conversation_id=$1 ORDER BY created_at DESC LIMIT 50',
+      [req.params.id]
+    );
+    return rows;
+  });
+
+  // Export conversation as plain text
+  fastify.get('/conversations/:id/export', auth, async (req, reply) => {
+    const { rows: conv } = await query(`
+      SELECT c.*, ct.name as contact_name, ct.phone as contact_phone, p.name as agent_name
+      FROM conversations c
+      LEFT JOIN contacts ct ON ct.id=c.contact_id
+      LEFT JOIN profiles p ON p.id=c.assigned_to
+      WHERE c.id=$1
+    `, [req.params.id]);
+    if (!conv[0]) return reply.status(404).send({ error: 'Não encontrada' });
+    const { rows: msgs } = await query(
+      'SELECT * FROM messages WHERE conversation_id=$1 ORDER BY created_at ASC',
+      [req.params.id]
+    );
+    const c = conv[0];
+    const header = `Conversa exportada — ${new Date().toLocaleString('pt-BR')}
+Contato: ${c.contact_name || c.contact_phone}
+Telefone: ${c.contact_phone}
+Agente: ${c.agent_name || 'Não atribuído'}
+Status: ${c.status}
+Conexão: ${c.connection_name || '-'}
+${'─'.repeat(60)}
+`;
+    const body = msgs.map(m => {
+      const who = m.direction === 'outbound' ? (c.agent_name || 'Agente') : (c.contact_name || c.contact_phone);
+      const time = new Date(m.created_at).toLocaleString('pt-BR');
+      const text = m.media_url ? `[${m.type || 'mídia'}] ${m.media_url}` : (m.content || '');
+      return `[${time}] ${who}:\n${text}`;
+    }).join('\n\n');
+    reply.header('Content-Type', 'text/plain; charset=utf-8');
+    reply.header('Content-Disposition', `attachment; filename="conversa_${req.params.id.slice(0,8)}.txt"`);
+    return header + body;
+  });
+
+  // Shim-compatible alias for conversation events (db.ts uses /conversation-events)
+  fastify.get('/conversation-events', auth, async (req) => {
+    const { conversation_id } = req.query;
+    if (!conversation_id) return [];
+    const { rows } = await query(
+      'SELECT * FROM conversation_events WHERE conversation_id=$1 ORDER BY created_at DESC LIMIT 50',
+      [conversation_id]
+    );
+    return rows;
   });
 
   // Bulk assign conversations from one agent to another

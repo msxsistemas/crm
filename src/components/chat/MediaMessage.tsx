@@ -77,19 +77,34 @@ const MediaMessage = ({ mediaUrl, mediaType, body, fromMe }: MediaMessageProps) 
 
   if (type.startsWith("video") || type === "video") {
     return (
-      <div className="space-y-1">
-        <video
-          controls
-          className="w-full max-w-[260px] rounded-md"
-          preload="metadata"
-          playsInline
-        >
-          <source src={mediaUrl} />
-        </video>
-        {!isGenericLabel && body && (
-          <p className="text-[14.2px] whitespace-pre-wrap px-1 leading-[19px]">{body}</p>
-        )}
-      </div>
+      <>
+        <div className="space-y-1">
+          <button type="button" className="block w-full" onClick={() => setImageOpen(true)}>
+            <video
+              className="w-full max-w-[260px] rounded-md cursor-pointer hover:opacity-90 transition-opacity"
+              preload="metadata"
+              playsInline
+              muted
+            >
+              <source src={mediaUrl} />
+            </video>
+          </button>
+          {!isGenericLabel && body && (
+            <p className="text-[14.2px] whitespace-pre-wrap px-1 leading-[19px]">{body}</p>
+          )}
+        </div>
+        <Dialog open={imageOpen} onOpenChange={setImageOpen}>
+          <DialogContent className="max-w-4xl border-[#2a3942] bg-[#111b21] p-2 sm:p-4">
+            <video
+              controls
+              autoPlay
+              className="max-h-[80vh] w-full rounded-lg"
+            >
+              <source src={mediaUrl} />
+            </video>
+          </DialogContent>
+        </Dialog>
+      </>
     );
   }
 

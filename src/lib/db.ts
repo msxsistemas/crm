@@ -96,6 +96,7 @@ const TABLE_MAP: Record<string, string> = {
   contact_forms: '/contact-forms',
   attendance_flow_templates: '/flow-templates',
   conversation_notes: '/conversation-notes',
+  conversation_events: '/conversation-events',
   conversation_labels: '/conversation-labels',
   internal_messages: '/internal-messages',
   internal_channels: '/internal-channels',

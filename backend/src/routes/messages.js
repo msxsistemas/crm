@@ -344,6 +344,31 @@ async function handleEvolutionWebhook(payload, fastify) {
           [contact.id, instance]
         );
         conv = rows[0];
+
+        // ── Auto-assign round-robin ─────────────────────────────────────────
+        try {
+          const { rows: s } = await client.query('SELECT auto_assign_enabled FROM settings WHERE id=1');
+          if (s[0]?.auto_assign_enabled) {
+            const { rows: agents } = await client.query(`
+              SELECT p.id, COUNT(c.id) as open_count
+              FROM profiles p
+              LEFT JOIN conversations c ON c.assigned_to = p.id AND c.status != 'closed'
+              WHERE p.role IN ('agent','supervisor') AND p.status = 'online'
+              GROUP BY p.id ORDER BY open_count ASC LIMIT 1
+            `);
+            if (agents[0]) {
+              await client.query('UPDATE conversations SET assigned_to=$1 WHERE id=$2', [agents[0].id, conv.id]);
+              conv.assigned_to = agents[0].id;
+              // Log event
+              client.query("INSERT INTO conversation_events (conversation_id, event_type, actor_name, new_value) VALUES ($1,'assigned','Sistema',$2)",
+                [conv.id, agents[0].id]).catch(() => {});
+            }
+          }
+        } catch {}
+
+        // Log conversation created event
+        client.query("INSERT INTO conversation_events (conversation_id, event_type, actor_name, new_value) VALUES ($1,'created','Sistema','open')",
+          [conv.id]).catch(() => {});
       }
 
       const { rows: msgRows } = await client.query(
@@ -380,6 +405,38 @@ async function handleEvolutionWebhook(payload, fastify) {
         return; // don't process chatbot for CSAT replies
       }
     }
+
+    // ── Office hours check ────────────────────────────────────────────────
+    try {
+      const { rows: s } = await query('SELECT office_hours_enabled, office_hours_schedule, office_hours_off_message FROM settings WHERE id=1');
+      const cfg = s[0];
+      if (cfg?.office_hours_enabled && cfg?.office_hours_schedule) {
+        const now = new Date();
+        const day = now.getDay(); // 0=Sun
+        const sched = cfg.office_hours_schedule;
+        const todayEntry = Array.isArray(sched) ? sched[day] : null;
+        const isOpen = (() => {
+          if (!todayEntry?.active) return false;
+          const [sh, sm] = (todayEntry.start || '09:00').split(':').map(Number);
+          const [eh, em] = (todayEntry.end   || '18:00').split(':').map(Number);
+          const cur = now.getHours() * 60 + now.getMinutes();
+          return cur >= sh * 60 + sm && cur < eh * 60 + em;
+        })();
+        if (!isOpen) {
+          const msg = cfg.office_hours_off_message || 'No momento estamos fora do horário de atendimento. Retornaremos em breve!';
+          const { rows: evo } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
+          const e = evo[0];
+          if (e?.evolution_url) {
+            fetch(`${e.evolution_url}/message/sendText/${instance}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': e.evolution_key },
+              body: JSON.stringify({ number: phone, text: msg }),
+            }).catch(() => {});
+          }
+          return; // don't process chatbot outside hours
+        }
+      }
+    } catch {}
 
     // ── Chatbot engine ─────────────────────────────────────────────────────
     // Skip if contact has chatbot disabled or conversation is assigned to an agent

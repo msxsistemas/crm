@@ -120,6 +120,8 @@ const ContactDetailsSidebar = ({
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [campaignHistory, setCampaignHistory] = useState<CampaignHistoryItem[]>([]);
   const [campaignHistoryOpen, setCampaignHistoryOpen] = useState(false);
+  const [auditEvents, setAuditEvents] = useState<{ id: string; event_type: string; actor_name: string | null; old_value: string | null; new_value: string | null; created_at: string }[]>([]);
+  const [auditOpen, setAuditOpen] = useState(false);
 
   // @mention states
   const [agents, setAgents] = useState<AgentProfile[]>([]);
@@ -409,6 +411,15 @@ const ContactDetailsSidebar = ({
         .order("sent_at", { ascending: false })
         .limit(10);
       setCampaignHistory((campData as unknown as CampaignHistoryItem[]) || []);
+
+      // Load audit events for this conversation
+      const { data: evtData } = await db
+        .from("conversation_events")
+        .select("id, event_type, actor_name, old_value, new_value, created_at")
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: false })
+        .limit(30);
+      setAuditEvents((evtData as any[]) || []);
     };
     load();
   }, [contactId, conversationId]);
@@ -825,6 +836,53 @@ const ContactDetailsSidebar = ({
           </div>
         )}
       </div>
+
+      {/* Audit Trail */}
+      {auditEvents.length > 0 && (
+        <div className="px-4 py-3 border-b border-border">
+          <button
+            className="flex items-center justify-between w-full"
+            onClick={() => setAuditOpen((v) => !v)}
+          >
+            <div className="flex items-center gap-2">
+              <History className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-semibold text-foreground">Auditoria ({auditEvents.length})</span>
+            </div>
+            {auditOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+          </button>
+          {auditOpen && (
+            <div className="mt-3 space-y-2 max-h-60 overflow-y-auto">
+              {auditEvents.map((evt) => {
+                const typeLabels: Record<string, string> = {
+                  created: "Conversa criada",
+                  status_changed: "Status alterado",
+                  assigned: "Atribuído",
+                  unassigned: "Desatribuído",
+                  note_added: "Nota adicionada",
+                };
+                const label = typeLabels[evt.event_type] || evt.event_type;
+                const detail = evt.event_type === "status_changed"
+                  ? `${evt.old_value || "?"} → ${evt.new_value || "?"}`
+                  : evt.new_value
+                  ? evt.new_value.slice(0, 60)
+                  : null;
+                return (
+                  <div key={evt.id} className="flex items-start gap-2 text-xs">
+                    <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-foreground">{label}</p>
+                      {detail && <p className="text-muted-foreground truncate">{detail}</p>}
+                      <p className="text-[10px] text-muted-foreground">
+                        {evt.actor_name || "Sistema"} · {new Date(evt.created_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Custom Fields */}
       {customFields && Object.keys(customFields).length > 0 && (

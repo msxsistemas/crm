@@ -154,6 +154,37 @@ export default async function contactRoutes(fastify) {
     return { updated, total: contacts.length };
   });
 
+  // Detect duplicate contacts (same phone)
+  fastify.get('/contacts/duplicates', auth, async (req) => {
+    const { rows } = await query(`
+      SELECT phone, COUNT(*) as count,
+        array_agg(id ORDER BY created_at ASC) as ids,
+        array_agg(name ORDER BY created_at ASC) as names,
+        array_agg(created_at ORDER BY created_at ASC) as created_ats
+      FROM contacts
+      WHERE phone IS NOT NULL AND phone != ''
+      GROUP BY phone
+      HAVING COUNT(*) > 1
+      ORDER BY count DESC
+      LIMIT 100
+    `);
+    return rows;
+  });
+
+  // Merge duplicate contacts: keep_id absorbs all merge_ids
+  fastify.post('/contacts/merge', auth, async (req, reply) => {
+    const { keep_id, merge_ids } = req.body;
+    if (!keep_id || !Array.isArray(merge_ids) || !merge_ids.length) {
+      return reply.status(400).send({ error: 'keep_id e merge_ids obrigatórios' });
+    }
+    const ph = merge_ids.map((_, i) => `$${i + 2}`).join(',');
+    // Reassign conversations + messages contact data
+    await query(`UPDATE conversations SET contact_id=$1 WHERE contact_id IN (${ph})`, [keep_id, ...merge_ids]);
+    await query(`DELETE FROM contacts WHERE id IN (${ph})`, merge_ids);
+    invalidate('contacts:list:*').catch(() => {});
+    return { ok: true, merged: merge_ids.length };
+  });
+
   // Bulk import CSV
   fastify.post('/contacts/bulk', auth, async (req, reply) => {
     const { contacts } = req.body;

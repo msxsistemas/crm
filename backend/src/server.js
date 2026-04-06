@@ -182,6 +182,31 @@ startSchedulesWorker(io);
 deliverWebhook.startWorker();
 startSLAWorker();
 
+// Auto-close inactive conversations (runs every hour)
+const autoCloseInactive = async () => {
+  try {
+    const { rows: s } = await pool.query('SELECT auto_close_days FROM settings WHERE id=1');
+    const days = parseInt(s[0]?.auto_close_days || 0);
+    if (!days) return;
+    const { rows } = await pool.query(`
+      UPDATE conversations
+      SET status='closed', updated_at=NOW()
+      WHERE status IN ('open','in_progress')
+        AND last_message_at < NOW() - INTERVAL '${days} days'
+      RETURNING id
+    `);
+    if (rows.length) {
+      rows.forEach(r => {
+        pool.query("INSERT INTO conversation_events (conversation_id, event_type, actor_name, new_value) VALUES ($1,'status_changed','Sistema (auto-fechamento)','closed')", [r.id]).catch(() => {});
+      });
+      io.emit('conversations:bulk_closed', { ids: rows.map(r => r.id) });
+      console.log(`[auto-close] Fechou ${rows.length} conversa(s) inativas`);
+    }
+  } catch {}
+};
+setInterval(autoCloseInactive, 60 * 60 * 1000); // a cada hora
+autoCloseInactive(); // rodar na inicialização também
+
 // Start
 const PORT = parseInt(process.env.PORT || '3000');
 const HOST = '0.0.0.0';
