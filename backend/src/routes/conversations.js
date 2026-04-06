@@ -367,6 +367,41 @@ ${'─'.repeat(60)}
     return rows[0];
   });
 
+  // Bulk archive conversations
+  fastify.post('/conversations/archive-bulk', auth, async (req) => {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) return { ok: true };
+    const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+    await query(`UPDATE conversations SET status='archived', updated_at=NOW() WHERE id IN (${placeholders})`, ids);
+    invalidate('conv:list:*').catch(() => {});
+    return { ok: true, count: ids.length };
+  });
+
+  // Send audio (base64) via Evolution API
+  fastify.post('/conversations/:id/send-audio', auth, async (req, reply) => {
+    const { audio_base64, mime_type } = req.body;
+    const { rows } = await query(
+      'SELECT c.connection_name AS instance_name, ct.phone FROM conversations c JOIN contacts ct ON ct.id=c.contact_id WHERE c.id=$1',
+      [req.params.id]
+    );
+    if (!rows[0]) return reply.code(404).send({ error: 'Not found' });
+    const { rows: settings } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
+    const s = settings[0];
+    if (!s?.evolution_url) return reply.code(400).send({ error: 'Evolution API não configurada' });
+    const resp = await fetch(`${s.evolution_url}/message/sendMedia/${rows[0].instance_name}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': s.evolution_key },
+      body: JSON.stringify({
+        number: rows[0].phone,
+        mediatype: 'audio',
+        media: audio_base64,
+        fileName: 'audio.ogg',
+        mimetype: mime_type || 'audio/ogg',
+      }),
+    });
+    return { ok: resp.ok };
+  });
+
   // Bulk assign conversations from one agent to another
   fastify.post('/conversations/bulk-assign', auth, async (req) => {
     const { from_user, to_user } = req.body;

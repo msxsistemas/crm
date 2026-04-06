@@ -133,7 +133,7 @@ interface DBMessage {
   content?: string;
 }
 
-type TabFilter = "atendendo" | "aguardando" | "encerradas" | "favoritas";
+type TabFilter = "atendendo" | "aguardando" | "encerradas" | "favoritas" | "arquivadas";
 
 interface CatalogProduct {
   id: string;
@@ -1695,6 +1695,32 @@ const Inbox = () => {
     }
   };
 
+  const handleArchiveConversation = async (id: string) => {
+    try {
+      const { api } = await import("@/lib/api");
+      await api.patch(`/conversations/${id}`, { status: 'archived' });
+      if (selected === id) setSelected(null);
+      toast.success("Conversa arquivada");
+      loadConversations();
+    } catch {
+      toast.error("Erro ao arquivar conversa");
+    }
+  };
+
+  const handleBulkArchiveSelected = async () => {
+    const ids = Array.from(bulkSelected);
+    if (ids.length === 0) return;
+    try {
+      const { api } = await import("@/lib/api");
+      await api.post('/conversations/archive-bulk', { ids });
+      setBulkSelected(new Set());
+      toast.success(`${ids.length} conversa(s) arquivada(s)`);
+      loadConversations();
+    } catch {
+      toast.error("Erro ao arquivar conversas");
+    }
+  };
+
   // Load merge candidates
   const loadMergeCandidates = useCallback(async () => {
     if (!selected) return;
@@ -2080,6 +2106,7 @@ const Inbox = () => {
     atendendo: conversations.filter(c => c.status === "in_progress").length,
     encerradas: conversations.filter(c => c.status === "closed").length,
     favoritas: conversations.filter(c => c.starred).length,
+    arquivadas: conversations.filter(c => c.status === "archived").length,
   }), [conversations]);
 
   const filtered = conversations
@@ -2087,8 +2114,9 @@ const Inbox = () => {
       if (activeTab === "atendendo") return c.status === "in_progress";
       if (activeTab === "aguardando") return c.status === "open";
       if (activeTab === "encerradas") return c.status === "closed";
-      if (activeTab === "favoritas") return c.starred === true;
-      return true;
+      if (activeTab === "favoritas") return c.starred === true && c.status !== "archived";
+      if (activeTab === "arquivadas") return c.status === "archived";
+      return c.status !== "archived";
     })
     .filter((c) => {
       if (filterConnection && c.instance_name !== filterConnection) return false;
@@ -2636,6 +2664,7 @@ const Inbox = () => {
             { key: "aguardando" as TabFilter, label: "AGUARDANDO", count: statusCounts.aguardando },
             { key: "encerradas" as TabFilter, label: "ENCERRADAS", count: statusCounts.encerradas },
             { key: "favoritas" as TabFilter, label: "⭐ FAVORITAS", count: statusCounts.favoritas },
+            { key: "arquivadas" as TabFilter, label: "📦 ARQUIVADAS", count: statusCounts.arquivadas },
           ]).map((tab) => (
             <button
               key={tab.key}
@@ -2941,6 +2970,15 @@ const Inbox = () => {
                         </button>
                       </>
                     )}
+                    {convo.status !== "archived" && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleArchiveConversation(convo.id); }}
+                        className="px-2 py-0.5 rounded text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        title="Arquivar conversa"
+                      >
+                        📦
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -2995,6 +3033,12 @@ const Inbox = () => {
                 className="px-2 py-1 rounded bg-primary-foreground/20 hover:bg-primary-foreground/30 transition-colors whitespace-nowrap"
               >
                 Atribuir a mim
+              </button>
+              <button
+                onClick={handleBulkArchiveSelected}
+                className="px-2 py-1 rounded bg-primary-foreground/20 hover:bg-primary-foreground/30 transition-colors whitespace-nowrap"
+              >
+                Arquivar selecionadas
               </button>
               <button
                 onClick={() => setBulkSelected(new Set())}
