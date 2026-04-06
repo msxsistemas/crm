@@ -11,6 +11,7 @@ import {
   Shuffle, CheckCircle, X, Image, FileText, Mic, Folder, ChevronDown, Smartphone, Star,
   Trash2, Copy, Forward, Reply, Pencil, Check, AlertCircle, Bot, Clock, Target, Sparkles,
   LayoutTemplate, Tag, History, Ban, LayoutList, List, GitMerge, ShoppingBag, Download,
+  CheckSquare,
 } from "lucide-react";
 import { useFollowupReminders } from "@/hooks/useFollowupReminders";
 import FollowupDialog from "@/components/followup/FollowupDialog";
@@ -306,6 +307,8 @@ const Inbox = () => {
   });
   const [avatarErrorContacts, setAvatarErrorContacts] = useState<Set<string>>(new Set());
   const [selectedConvos, setSelectedConvos] = useState<Set<string>>(new Set());
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
   const reconnectIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Audio recording states
@@ -1663,6 +1666,35 @@ const Inbox = () => {
     loadConversations();
   };
 
+  // Bulk actions using bulkSelected state
+  const handleBulkCloseSelected = async () => {
+    const ids = Array.from(bulkSelected);
+    if (ids.length === 0) return;
+    try {
+      const { api } = await import("@/lib/api");
+      await Promise.all(ids.map(id => api.patch(`/conversations/${id}`, { status: 'closed' })));
+      setBulkSelected(new Set());
+      toast.success(`${ids.length} conversa(s) encerrada(s)`);
+      loadConversations();
+    } catch {
+      toast.error("Erro ao encerrar conversas");
+    }
+  };
+
+  const handleBulkAssignToMe = async () => {
+    const ids = Array.from(bulkSelected);
+    if (ids.length === 0 || !user?.id) return;
+    try {
+      const { api } = await import("@/lib/api");
+      await Promise.all(ids.map(id => api.patch(`/conversations/${id}`, { assigned_to: user.id })));
+      setBulkSelected(new Set());
+      toast.success(`${ids.length} conversa(s) atribuída(s) a você`);
+      loadConversations();
+    } catch {
+      toast.error("Erro ao atribuir conversas");
+    }
+  };
+
   // Load merge candidates
   const loadMergeCandidates = useCallback(async () => {
     if (!selected) return;
@@ -2423,6 +2455,15 @@ const Inbox = () => {
             <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => setShowShortcutsModal(true)} title="Atalhos de teclado (Ctrl+/)">
               <span className="text-xs font-bold">?</span>
             </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className={cn("h-8 w-8", bulkMode ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground")}
+              onClick={() => { setBulkMode(v => { if (v) setBulkSelected(new Set()); return !v; }); }}
+              title={bulkMode ? "Desativar seleção múltipla" : "Selecionar múltiplas conversas"}
+            >
+              <CheckSquare className="h-4 w-4" />
+            </Button>
           </div>
         </div>
 
@@ -2753,25 +2794,27 @@ const Inbox = () => {
                       : "hover:bg-muted/50"
                   )}
                 >
-                  <div
-                    className="shrink-0 flex items-center self-center"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedConvos.has(convo.id)}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        setSelectedConvos((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(convo.id)) next.delete(convo.id);
-                          else next.add(convo.id);
-                          return next;
-                        });
-                      }}
-                      className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
-                    />
-                  </div>
+                  {bulkMode && (
+                    <div
+                      className="shrink-0 flex items-center self-center"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={bulkSelected.has(convo.id)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          setBulkSelected((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(convo.id)) next.delete(convo.id);
+                            else next.add(convo.id);
+                            return next;
+                          });
+                        }}
+                        className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
+                      />
+                    </div>
+                  )}
                   <div className="relative shrink-0 flex flex-col items-center gap-1">
                     <div className="flex h-11 w-11 items-center justify-center rounded-full bg-muted text-sm font-semibold text-foreground">
                       {convo.contacts?.avatar_url && !avatarErrorContacts.has(convo.contact_id) ? (
@@ -2909,8 +2952,8 @@ const Inbox = () => {
           )}
         </div>
 
-        {/* Bulk action bar */}
-        {selectedConvos.size > 0 && (
+        {/* Bulk action bar (legado selectedConvos) */}
+        {selectedConvos.size > 0 && bulkSelected.size === 0 && (
           <div className="flex items-center justify-between gap-2 px-3 py-2 bg-primary text-primary-foreground text-xs font-medium border-t border-primary/50">
             <span>{selectedConvos.size} selecionada(s)</span>
             <div className="flex items-center gap-1">
@@ -2931,6 +2974,34 @@ const Inbox = () => {
                 className="px-2 py-1 rounded bg-primary-foreground/20 hover:bg-primary-foreground/30 transition-colors"
               >
                 Desmarcar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Bulk action bar (bulkSelected) */}
+        {bulkSelected.size > 0 && (
+          <div className="flex items-center justify-between gap-2 px-3 py-2 bg-primary text-primary-foreground text-xs font-medium border-t border-primary/50">
+            <span>{bulkSelected.size} selecionada(s)</span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handleBulkCloseSelected}
+                className="px-2 py-1 rounded bg-primary-foreground/20 hover:bg-primary-foreground/30 transition-colors whitespace-nowrap"
+              >
+                Fechar selecionadas
+              </button>
+              <button
+                onClick={handleBulkAssignToMe}
+                className="px-2 py-1 rounded bg-primary-foreground/20 hover:bg-primary-foreground/30 transition-colors whitespace-nowrap"
+              >
+                Atribuir a mim
+              </button>
+              <button
+                onClick={() => setBulkSelected(new Set())}
+                className="p-1 rounded bg-primary-foreground/20 hover:bg-primary-foreground/30 transition-colors"
+                title="Limpar seleção"
+              >
+                <X className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
