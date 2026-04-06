@@ -17,16 +17,91 @@ export default async function messageRoutes(fastify) {
     return rows;
   });
 
-  // Generic /messages route for shim compatibility
+  // Generic /messages route — supports ?conversation_id=, ?search=, ?conversation_id=a,b,c (last msg per convo)
   fastify.get('/messages', auth, async (req) => {
-    const { conversation_id, limit: lim = 50 } = req.query;
+    const { conversation_id, limit: lim = 50, search } = req.query;
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    // Full-text search across all messages
+    if (search) {
+      const { rows } = await query(
+        `SELECT m.*, m.content as body, (m.direction='outbound') as from_me,
+                c.contact_id,
+                ct.name as contact_name, ct.phone as contact_phone
+         FROM messages m
+         JOIN conversations c ON c.id = m.conversation_id
+         JOIN contacts ct ON ct.id = c.contact_id
+         WHERE to_tsvector('portuguese', COALESCE(m.content,'')) @@ plainto_tsquery('portuguese', $1)
+            OR m.content ILIKE $2
+         ORDER BY m.created_at DESC LIMIT 20`,
+        [search, `%${search}%`]
+      );
+      return rows;
+    }
+
+    // Multi-conversation last-message fetch (comma-separated IDs)
+    if (conversation_id && conversation_id.includes(',')) {
+      const ids = conversation_id.split(',').filter(id => UUID_RE.test(id.trim())).map(id => id.trim());
+      if (!ids.length) return [];
+      const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
+      const { rows } = await query(
+        `SELECT DISTINCT ON (conversation_id) conversation_id, content, created_at, direction
+         FROM messages WHERE conversation_id IN (${placeholders})
+         ORDER BY conversation_id, created_at DESC`,
+        ids
+      );
+      return rows;
+    }
+
     if (!conversation_id || !UUID_RE.test(conversation_id)) return [];
     const { rows } = await query(
       `SELECT *, content as body, (direction = 'outbound') as from_me FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC LIMIT $2`,
       [conversation_id, lim]
     );
     return rows;
+  });
+
+  // ── Message reactions ──────────────────────────────────────────────────────
+  fastify.get('/message-reactions', auth, async (req) => {
+    const { message_id, conversation_id } = req.query;
+    if (conversation_id) {
+      const { rows } = await query(
+        `SELECT mr.* FROM message_reactions mr
+         JOIN messages m ON m.id = mr.message_id
+         WHERE m.conversation_id = $1`,
+        [conversation_id]
+      );
+      return rows;
+    }
+    if (message_id) {
+      const { rows } = await query('SELECT * FROM message_reactions WHERE message_id=$1', [message_id]);
+      return rows;
+    }
+    return [];
+  });
+
+  fastify.post('/message-reactions', auth, async (req, reply) => {
+    const { message_id, emoji } = req.body;
+    const user_id = req.user.id;
+    // Upsert: if same user+message+emoji exists, toggle off; else insert
+    const { rows: existing } = await query(
+      'SELECT id FROM message_reactions WHERE message_id=$1 AND user_id=$2 AND emoji=$3',
+      [message_id, user_id, emoji]
+    );
+    if (existing[0]) {
+      await query('DELETE FROM message_reactions WHERE id=$1', [existing[0].id]);
+      return reply.status(200).send({ deleted: true });
+    }
+    const { rows } = await query(
+      'INSERT INTO message_reactions (message_id, user_id, emoji) VALUES ($1,$2,$3) RETURNING *',
+      [message_id, user_id, emoji]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.delete('/message-reactions/:id', auth, async (req) => {
+    await query('DELETE FROM message_reactions WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    return { ok: true };
   });
 
   // Generic POST /messages for shim compatibility (Inbox page sends here)

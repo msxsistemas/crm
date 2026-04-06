@@ -842,29 +842,8 @@ const Inbox = () => {
     if (error) {
       console.error("Error loading conversations:", error);
     } else {
-      const convos = (data as unknown as DBConversation[]) || [];
-      // Fetch last message for each conversation
-      if (convos.length > 0) {
-        const ids = convos.map((c) => c.id);
-        const { data: msgs } = await db
-          .from("messages")
-          .select("conversation_id, content, created_at")
-          .in("conversation_id", ids)
-          .order("created_at", { ascending: false });
-
-        if (msgs) {
-          const lastMsgMap = new Map<string, string>();
-          for (const m of msgs) {
-            if (!lastMsgMap.has(m.conversation_id)) {
-              lastMsgMap.set(m.conversation_id, m.content);
-            }
-          }
-          convos.forEach((c) => {
-            c.last_message_body = lastMsgMap.get(c.id) || undefined;
-          });
-        }
-      }
-      setConversations(convos);
+      // last_message_body already comes from the SQL subquery — no extra fetch needed
+      setConversations((data as unknown as DBConversation[]) || []);
     }
     setLoading(false);
   }, []);

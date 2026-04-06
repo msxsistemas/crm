@@ -121,7 +121,7 @@ const TABLE_MAP: Record<string, string> = {
   custom_reports: '/__skip__',
   distribution_log: '/__skip__',
   help_articles: '/__skip__',
-  message_reactions: '/__skip__',
+  message_reactions: '/message-reactions',
   scheduled_reports: '/__skip__',
   system_settings: '/__skip__',
   user_activity_logs: '/__skip__',

@@ -92,31 +92,28 @@ const GlobalSearch: React.FC<GlobalSearchProps> = ({
           .select("id, name, phone")
           .or(`name.ilike.%${q}%,phone.ilike.%${q}%`)
           .limit(5),
+        // Use backend full-text search endpoint
         db
           .from("messages")
-          .select(
-            "id, content, created_at, conversation_id, conversations(id, contact_id, contacts(name, phone))"
-          )
+          .select("id, content, created_at, conversation_id, contact_name, contact_phone")
           .ilike("content", `%${q}%`)
           .order("created_at", { ascending: false })
           .limit(10),
       ]);
 
-      // Map contacts and find their conversation_id if available
       const mappedContacts: ContactResult[] = (contactData || []).map((c) => ({
         id: c.id,
         name: c.name,
         phone: c.phone,
       }));
 
-      // Map message results
       const mappedMessages: MessageResult[] = (msgData || []).map((m: any) => ({
         id: m.id,
         content: m.content || "",
         created_at: m.created_at,
         conversation_id: m.conversation_id,
-        contact_name: m.conversations?.contacts?.name ?? null,
-        contact_phone: m.conversations?.contacts?.phone ?? "",
+        contact_name: m.contact_name ?? m.conversations?.contacts?.name ?? null,
+        contact_phone: m.contact_phone ?? m.conversations?.contacts?.phone ?? "",
       }));
 
       setContacts(mappedContacts);

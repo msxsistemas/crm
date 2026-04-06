@@ -1122,6 +1122,16 @@ const Contacts = () => {
                   <DropdownMenuItem className="gap-2" onClick={openWhatsAppImport} disabled={importingWhatsApp}>
                     <Smartphone className="h-4 w-4 text-green-600" /> Importar do WhatsApp
                   </DropdownMenuItem>
+                  <DropdownMenuItem className="gap-2" onClick={async () => {
+                    toast.info("Sincronizando fotos de perfil...");
+                    try {
+                      const r = await api.post<{ updated: number; total: number }>('/contacts/sync-avatars');
+                      toast.success(`${r.updated} de ${r.total} fotos sincronizadas`);
+                      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+                    } catch (e: any) { toast.error(e.message || "Erro ao sincronizar"); }
+                  }}>
+                    <User className="h-4 w-4 text-blue-500" /> Sincronizar fotos WhatsApp
+                  </DropdownMenuItem>
                   {can("export_contacts") && (
                     <DropdownMenuItem className="gap-2" onClick={handleExportCSV}>
                       <Download className="h-4 w-4" /> Exportar CSV

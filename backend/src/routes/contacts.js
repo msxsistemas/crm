@@ -118,6 +118,42 @@ export default async function contactRoutes(fastify) {
     return { message: 'Contato excluído' };
   });
 
+  // Sync avatars from Evolution API for contacts without avatar_url
+  fastify.post('/contacts/sync-avatars', auth, async (req, reply) => {
+    const { rows: settings } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
+    const s = settings[0];
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'Evolution API não configurada' });
+
+    // Get Evolution instance name
+    const { rows: instances } = await query("SELECT instance_name FROM evolution_connections WHERE status='open' LIMIT 1");
+    const instance = instances[0]?.instance_name;
+    if (!instance) return reply.status(400).send({ error: 'Nenhuma instância conectada' });
+
+    // Get contacts without avatar
+    const { rows: contacts } = await query('SELECT id, phone FROM contacts WHERE avatar_url IS NULL AND phone IS NOT NULL LIMIT 50');
+    let updated = 0;
+
+    for (const contact of contacts) {
+      try {
+        const res = await fetch(`${s.evolution_url}/chat/fetchProfilePictureUrl/${instance}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': s.evolution_key },
+          body: JSON.stringify({ number: contact.phone }),
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+        const picUrl = data?.profilePictureUrl;
+        if (picUrl) {
+          await query('UPDATE contacts SET avatar_url=$1 WHERE id=$2', [picUrl, contact.id]);
+          updated++;
+        }
+        // Small delay to avoid rate limiting
+        await new Promise(r => setTimeout(r, 200));
+      } catch {}
+    }
+    return { updated, total: contacts.length };
+  });
+
   // Bulk import CSV
   fastify.post('/contacts/bulk', auth, async (req, reply) => {
     const { contacts } = req.body;

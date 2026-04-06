@@ -57,8 +57,10 @@ export default async function conversationRoutes(fastify) {
       SELECT c.*,
         c.connection_name as instance_name,
         ct.name as contact_name, ct.phone as contact_phone, ct.tags as contact_tags,
-        jsonb_build_object('id', ct.id, 'name', ct.name, 'phone', ct.phone, 'tags', ct.tags) as contacts,
-        p.name as assigned_to_name, p.avatar_url as assigned_to_avatar
+        ct.avatar_url as contact_avatar_url,
+        jsonb_build_object('id', ct.id, 'name', ct.name, 'phone', ct.phone, 'tags', ct.tags, 'avatar_url', ct.avatar_url) as contacts,
+        p.name as assigned_to_name, p.avatar_url as assigned_to_avatar,
+        (SELECT content FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) as last_message_body
       FROM conversations c
       LEFT JOIN contacts ct ON ct.id = c.contact_id
       LEFT JOIN profiles p ON p.id = c.assigned_to
