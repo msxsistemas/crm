@@ -81,6 +81,8 @@ import {
   Timer,
   Shield,
   Grid3x3,
+  Repeat,
+  Trophy,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -199,6 +201,8 @@ const userNavSections: NavSection[] = [
       { to: "/sentiment-dashboard", icon: TrendingUp, label: "Análise de Sentimento" },
       { to: "/response-time-report", icon: Clock, label: "Tempo de Atendimento" },
       { to: "/heatmap-report", icon: Grid3x3, label: "Mapa de Calor" },
+      { to: "/retention-report", icon: Repeat, label: "Retenção de Clientes" },
+      { to: "/gamification", icon: Trophy, label: "Ranking" },
     ],
   },
   {

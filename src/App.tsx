@@ -118,6 +118,9 @@ const SentimentDashboard = lazy(() => import("./pages/SentimentDashboard"));
 const AdminPanel = lazy(() => import("./pages/AdminPanel"));
 const ResponseTimeReport = lazy(() => import("./pages/ResponseTimeReport"));
 const HeatmapReport = lazy(() => import("./pages/HeatmapReport"));
+const RetentionReport = lazy(() => import("./pages/RetentionReport"));
+const Gamification = lazy(() => import("./pages/Gamification"));
+const StatusPage = lazy(() => import("./pages/StatusPage"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -232,6 +235,8 @@ const App = () => (
                     <Route path="/painel-admin" element={<AdminPanel />} />
                     <Route path="/response-time-report" element={<ResponseTimeReport />} />
                     <Route path="/heatmap-report" element={<HeatmapReport />} />
+                    <Route path="/retention-report" element={<RetentionReport />} />
+                    <Route path="/gamification" element={<Gamification />} />
                   </Route>
                   <Route
                     element={
@@ -264,6 +269,7 @@ const App = () => (
                   </Route>
                   <Route path="/form/:slug" element={<PublicContactForm />} />
                   <Route path="/f/:slug" element={<PublicCaptureForm />} />
+                  <Route path="/status" element={<StatusPage />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>

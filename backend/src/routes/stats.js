@@ -826,4 +826,94 @@ export default async function statsRoutes(fastify) {
     `);
     return rows;
   });
+
+  // ── Retention Report ─────────────────────────────────────────────────────
+  fastify.get('/stats/retention', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { months = 6 } = req.query;
+
+    const { rows: retention } = await query(`
+      WITH first_contacts AS (
+        SELECT contact_id, MIN(created_at) as first_at
+        FROM conversations GROUP BY contact_id
+      ),
+      returning AS (
+        SELECT
+          fc.contact_id,
+          fc.first_at,
+          COUNT(c.id) as total_conversations,
+          MAX(c.created_at) as last_at,
+          EXTRACT(DAY FROM MAX(c.created_at) - fc.first_at) as days_as_customer
+        FROM first_contacts fc
+        JOIN conversations c ON c.contact_id = fc.contact_id
+        WHERE fc.first_at > NOW() - ($1 || ' months')::interval
+        GROUP BY fc.contact_id, fc.first_at
+      )
+      SELECT
+        COUNT(*) as total_contacts,
+        COUNT(*) FILTER (WHERE total_conversations > 1) as returned,
+        COUNT(*) FILTER (WHERE total_conversations = 1) as one_time,
+        ROUND(COUNT(*) FILTER (WHERE total_conversations > 1)::numeric / NULLIF(COUNT(*),0) * 100, 1) as retention_rate,
+        ROUND(AVG(total_conversations)::numeric, 1) as avg_conversations_per_contact,
+        ROUND(AVG(days_as_customer) FILTER (WHERE total_conversations > 1)::numeric, 0) as avg_days_retained
+      FROM returning
+    `, [months]);
+
+    const { rows: cohort } = await query(`
+      WITH monthly_first AS (
+        SELECT contact_id, DATE_TRUNC('month', MIN(created_at)) as cohort_month
+        FROM conversations GROUP BY contact_id
+      )
+      SELECT
+        TO_CHAR(mf.cohort_month, 'Mon/YY') as month,
+        COUNT(DISTINCT mf.contact_id) as new_contacts,
+        COUNT(DISTINCT c2.contact_id) as returned_contacts
+      FROM monthly_first mf
+      LEFT JOIN conversations c2 ON c2.contact_id = mf.contact_id
+        AND DATE_TRUNC('month', c2.created_at) > mf.cohort_month
+      WHERE mf.cohort_month > NOW() - ($1 || ' months')::interval
+      GROUP BY mf.cohort_month ORDER BY mf.cohort_month ASC
+    `, [months]);
+
+    const { rows: topReturning } = await query(`
+      SELECT ct.name, ct.phone, COUNT(c.id) as visits, MAX(c.created_at) as last_visit
+      FROM contacts ct JOIN conversations c ON c.contact_id=ct.id
+      GROUP BY ct.id, ct.name, ct.phone
+      HAVING COUNT(c.id) > 2
+      ORDER BY visits DESC LIMIT 10
+    `);
+
+    return { summary: retention[0], cohort, topReturning };
+  });
+
+  // ── Gamification / Agent Ranking ─────────────────────────────────────────
+  fastify.get('/stats/gamification', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query(`
+      SELECT
+        p.id, p.full_name, p.avatar_url,
+        (COUNT(c.id) FILTER (WHERE c.status='closed' AND c.closed_at > NOW() - interval '7 days') * 10) +
+        (COALESCE(ROUND(AVG(c.csat_score) FILTER (WHERE c.csat_score IS NOT NULL AND c.closed_at > NOW() - interval '7 days'))::int, 0) * 5) +
+        (COUNT(c.id) FILTER (WHERE c.status='closed' AND c.closed_at > NOW() - interval '7 days' AND c.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (c.first_response_at - c.created_at)) < 300) * 3) as points_week,
+        COUNT(c.id) FILTER (WHERE c.status='closed' AND c.closed_at > NOW() - interval '7 days') as closed_week,
+        COUNT(c.id) FILTER (WHERE c.status='closed') as closed_total,
+        ROUND(AVG(c.csat_score) FILTER (WHERE c.csat_score IS NOT NULL)::numeric, 1) as avg_csat,
+        ROUND(AVG(EXTRACT(EPOCH FROM (c.first_response_at - c.created_at))/60) FILTER (WHERE c.first_response_at IS NOT NULL)::numeric, 1) as avg_response_min
+      FROM profiles p
+      LEFT JOIN conversations c ON c.assigned_to = p.id
+      WHERE p.role IN ('agent','supervisor')
+      GROUP BY p.id ORDER BY points_week DESC
+    `);
+
+    const withBadges = rows.map((agent, idx) => {
+      const badges = [];
+      if (idx === 0) badges.push({ id: 'top1', label: '🥇 Top Agente', color: 'gold' });
+      if (idx === 1) badges.push({ id: 'top2', label: '🥈 2º Lugar', color: 'silver' });
+      if (idx === 2) badges.push({ id: 'top3', label: '🥉 3º Lugar', color: 'bronze' });
+      if (agent.avg_csat >= 4.5) badges.push({ id: 'csat_star', label: '⭐ Mestre CSAT', color: 'yellow' });
+      if (agent.avg_response_min < 5) badges.push({ id: 'speed', label: '⚡ Relâmpago', color: 'blue' });
+      if (agent.closed_week >= 20) badges.push({ id: 'closer', label: '🎯 Fechador', color: 'green' });
+      return { ...agent, badges, rank: idx + 1 };
+    });
+
+    return withBadges;
+  });
 }

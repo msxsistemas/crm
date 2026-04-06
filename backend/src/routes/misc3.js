@@ -1933,4 +1933,163 @@ ${conversationContext ? `Contexto da conversa atual:\n${conversationContext}\n\n
     return { answer: ai.content?.[0]?.text || 'Não foi possível gerar resposta.' };
   });
 
+  // ── Public System Status Page ─────────────────────────────────────────────
+  fastify.get('/status', async (req, reply) => {
+    const { pool } = await import('../database.js');
+    const { redis } = await import('../redis.js');
+    const { minioClient, BUCKET } = await import('../minio.js');
+
+    const checks = {};
+    const start = Date.now();
+
+    // PostgreSQL
+    try {
+      await pool.query('SELECT 1');
+      checks.postgres = { status: 'operational', latency: Date.now() - start };
+    } catch(e) {
+      checks.postgres = { status: 'down', error: e.message };
+    }
+
+    // Redis
+    try {
+      const t = Date.now();
+      await redis.ping();
+      checks.redis = { status: 'operational', latency: Date.now() - t };
+    } catch(e) {
+      checks.redis = { status: 'down', error: e.message };
+    }
+
+    // MinIO
+    try {
+      const t = Date.now();
+      await minioClient.bucketExists(BUCKET);
+      checks.minio = { status: 'operational', latency: Date.now() - t };
+    } catch(e) {
+      checks.minio = { status: 'degraded', error: e.message };
+    }
+
+    // WhatsApp connections
+    try {
+      const { rows } = await pool.query("SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status='open') as connected FROM connections");
+      checks.whatsapp = {
+        status: parseInt(rows[0].connected) > 0 ? 'operational' : 'degraded',
+        connected: parseInt(rows[0].connected),
+        total: parseInt(rows[0].total)
+      };
+    } catch(e) {
+      checks.whatsapp = { status: 'unknown' };
+    }
+
+    const allOk = Object.values(checks).every(c => c.status === 'operational');
+    const anyDown = Object.values(checks).some(c => c.status === 'down');
+
+    return {
+      status: anyDown ? 'major_outage' : allOk ? 'operational' : 'partial_outage',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      services: checks
+    };
+  });
+
+  // ── Organizations ─────────────────────────────────────────────────────────
+  fastify.get('/organizations', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query(`
+      SELECT o.id, o.name, o.logo_url, o.subdomain,
+        om.role as org_role,
+        (SELECT COUNT(*) FROM profiles WHERE organization_id = o.id) as member_count
+      FROM organizations o
+      JOIN organization_members om ON om.organization_id = o.id AND om.user_id = $1
+      ORDER BY o.name ASC
+    `, [req.user.id]).catch(() => ({ rows: [] }));
+
+    if (!rows.length) {
+      const { rows: s } = await query("SELECT id, name FROM settings WHERE id=1").catch(() => ({ rows: [] }));
+      return [{ id: s[0]?.id || '1', name: s[0]?.name || 'MSX CRM', logo_url: null, org_role: req.user.role }];
+    }
+    return rows;
+  });
+
+  fastify.post('/organizations', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    if (req.user.role !== 'admin') return reply.status(403).send({ error: 'Apenas admins podem criar organizações' });
+    const { name, subdomain } = req.body;
+    if (!name) return reply.status(400).send({ error: 'Nome obrigatório' });
+
+    try {
+      const { rows } = await query(
+        'INSERT INTO organizations (name, subdomain, created_by) VALUES ($1,$2,$3) RETURNING *',
+        [name, subdomain || null, req.user.id]
+      );
+      await query(
+        'INSERT INTO organization_members (organization_id, user_id, role) VALUES ($1,$2,$3)',
+        [rows[0].id, req.user.id, 'admin']
+      );
+      return rows[0];
+    } catch(e) {
+      return reply.status(500).send({ error: 'Funcionalidade requer migração de banco', details: e.message });
+    }
+  });
+
+  fastify.get('/organizations/current', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query("SELECT id, name, logo_url FROM settings WHERE id=1").catch(() => ({ rows: [] }));
+    return rows[0] || { id: '1', name: 'MSX CRM' };
+  });
+
+  fastify.patch('/organizations/current', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    if (req.user.role !== 'admin') return reply.status(403).send({ error: 'Forbidden' });
+    const { name, logo_url } = req.body;
+    await query('UPDATE settings SET name=COALESCE($1,name) WHERE id=1', [name]);
+    return { success: true };
+  });
+
+  // ── Google Sheets Export ──────────────────────────────────────────────────
+  fastify.post('/integrations/google-sheets/export', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { spreadsheet_id, sheet_name, access_token, data_type } = req.body;
+
+    if (!spreadsheet_id || !access_token) {
+      return reply.status(400).send({ error: 'spreadsheet_id e access_token obrigatórios' });
+    }
+
+    let rows = [];
+    let headers = [];
+
+    if (data_type === 'contacts') {
+      const { rows: contacts } = await query(
+        'SELECT name, phone, email, organization, city, state, created_at FROM contacts ORDER BY created_at DESC LIMIT 1000'
+      );
+      headers = ['Nome', 'Telefone', 'Email', 'Empresa', 'Cidade', 'Estado', 'Criado em'];
+      rows = contacts.map(c => [c.name, c.phone, c.email, c.organization, c.city, c.state, new Date(c.created_at).toLocaleDateString('pt-BR')]);
+    } else if (data_type === 'conversations') {
+      const { rows: convs } = await query(`
+        SELECT ct.name, ct.phone, c.status, c.csat_score, p.full_name as agent, c.created_at, c.closed_at
+        FROM conversations c JOIN contacts ct ON ct.id=c.contact_id LEFT JOIN profiles p ON p.id=c.assigned_to
+        ORDER BY c.created_at DESC LIMIT 1000
+      `);
+      headers = ['Contato', 'Telefone', 'Status', 'CSAT', 'Agente', 'Criado em', 'Fechado em'];
+      rows = convs.map(c => [c.name, c.phone, c.status, c.csat_score, c.agent, new Date(c.created_at).toLocaleDateString('pt-BR'), c.closed_at ? new Date(c.closed_at).toLocaleDateString('pt-BR') : '']);
+    }
+
+    const range = `${sheet_name || 'Sheet1'}!A1`;
+    const values = [headers, ...rows];
+
+    const response = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheet_id}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ values })
+      }
+    );
+
+    if (!response.ok) {
+      const err = await response.json();
+      return reply.status(400).send({ error: 'Falha ao escrever no Google Sheets', details: err });
+    }
+
+    const result = await response.json();
+    return { success: true, updated_rows: result.updatedRows, spreadsheet_url: `https://docs.google.com/spreadsheets/d/${spreadsheet_id}` };
+  });
+
 }
