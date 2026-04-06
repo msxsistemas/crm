@@ -79,9 +79,10 @@ const notifTypeIcon = (type: string) => {
 interface TopBarProps {
   onStartTour?: () => void;
   onOpenSearch?: () => void;
+  onOpenShortcuts?: () => void;
 }
 
-const TopBar = ({ onStartTour, onOpenSearch }: TopBarProps) => {
+const TopBar = ({ onStartTour, onOpenSearch, onOpenShortcuts }: TopBarProps) => {
   const { user } = useAuth();
   const { platformName } = usePlatformName();
   const navigate = useNavigate();
@@ -99,6 +100,14 @@ const TopBar = ({ onStartTour, onOpenSearch }: TopBarProps) => {
   const [isChangingStatus, setIsChangingStatus] = useState(false);
   const [socketStatus, setSocketStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [apiStatus, setApiStatus] = useState<'connected' | 'disconnected'>('disconnected');
+  const [orgName, setOrgName] = useState<string>("");
+
+  // Load org name
+  useEffect(() => {
+    api.get<{ id: string; name: string; logo_url: string | null }>('/organizations/current')
+      .then(org => { if (org?.name) setOrgName(org.name); })
+      .catch(() => {});
+  }, []);
 
   // Persist theme preference to server when changed
   useEffect(() => {
@@ -374,10 +383,18 @@ const TopBar = ({ onStartTour, onOpenSearch }: TopBarProps) => {
 
   return (
     <div className="h-14 bg-blue-600 flex items-center justify-between px-6 text-white text-sm shrink-0 select-none">
-      {/* Left: Greeting */}
-      <span className="truncate font-medium">
-        Olá {displayName}, Seja bem vindo(a) a plataforma {platformName}!
-      </span>
+      {/* Left: Greeting + Org badge */}
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="truncate font-medium">
+          Olá {displayName}, Seja bem vindo(a) a plataforma {platformName}!
+        </span>
+        {orgName && (
+          <span className="shrink-0 bg-white/15 text-white/90 text-[10px] font-medium px-2 py-0.5 rounded-full border border-white/20 hidden sm:inline-flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-300 inline-block" />
+            {orgName}
+          </span>
+        )}
+      </div>
 
       {/* Right: Icons */}
       <div className="flex items-center gap-3 shrink-0 ml-6">
@@ -529,6 +546,19 @@ const TopBar = ({ onStartTour, onOpenSearch }: TopBarProps) => {
           onComplete={id => updateReminderStatus(id, "completed")}
           onDismiss={id => updateReminderStatus(id, "dismissed")}
         />
+
+        {/* Keyboard shortcuts cheatsheet */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={onOpenShortcuts}
+              className="hover:text-white/80 transition-colors p-1 flex items-center gap-1 bg-white/10 rounded-md px-2 py-1"
+            >
+              <span className="text-[13px] font-bold leading-none">?</span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Atalhos de teclado (?)</TooltipContent>
+        </Tooltip>
 
         {/* Tour guide button */}
         {onStartTour && (

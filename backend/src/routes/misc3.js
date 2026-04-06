@@ -1892,6 +1892,28 @@ export default async function misc3Routes(fastify) {
     return { text: result.text };
   });
 
+  // ── Note Version History ──────────────────────────────────────────────────
+  fastify.get('/notes/:id/versions', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query(
+      'SELECT nv.*, p.full_name as edited_by_name FROM note_versions nv LEFT JOIN profiles p ON p.id=nv.edited_by WHERE nv.note_id=$1 ORDER BY nv.created_at DESC',
+      [req.params.id]
+    );
+    return rows;
+  });
+
+  fastify.post('/notes/:id/restore/:versionId', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows: ver } = await query('SELECT * FROM note_versions WHERE id=$1 AND note_id=$2', [req.params.versionId, req.params.id]);
+    if (!ver[0]) return reply.status(404).send({ error: 'Versão não encontrada' });
+
+    // Save current note content as a new version before restoring
+    const { rows: current } = await query('SELECT * FROM conversation_notes WHERE id=$1', [req.params.id]);
+    if (current[0]) {
+      await query('INSERT INTO note_versions (note_id, content, edited_by) VALUES ($1,$2,$3)', [req.params.id, current[0].content, req.user.id]);
+      await query('UPDATE conversation_notes SET content=$1 WHERE id=$2', [ver[0].content, req.params.id]);
+    }
+    return { success: true, content: ver[0].content };
+  });
+
   // ── AI Copilot for Agents ─────────────────────────────────────────────────
   fastify.post('/ai/copilot', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const { question, conversation_id, context_messages = 10 } = req.body;

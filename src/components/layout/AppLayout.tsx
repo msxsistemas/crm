@@ -11,6 +11,8 @@ import OnboardingTour from "@/components/onboarding/OnboardingTour";
 import GlobalSearch from "@/components/GlobalSearch";
 import { SessionTimeoutWarning } from "@/components/SessionTimeoutWarning";
 import OnboardingWizard from "@/components/OnboardingWizard";
+import { ShortcutsCheatsheet } from "@/components/ShortcutsCheatsheet";
+import { KeyboardShortcutsManager } from "@/components/KeyboardShortcutsManager";
 
 const AppLayout = () => {
   const { user } = useAuth();
@@ -18,19 +20,13 @@ const AppLayout = () => {
   const { updateStatus } = usePresence(user?.id, userName);
   const { tourActive, currentStep, totalSteps, startTour, endTour, nextStep, prevStep } =
     useOnboardingTour();
-  useGlobalKeyboardShortcuts();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
-        e.preventDefault();
-        setSearchOpen((prev) => !prev);
-      }
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, []);
+  useGlobalKeyboardShortcuts({
+    onOpenSearch: () => setSearchOpen((prev) => !prev),
+    onOpenCheatsheet: () => setCheatsheetOpen(true),
+  });
 
   // Set offline on tab/window close
   useEffect(() => {
@@ -57,7 +53,7 @@ const AppLayout = () => {
     <div className="flex h-screen overflow-hidden">
       <AppSidebar onStartTour={startTour} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <TopBar onStartTour={startTour} onOpenSearch={() => setSearchOpen(true)} />
+        <TopBar onStartTour={startTour} onOpenSearch={() => setSearchOpen(true)} onOpenShortcuts={() => setCheatsheetOpen(true)} />
         <main className="flex-1 overflow-hidden flex flex-col">
           <Suspense fallback={
             <div className="flex h-full items-center justify-center">
@@ -77,6 +73,7 @@ const AppLayout = () => {
         onEnd={endTour}
       />
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <ShortcutsCheatsheet open={cheatsheetOpen} onClose={() => setCheatsheetOpen(false)} />
       <SessionTimeoutWarning />
       <OnboardingWizard />
     </div>

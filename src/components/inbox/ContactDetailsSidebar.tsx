@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clock, TrendingUp, Send, ChevronDown, ChevronUp, Cake, Star, CheckSquare, Trash2, CreditCard, MapPin, ShieldOff, Shield, RefreshCw, Sliders, FolderOpen, FileText, Image, File, Download } from "lucide-react";
+import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clock, TrendingUp, Send, ChevronDown, ChevronUp, Cake, Star, CheckSquare, Trash2, CreditCard, MapPin, ShieldOff, Shield, RefreshCw, Sliders, FolderOpen, FileText, Image, File, Download, RotateCcw } from "lucide-react";
 import TagSelector from "@/components/shared/TagSelector";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { db } from "@/lib/db";
 import api from "@/lib/api";
 
@@ -131,6 +132,11 @@ const ContactDetailsSidebar = ({
   const [contactVersions, setContactVersions] = useState<{ id: string; changed_fields: Record<string, { old: unknown; new: unknown }>; changed_by_name: string | null; created_at: string }[]>([]);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [versionsLoaded, setVersionsLoaded] = useState(false);
+
+  // Note version history
+  interface NoteVersion { id: string; note_id: string; content: string; edited_by: string | null; edited_by_name: string | null; created_at: string; }
+  const [noteVersionsModal, setNoteVersionsModal] = useState<{ noteId: string; versions: NoteVersion[] } | null>(null);
+  const [noteVersionsLoading, setNoteVersionsLoading] = useState(false);
 
   // Contact conversation history
   const [contactHistory, setContactHistory] = useState<any[]>([]);
@@ -317,6 +323,31 @@ const ContactDetailsSidebar = ({
       })
       .catch(() => {});
   }, [contactId]);
+
+  // Load note version history
+  const loadNoteVersions = async (noteId: string) => {
+    setNoteVersionsLoading(true);
+    try {
+      const versions = await api.get<any[]>(`/notes/${noteId}/versions`);
+      setNoteVersionsModal({ noteId, versions: versions || [] });
+    } catch {
+      setNoteVersionsModal({ noteId, versions: [] });
+    } finally {
+      setNoteVersionsLoading(false);
+    }
+  };
+
+  const handleRestoreNoteVersion = async (noteId: string, versionId: string) => {
+    try {
+      const result = await api.post<{ success: boolean; content: string }>(`/notes/${noteId}/restore/${versionId}`);
+      if (result?.content) {
+        setNotes(prev => prev.map(n => n.id === noteId ? { ...n, content: result.content } : n));
+        setNoteVersionsModal(null);
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   // Load contact versions on demand
   const loadContactVersions = useCallback(() => {
@@ -1058,20 +1089,30 @@ const ContactDetailsSidebar = ({
                     {note.author_name || note.profiles?.full_name || "Usuário"}
                     {note.is_pinned && <span className="ml-1 text-yellow-600">📌</span>}
                   </p>
-                  <button
-                    type="button"
-                    title={note.is_pinned ? "Desafixar" : "Fixar nota"}
-                    className="text-muted-foreground hover:text-yellow-500 transition-colors"
-                    onClick={async () => {
-                      try {
-                        const { api } = await import("@/lib/api");
-                        await api.patch(`/conversations/${conversationId}/notes/${note.id}`, { is_pinned: !note.is_pinned });
-                        setNotes(prev => prev.map(n => n.id === note.id ? { ...n, is_pinned: !n.is_pinned } : n));
-                      } catch {}
-                    }}
-                  >
-                    <span className="text-[11px]">{note.is_pinned ? "✕" : "📌"}</span>
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      title="Ver histórico de versões"
+                      className="text-[10px] text-muted-foreground hover:text-blue-500 transition-colors flex items-center gap-0.5 px-1 py-0.5 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                      onClick={() => loadNoteVersions(note.id)}
+                    >
+                      <History className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      title={note.is_pinned ? "Desafixar" : "Fixar nota"}
+                      className="text-muted-foreground hover:text-yellow-500 transition-colors"
+                      onClick={async () => {
+                        try {
+                          const { api } = await import("@/lib/api");
+                          await api.patch(`/conversations/${conversationId}/notes/${note.id}`, { is_pinned: !note.is_pinned });
+                          setNotes(prev => prev.map(n => n.id === note.id ? { ...n, is_pinned: !n.is_pinned } : n));
+                        } catch {}
+                      }}
+                    >
+                      <span className="text-[11px]">{note.is_pinned ? "✕" : "📌"}</span>
+                    </button>
+                  </div>
                 </div>
                 <p className="text-xs text-foreground whitespace-pre-wrap">
                   {renderNoteContent(note.content)}
@@ -1878,6 +1919,61 @@ const ContactDetailsSidebar = ({
           </div>
         )}
       </div>
+
+      {/* Note Versions Modal */}
+      {noteVersionsModal && (
+        <Dialog open={!!noteVersionsModal} onOpenChange={(v) => { if (!v) setNoteVersionsModal(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <History className="h-4 w-4 text-primary" />
+                Histórico de Versões da Nota
+              </DialogTitle>
+            </DialogHeader>
+            {noteVersionsLoading ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">Carregando versões...</div>
+            ) : noteVersionsModal.versions.length === 0 ? (
+              <div className="py-6 text-center text-sm text-muted-foreground">
+                Nenhuma versão anterior encontrada.
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+                {noteVersionsModal.versions.map((ver) => (
+                  <div key={ver.id} className="rounded-md border border-border p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-[11px] font-medium text-muted-foreground">
+                          {ver.edited_by_name || 'Agente'}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {new Date(ver.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRestoreNoteVersion(noteVersionsModal.noteId, ver.id)}
+                        className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-primary text-primary hover:bg-primary/10 transition-colors"
+                        title="Restaurar esta versão"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        Restaurar
+                      </button>
+                    </div>
+                    <p className="text-xs text-foreground whitespace-pre-wrap bg-muted/40 rounded p-2 line-clamp-4">
+                      {ver.content}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="pt-2 border-t">
+              <Button size="sm" variant="ghost" className="w-full" onClick={() => setNoteVersionsModal(null)}>
+                Fechar
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 };

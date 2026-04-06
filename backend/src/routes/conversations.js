@@ -518,12 +518,36 @@ ${'─'.repeat(60)}
     return rows;
   });
 
-  // Pin/unpin note
+  // Pin/unpin note or update note content (with version auto-save)
   fastify.patch('/conversations/:id/notes/:noteId', auth, async (req, reply) => {
-    const { is_pinned } = req.body;
+    const { is_pinned, content } = req.body;
+    const updates = [];
+    const params = [];
+    let p = 1;
+
+    // If content is being updated, save old version first
+    if (content !== undefined) {
+      const { rows: oldNote } = await query(
+        'SELECT content FROM conversation_notes WHERE id=$1 AND conversation_id=$2',
+        [req.params.noteId, req.params.id]
+      );
+      if (oldNote[0] && oldNote[0].content !== content) {
+        await query(
+          'INSERT INTO note_versions (note_id, content, edited_by) VALUES ($1,$2,$3)',
+          [req.params.noteId, oldNote[0].content, req.user.id]
+        ).catch(() => {});
+      }
+      updates.push(`content = $${p}`); params.push(content); p++;
+    }
+
+    if (is_pinned !== undefined) { updates.push(`is_pinned = $${p}`); params.push(is_pinned); p++; }
+    if (!updates.length) return reply.status(400).send({ error: 'Nada para atualizar' });
+
+    params.push(req.params.noteId);
+    params.push(req.params.id);
     const { rows } = await query(
-      'UPDATE conversation_notes SET is_pinned=$1 WHERE id=$2 AND conversation_id=$3 RETURNING *',
-      [is_pinned, req.params.noteId, req.params.id]
+      `UPDATE conversation_notes SET ${updates.join(', ')} WHERE id=$${p} AND conversation_id=$${p + 1} RETURNING *`,
+      params
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Nota não encontrada' });
     return rows[0];

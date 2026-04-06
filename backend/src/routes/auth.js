@@ -145,7 +145,7 @@ export default async function authRoutes(fastify) {
   // Update profile
   // -- ALTER TABLE profiles ADD COLUMN IF NOT EXISTS theme_preference TEXT DEFAULT 'dark';
   fastify.patch('/auth/me', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { name, full_name, avatar_url, permissions, two_factor_enabled, signing_enabled, signature, signature_html, signature_enabled, status, max_conversations, absence_enabled, absence_start, absence_end, absence_message, theme_preference, onboarding_completed } = req.body;
+    const { name, full_name, avatar_url, permissions, two_factor_enabled, signing_enabled, signature, signature_html, signature_enabled, status, max_conversations, absence_enabled, absence_start, absence_end, absence_message, theme_preference, onboarding_completed, shortcuts_config } = req.body;
     const updates = [];
     const params = [];
     let p = 1;
@@ -166,6 +166,7 @@ export default async function authRoutes(fastify) {
     if (absence_message !== undefined) { updates.push(`absence_message = $${p}`); params.push(absence_message || null); p++; }
     if (theme_preference !== undefined && ['dark','light'].includes(theme_preference)) { updates.push(`theme_preference = $${p}`); params.push(theme_preference); p++; }
     if (onboarding_completed !== undefined) { updates.push(`onboarding_completed = $${p}`); params.push(onboarding_completed); p++; }
+    if (shortcuts_config !== undefined) { updates.push(`shortcuts_config = $${p}`); params.push(JSON.stringify(shortcuts_config)); p++; }
     if (!updates.length) return reply.status(400).send({ error: 'Nada para atualizar' });
     updates.push(`updated_at = NOW()`);
     params.push(req.user.id);

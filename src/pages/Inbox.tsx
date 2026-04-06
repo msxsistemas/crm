@@ -12,7 +12,7 @@ import {
   Trash2, Copy, Forward, Reply, Pencil, Check, AlertCircle, Bot, Clock, Target, Sparkles,
   LayoutTemplate, Tag, History, Ban, LayoutList, List, GitMerge, ShoppingBag, Download,
   CheckSquare, Users, Languages, UserCheck, Archive, LayoutGrid, AlignJustify, CreditCard,
-  Pin, PinOff,
+  Pin, PinOff, Eye, EyeOff, Bold, Italic, Code,
 } from "lucide-react";
 import { useFollowupReminders } from "@/hooks/useFollowupReminders";
 import FollowupDialog from "@/components/followup/FollowupDialog";
@@ -59,6 +59,7 @@ import { useMessageQueue } from "@/hooks/useMessageQueue";
 import { loadDistributionConfig, distributeConversation } from "@/lib/autoDistribution";
 import type { DistributionConfig } from "@/lib/autoDistribution";
 import { useSocketEvent } from "@/hooks/useSocketEvent";
+import { getSocket } from "@/lib/socket";
 import { useChatSound } from "@/hooks/useChatSound";
 
 const tailwindColorMap: Record<string, string> = {
@@ -248,6 +249,7 @@ const Inbox = () => {
     try { return JSON.parse(localStorage.getItem("inbox_search_history") || "[]"); } catch { return []; }
   });
   const [messageInput, setMessageInput] = useState("");
+  const [showMarkdownPreview, setShowMarkdownPreview] = useState(false);
   const [signing, setSigning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -508,6 +510,12 @@ const Inbox = () => {
   const typingChannelRef = useRef<RealtimeChannel | null>(null);
   const typingDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [typingUsers, setTypingUsers] = useState<{ user_id: string; user_name: string }[]>([]);
+
+  // Collaborative editing state
+  const [collaboratingAgent, setCollaboratingAgent] = useState<{ name: string; preview: string } | null>(null);
+  const collaboratingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Map conversationId -> composing agent info (for conversation list indicator)
+  const [composingByConvo, setComposingByConvo] = useState<Record<string, { name: string }>>({});
 
   // Message reactions state: messageId -> array of {emoji, count, users[]}
   const [messageReactions, setMessageReactions] = useState<
@@ -1163,6 +1171,27 @@ const Inbox = () => {
       setConversations(prev => prev.map(c => c.id === data.conversation_id ? { ...c, pinned_message_id: null } : c));
     }
   }, []);
+
+  // Collaborative editing: listen for other agents composing
+  useSocketEvent('agent:composing', (data: any) => {
+    if (!data?.conversation_id || !data?.agent_id) return;
+    // Update composing-by-convo map for conversation list indicator
+    setComposingByConvo(prev => ({ ...prev, [data.conversation_id]: { name: data.agent_name || 'Agente' } }));
+    // Auto-clear from map after 4s
+    setTimeout(() => {
+      setComposingByConvo(prev => {
+        const next = { ...prev };
+        delete next[data.conversation_id];
+        return next;
+      });
+    }, 4000);
+    // If it's in the currently selected conversation and it's a different agent, show banner
+    if (data.conversation_id === selected && data.agent_id !== user?.id) {
+      setCollaboratingAgent({ name: data.agent_name || 'Agente', preview: data.text_preview || '' });
+      if (collaboratingTimerRef.current) clearTimeout(collaboratingTimerRef.current);
+      collaboratingTimerRef.current = setTimeout(() => setCollaboratingAgent(null), 3000);
+    }
+  }, [selected, user?.id]);
 
   // Realtime subscriptions
   useEffect(() => {
@@ -2623,6 +2652,18 @@ const Inbox = () => {
     if (!msgSearch.trim()) return messages;
     return messages.filter(m => m.body?.toLowerCase().includes(msgSearch.toLowerCase()));
   }, [messages, msgSearch]);
+
+  const renderMarkdown = (text: string): string => {
+    return text
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/`(.+?)`/g, '<code class="bg-muted px-1 rounded text-sm">$1</code>')
+      .replace(/^### (.+)$/gm, '<h3 class="font-bold text-base">$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2 class="font-bold text-lg">$1</h2>')
+      .replace(/^# (.+)$/gm, '<h1 class="font-bold text-xl">$1</h1>')
+      .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
+      .replace(/\n/g, '<br>');
+  };
 
   const highlightText = (text: string, query: string): React.ReactNode => {
     if (!query.trim()) return text;
@@ -4273,9 +4314,16 @@ const Inbox = () => {
                           </div>
                         ) : (
                           <>
-                            <p className="whitespace-pre-wrap leading-[19px]">
-                              {highlightText(msg.body.replace(/\*(.*?)\*/g, '$1'), msgSearch)}
-                            </p>
+                            {msg.from_me && /(\*\*|\*|`|^#|^-)/m.test(msg.body || '') ? (
+                              <div
+                                className="leading-[19px] prose prose-sm dark:prose-invert max-w-none"
+                                dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.body) }}
+                              />
+                            ) : (
+                              <p className="whitespace-pre-wrap leading-[19px]">
+                                {highlightText(msg.body.replace(/\*(.*?)\*/g, '$1'), msgSearch)}
+                              </p>
+                            )}
                             {/https?:\/\//.test(msg.body) && (
                               <LinkPreview text={msg.body} fromMe={msg.from_me} />
                             )}
@@ -4517,6 +4565,27 @@ const Inbox = () => {
 
             {/* Message input - WhatsApp style */}
             {!selectingForForward && <div className="border-t border-border px-3 py-2 bg-card">
+              {/* Collaborative editing banner */}
+              {collaboratingAgent && (
+                <div className="px-3 py-1.5 -mx-3 mb-2 bg-blue-50 dark:bg-blue-950/30 border-b border-blue-200 dark:border-blue-800 text-xs text-blue-700 dark:text-blue-300 flex items-center gap-2">
+                  <div className="flex gap-0.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                  <span><strong>{collaboratingAgent.name}</strong> está escrevendo esta resposta...</span>
+                  {collaboratingAgent.preview && (
+                    <span className="text-blue-500 dark:text-blue-400 italic truncate max-w-[200px]">"{collaboratingAgent.preview}"</span>
+                  )}
+                  <button
+                    className="ml-auto text-blue-400 hover:text-blue-600 dark:hover:text-blue-200"
+                    onClick={() => setCollaboratingAgent(null)}
+                    title="Dispensar"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
               {/* File Manager selected preview */}
               {fileManagerSelected && (
                 <div className="flex items-center gap-2 mb-2 bg-muted rounded-lg px-3 py-2 border-l-4 border-primary">
@@ -4745,55 +4814,124 @@ const Inbox = () => {
                         ))}
                       </div>
                     )}
-                    <Input
-                      placeholder={uploading ? "Enviando arquivo..." : "Digite uma mensagem ou / para respostas rápidas"}
-                      className="w-full bg-muted border-0 text-foreground placeholder:text-muted-foreground rounded-lg h-10 focus-visible:ring-0 focus-visible:ring-offset-0"
-                      value={messageInput}
-                      onChange={(e) => {
-                        const newValue = e.target.value;
-                        setMessageInput(newValue);
-                        broadcastTyping();
-                        const lastSlashIdx = newValue.lastIndexOf("/");
-                        if (lastSlashIdx !== -1) {
-                          const afterSlash = newValue.slice(lastSlashIdx + 1);
-                          if (!afterSlash.includes(" ") || afterSlash.length === 0) {
-                            setSlashQuery(afterSlash.toLowerCase());
-                            setSlashSelectedIndex(0);
+                    {/* Markdown formatting toolbar */}
+                    {messageInput && (
+                      <div className="absolute bottom-full left-0 mb-0.5 flex items-center gap-0.5 bg-background border border-border rounded-md px-1 py-0.5 shadow-sm z-40">
+                        {[
+                          { icon: <Bold className="h-3 w-3" />, title: 'Negrito', wrap: '**', type: 'wrap' as const },
+                          { icon: <Italic className="h-3 w-3" />, title: 'Itálico', wrap: '*', type: 'wrap' as const },
+                          { icon: <Code className="h-3 w-3" />, title: 'Código', wrap: '`', type: 'wrap' as const },
+                          { icon: <List className="h-3 w-3" />, title: 'Lista', wrap: '- ', type: 'prefix' as const },
+                        ].map((btn) => (
+                          <button
+                            key={btn.title}
+                            title={btn.title}
+                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              const inputEl = document.querySelector('[data-msg-input]') as HTMLInputElement | null;
+                              if (!inputEl) return;
+                              const start = inputEl.selectionStart ?? 0;
+                              const end = inputEl.selectionEnd ?? 0;
+                              const val = messageInput;
+                              let newVal: string;
+                              let newCursor: number;
+                              if (btn.type === 'wrap') {
+                                const selected = val.slice(start, end);
+                                newVal = val.slice(0, start) + btn.wrap + selected + btn.wrap + val.slice(end);
+                                newCursor = end + btn.wrap.length * 2;
+                              } else {
+                                newVal = val.slice(0, start) + btn.wrap + val.slice(start);
+                                newCursor = start + btn.wrap.length;
+                              }
+                              setMessageInput(newVal);
+                              requestAnimationFrame(() => {
+                                inputEl.focus();
+                                inputEl.setSelectionRange(newCursor, newCursor);
+                              });
+                            }}
+                          >
+                            {btn.icon}
+                          </button>
+                        ))}
+                        <div className="w-px h-3 bg-border mx-0.5" />
+                        <button
+                          title={showMarkdownPreview ? 'Editar' : 'Pré-visualizar Markdown'}
+                          className={cn("p-1 rounded transition-colors", showMarkdownPreview ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
+                          onMouseDown={(e) => { e.preventDefault(); setShowMarkdownPreview(v => !v); }}
+                        >
+                          {showMarkdownPreview ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                        </button>
+                      </div>
+                    )}
+                    {showMarkdownPreview && messageInput ? (
+                      <div
+                        className="w-full min-h-[40px] bg-muted border-0 text-foreground rounded-lg px-3 py-2 text-sm leading-[19px] prose prose-sm dark:prose-invert max-w-none cursor-text"
+                        onClick={() => setShowMarkdownPreview(false)}
+                        dangerouslySetInnerHTML={{ __html: renderMarkdown(messageInput) }}
+                        title="Clique para voltar a editar"
+                      />
+                    ) : (
+                      <Input
+                        data-msg-input
+                        placeholder={uploading ? "Enviando arquivo..." : "Digite uma mensagem ou / para respostas rápidas"}
+                        className="w-full bg-muted border-0 text-foreground placeholder:text-muted-foreground rounded-lg h-10 focus-visible:ring-0 focus-visible:ring-offset-0"
+                        value={messageInput}
+                        onChange={(e) => {
+                          const newValue = e.target.value;
+                          setMessageInput(newValue);
+                          broadcastTyping();
+                          // Emit collaborative composing event to other agents
+                          if (selectedConvo?.id && user?.id) {
+                            getSocket().emit('agent:composing', {
+                              conversation_id: selectedConvo.id,
+                              agent_name: profileName || user.email || 'Agente',
+                              agent_id: user.id,
+                              text_preview: newValue.substring(0, 50),
+                            });
+                          }
+                          const lastSlashIdx = newValue.lastIndexOf("/");
+                          if (lastSlashIdx !== -1) {
+                            const afterSlash = newValue.slice(lastSlashIdx + 1);
+                            if (!afterSlash.includes(" ") || afterSlash.length === 0) {
+                              setSlashQuery(afterSlash.toLowerCase());
+                              setSlashSelectedIndex(0);
+                            } else {
+                              setSlashQuery(null);
+                            }
                           } else {
                             setSlashQuery(null);
                           }
-                        } else {
-                          setSlashQuery(null);
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (slashQuery !== null && slashResults.length > 0) {
-                          if (e.key === "ArrowDown") {
-                            e.preventDefault();
-                            setSlashSelectedIndex((i) => Math.min(i + 1, slashResults.length - 1));
-                            return;
+                        }}
+                        onKeyDown={(e) => {
+                          if (slashQuery !== null && slashResults.length > 0) {
+                            if (e.key === "ArrowDown") {
+                              e.preventDefault();
+                              setSlashSelectedIndex((i) => Math.min(i + 1, slashResults.length - 1));
+                              return;
+                            }
+                            if (e.key === "ArrowUp") {
+                              e.preventDefault();
+                              setSlashSelectedIndex((i) => Math.max(i - 1, 0));
+                              return;
+                            }
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleSlashSelect(slashResults[slashSelectedIndex]);
+                              return;
+                            }
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              setSlashQuery(null);
+                              return;
+                            }
                           }
-                          if (e.key === "ArrowUp") {
-                            e.preventDefault();
-                            setSlashSelectedIndex((i) => Math.max(i - 1, 0));
-                            return;
-                          }
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            handleSlashSelect(slashResults[slashSelectedIndex]);
-                            return;
-                          }
-                          if (e.key === "Escape") {
-                            e.preventDefault();
-                            setSlashQuery(null);
-                            return;
-                          }
-                        }
-                        if (e.key === "Enter" && !e.shiftKey) handleSendMessage();
-                        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleSendMessage(); }
-                      }}
-                      disabled={uploading}
-                    />
+                          if (e.key === "Enter" && !e.shiftKey) handleSendMessage();
+                          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleSendMessage(); }
+                        }}
+                        disabled={uploading}
+                      />
+                    )}
                   </div>
                   <div className="flex items-center gap-0.5">
                     <SignatureButton
