@@ -3384,7 +3384,13 @@ const Inbox = () => {
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground truncate mb-1.5">
-                      {convo.last_message_body || (convo.contacts?.name ? convo.contacts.phone : "Nova conversa")}
+                      {composingByConvo[convo.id] ? (
+                        <span className="text-blue-500 dark:text-blue-400 italic">
+                          ✍ {composingByConvo[convo.id].name} está escrevendo...
+                        </span>
+                      ) : (
+                        convo.last_message_body || (convo.contacts?.name ? convo.contacts.phone : "Nova conversa")
+                      )}
                     </p>
                     <div className="flex items-center gap-1 flex-wrap">
                       {convo.instance_name && convo.instance_name !== "default" && (

@@ -4971,6 +4971,230 @@ const SlaCategoryTab = () => {
   );
 };
 
+// ─── Google Sheets Section ───────────────────────────────────────────────────
+const GoogleSheetsSection = () => {
+  const [accessToken, setAccessToken] = useState('');
+  const [spreadsheetId, setSpreadsheetId] = useState('');
+  const [sheetName, setSheetName] = useState('Sheet1');
+  const [dataType, setDataType] = useState<'contacts' | 'conversations'>('contacts');
+  const [exporting, setExporting] = useState(false);
+  const [spreadsheetUrl, setSpreadsheetUrl] = useState<string | null>(null);
+  const [showToken, setShowToken] = useState(false);
+
+  const handleExport = async () => {
+    if (!accessToken.trim() || !spreadsheetId.trim()) {
+      toast.error('Access Token e Spreadsheet ID são obrigatórios');
+      return;
+    }
+    setExporting(true);
+    setSpreadsheetUrl(null);
+    try {
+      const res = await api.post<{ success: boolean; updated_rows: number; spreadsheet_url: string }>(
+        '/integrations/google-sheets/export',
+        { spreadsheet_id: spreadsheetId.trim(), sheet_name: sheetName || 'Sheet1', access_token: accessToken.trim(), data_type: dataType }
+      );
+      if (res?.success) {
+        toast.success(`Exportado com sucesso! ${res.updated_rows ?? ''} linhas atualizadas.`);
+        setSpreadsheetUrl(res.spreadsheet_url);
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Erro ao exportar para Google Sheets');
+    }
+    setExporting(false);
+  };
+
+  return (
+    <Card className="p-4 space-y-4">
+      <div className="flex items-center gap-3 mb-1">
+        <div className="h-10 w-10 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-xl">📊</div>
+        <div>
+          <div className="font-semibold">Exportar para Google Sheets</div>
+          <div className="text-sm text-muted-foreground">Envie contatos ou conversas diretamente para uma planilha do Google</div>
+        </div>
+      </div>
+
+      <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground space-y-1">
+        <p className="font-medium text-foreground">Como configurar:</p>
+        <p>1. Acesse <strong>Google Cloud Console</strong>, crie um projeto e ative a <strong>API Google Sheets</strong>.</p>
+        <p>2. Gere um <strong>Access Token OAuth2</strong> via <a href="https://developers.google.com/oauthplayground" target="_blank" rel="noopener noreferrer" className="text-blue-500 underline">Google OAuth Playground</a>.</p>
+        <p>3. Copie o ID da planilha da URL: <code className="bg-muted px-1 rounded">docs.google.com/spreadsheets/d/<strong>ID</strong>/</code></p>
+        <p className="text-amber-600 dark:text-amber-400">⚠️ O token expira em 1h — gere um novo quando necessário.</p>
+      </div>
+
+      <div className="grid gap-3">
+        <div>
+          <label className="text-sm font-medium block mb-1">Access Token OAuth2 *</label>
+          <div className="relative">
+            <Input
+              type={showToken ? 'text' : 'password'}
+              value={accessToken}
+              onChange={e => setAccessToken(e.target.value)}
+              placeholder="ya29.a0AfH6SM..."
+              className="pr-10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowToken(v => !v)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+        <div>
+          <label className="text-sm font-medium block mb-1">Spreadsheet ID *</label>
+          <Input
+            value={spreadsheetId}
+            onChange={e => setSpreadsheetId(e.target.value)}
+            placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+          />
+        </div>
+        <div>
+          <label className="text-sm font-medium block mb-1">Nome da Aba</label>
+          <Input
+            value={sheetName}
+            onChange={e => setSheetName(e.target.value)}
+            placeholder="Sheet1"
+          />
+        </div>
+        <div>
+          <label className="text-sm font-medium block mb-2">Dados a exportar</label>
+          <div className="flex gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="radio" checked={dataType === 'contacts'} onChange={() => setDataType('contacts')} className="accent-primary" />
+              <span className="text-sm">Contatos</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="radio" checked={dataType === 'conversations'} onChange={() => setDataType('conversations')} className="accent-primary" />
+              <span className="text-sm">Conversas</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Button onClick={handleExport} disabled={exporting} className="gap-2">
+          {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <span>📤</span>}
+          Exportar para Google Sheets
+        </Button>
+        {spreadsheetUrl && (
+          <a
+            href={spreadsheetUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-blue-600 dark:text-blue-400 underline flex items-center gap-1"
+          >
+            <CheckCircle className="h-4 w-4 text-green-500" /> Abrir planilha
+          </a>
+        )}
+      </div>
+    </Card>
+  );
+};
+
+// ─── Organização Tab ──────────────────────────────────────────────────────────
+const OrganizacaoTab = () => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const [orgName, setOrgName] = useState('');
+  const [orgLogoUrl, setOrgLogoUrl] = useState('');
+  const [memberCount, setMemberCount] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const org = await api.get<{ id: string; name: string; logo_url: string | null }>('/organizations/current');
+        setOrgName(org?.name || '');
+        setOrgLogoUrl(org?.logo_url || '');
+        // Fetch member count from organizations list
+        const orgs = await api.get<{ id: string; name: string; member_count?: number }[]>('/organizations');
+        const first = orgs?.[0];
+        if (first?.member_count !== undefined) setMemberCount(Number(first.member_count));
+      } catch {}
+      setLoading(false);
+    };
+    load();
+  }, []);
+
+  const handleSave = async () => {
+    if (!orgName.trim()) { toast.error('Nome obrigatório'); return; }
+    setSaving(true);
+    try {
+      await api.patch('/organizations/current', { name: orgName.trim(), logo_url: orgLogoUrl || null });
+      toast.success('Organização atualizada!');
+    } catch { toast.error('Erro ao salvar'); }
+    setSaving(false);
+  };
+
+  if (loading) return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+
+  return (
+    <div className="space-y-6">
+      <Card className="p-4 space-y-4">
+        <div className="flex items-center gap-3 mb-1">
+          <div className="h-10 w-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+            <Building className="h-5 w-5 text-blue-600" />
+          </div>
+          <div>
+            <div className="font-semibold">Organização</div>
+            <div className="text-sm text-muted-foreground">Informações da sua empresa no CRM</div>
+          </div>
+        </div>
+
+        <div className="grid gap-3">
+          <div>
+            <label className="text-sm font-medium block mb-1">Nome da Organização *</label>
+            <Input
+              value={orgName}
+              onChange={e => setOrgName(e.target.value)}
+              placeholder="Nome da empresa"
+              disabled={!isAdmin}
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium block mb-1">URL do Logotipo</label>
+            <Input
+              value={orgLogoUrl}
+              onChange={e => setOrgLogoUrl(e.target.value)}
+              placeholder="https://exemplo.com/logo.png"
+              disabled={!isAdmin}
+            />
+            {orgLogoUrl && (
+              <div className="mt-2">
+                <img src={orgLogoUrl} alt="Logo preview" className="h-10 w-auto rounded border" onError={e => (e.currentTarget.style.display = 'none')} />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {isAdmin && (
+          <Button onClick={handleSave} disabled={saving} className="gap-2">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Salvar
+          </Button>
+        )}
+      </Card>
+
+      <Card className="p-4">
+        <div className="flex items-center gap-3 mb-3">
+          <Users2 className="h-5 w-5 text-muted-foreground" />
+          <div>
+            <div className="font-semibold">Membros</div>
+            {memberCount !== null && (
+              <div className="text-sm text-muted-foreground">{memberCount} membro(s) na organização</div>
+            )}
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground bg-muted/50 rounded-lg p-3">
+          Para múltiplas organizações completas (multi-tenant), entre em contato com o suporte.
+        </p>
+      </Card>
+    </div>
+  );
+};
+
 // ─── Integrações Tab (n8n / Zapier / Make) ─────────────────────────────────
 const INTEGRATION_EVENTS = [
   { value: 'conversation.created', label: 'Nova conversa criada' },
@@ -5196,6 +5420,9 @@ const IntegracaoTab = () => {
         )}
       </Card>
 
+      {/* Google Sheets Export */}
+      <GoogleSheetsSection />
+
       {/* Create dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
@@ -5306,6 +5533,7 @@ const Settings = () => {
             <TabsTrigger value="fila_espera" className="gap-1.5"><Clock className="h-3.5 w-3.5" /> Fila de Espera</TabsTrigger>
             <TabsTrigger value="sla_categoria" className="gap-1.5"><Clock className="h-3.5 w-3.5" /> SLA por Categoria</TabsTrigger>
             <TabsTrigger value="integracoes" className="gap-1.5"><Globe className="h-3.5 w-3.5" /> Integrações</TabsTrigger>
+            <TabsTrigger value="organizacao" className="gap-1.5"><Building className="h-3.5 w-3.5" /> Organização</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -5338,6 +5566,7 @@ const Settings = () => {
           <TabsContent value="fila_espera"><QueueMessageTab /></TabsContent>
           <TabsContent value="sla_categoria"><SlaCategoryTab /></TabsContent>
           <TabsContent value="integracoes"><IntegracaoTab /></TabsContent>
+          <TabsContent value="organizacao"><OrganizacaoTab /></TabsContent>
         </Tabs>
       </div>
     </div>
