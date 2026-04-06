@@ -137,7 +137,7 @@ export default async function authRoutes(fastify) {
 
   // Update profile
   fastify.patch('/auth/me', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { name, avatar_url, permissions, two_factor_enabled, signing_enabled, signature, status } = req.body;
+    const { name, avatar_url, permissions, two_factor_enabled, signing_enabled, signature, status, max_conversations } = req.body;
     const updates = [];
     const params = [];
     let p = 1;
@@ -148,6 +148,7 @@ export default async function authRoutes(fastify) {
     if (signing_enabled !== undefined) { updates.push(`signing_enabled = $${p}`); params.push(signing_enabled); p++; }
     if (signature !== undefined) { updates.push(`signature = $${p}`); params.push(signature); p++; }
     if (status !== undefined && ['online','offline','away'].includes(status)) { updates.push(`status = $${p}`); params.push(status); p++; }
+    if (max_conversations !== undefined) { updates.push(`max_conversations = $${p}`); params.push(max_conversations === 0 || max_conversations === null ? null : parseInt(max_conversations) || null); p++; }
     if (!updates.length) return reply.status(400).send({ error: 'Nada para atualizar' });
     updates.push(`updated_at = NOW()`);
     params.push(req.user.id);

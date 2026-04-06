@@ -59,7 +59,7 @@ export default async function userRoutes(fastify) {
   });
 
   fastify.patch('/users/:id', adminOnly, async (req, reply) => {
-    const { name, full_name, email, role, permissions, password, status, signing_enabled, avatar_url } = req.body;
+    const { name, full_name, email, role, permissions, password, status, signing_enabled, avatar_url, max_conversations } = req.body;
     const updates = [];
     const params = [];
     let p = 1;
@@ -74,10 +74,11 @@ export default async function userRoutes(fastify) {
     if (status !== undefined) { updates.push(`status = $${p}`); params.push(status); p++; }
     if (signing_enabled !== undefined) { updates.push(`signing_enabled = $${p}`); params.push(signing_enabled); p++; }
     if (avatar_url !== undefined) { updates.push(`avatar_url = $${p}`); params.push(avatar_url); p++; }
+    if (max_conversations !== undefined) { updates.push(`max_conversations = $${p}`); params.push(max_conversations === 0 || max_conversations === null ? null : parseInt(max_conversations) || null); p++; }
     if (!updates.length) return reply.status(400).send({ error: 'Nada para atualizar' });
     params.push(req.params.id);
     const { rows } = await query(
-      `UPDATE profiles SET ${updates.join(',')} WHERE id = $${p} RETURNING id, name, name as full_name, email, role, permissions, status, signing_enabled, avatar_url`,
+      `UPDATE profiles SET ${updates.join(',')} WHERE id = $${p} RETURNING id, name, name as full_name, email, role, permissions, status, signing_enabled, avatar_url, max_conversations`,
       params
     );
     return rows[0];

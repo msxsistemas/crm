@@ -7,6 +7,7 @@
 // ALTER TABLE conversations ADD COLUMN IF NOT EXISTS sla_deadline TIMESTAMPTZ;
 // ALTER TABLE conversations ADD COLUMN IF NOT EXISTS sla_alerted BOOLEAN DEFAULT false;
 // ALTER TABLE categories ADD COLUMN IF NOT EXISTS sla_hours INTEGER;
+// ALTER TABLE profiles ADD COLUMN IF NOT EXISTS max_conversations INTEGER;
 
 import { query, pool, withTransaction } from '../database.js';
 import { cached, invalidate } from '../redis.js';
@@ -553,5 +554,35 @@ ${'─'.repeat(60)}
       LIMIT 100
     `);
     return rows;
+  });
+
+  // ── Supervisor Live Dashboard ──────────────────────────────────────────────
+  fastify.get('/supervisor/live', auth, async (req) => {
+    const { rows: queue } = await query(`
+      SELECT c.id, c.created_at, c.last_message_at, c.unread_count, c.sla_deadline,
+             ct.name as contact_name, ct.phone as contact_phone,
+             c.connection_name as instance_name, c.category_id, cat.name as category_name,
+             p.name as agent_name, p.id as agent_id, p.status as agent_status
+      FROM conversations c
+      JOIN contacts ct ON ct.id = c.contact_id
+      LEFT JOIN profiles p ON p.id = c.assigned_to
+      LEFT JOIN categories cat ON cat.id = c.category_id
+      WHERE c.status = 'open'
+      ORDER BY c.last_message_at DESC
+      LIMIT 200
+    `);
+
+    const { rows: agentStats } = await query(`
+      SELECT p.id, p.name as full_name, p.status, p.avatar_url, p.max_conversations,
+             COUNT(c.id) FILTER (WHERE c.status='open') as open_count,
+             COUNT(c.id) FILTER (WHERE c.status='closed' AND c.closed_at > NOW() - interval '24 hours') as closed_today
+      FROM profiles p
+      LEFT JOIN conversations c ON c.assigned_to = p.id
+      WHERE p.role IN ('agent','supervisor')
+      GROUP BY p.id, p.name, p.status, p.avatar_url, p.max_conversations
+      ORDER BY open_count DESC
+    `);
+
+    return { queue, agentStats };
   });
 }

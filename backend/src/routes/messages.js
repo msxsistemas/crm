@@ -354,7 +354,9 @@ async function handleEvolutionWebhook(payload, fastify) {
               FROM profiles p
               LEFT JOIN conversations c ON c.assigned_to = p.id AND c.status != 'closed'
               WHERE p.role IN ('agent','supervisor') AND p.status = 'online'
-              GROUP BY p.id ORDER BY open_count ASC LIMIT 1
+              GROUP BY p.id, p.max_conversations
+              HAVING p.max_conversations IS NULL OR COUNT(c.id) < p.max_conversations
+              ORDER BY open_count ASC LIMIT 1
             `);
             if (agents[0]) {
               await client.query('UPDATE conversations SET assigned_to=$1 WHERE id=$2', [agents[0].id, conv.id]);

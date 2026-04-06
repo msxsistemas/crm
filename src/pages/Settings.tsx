@@ -1015,15 +1015,40 @@ const HorariosTab = () => {
 
 // ─── Distribuição Tab ───
 const DistribuicaoTab = () => {
+  const { user } = useAuth();
   const [enabled, setEnabled] = useState(true);
   const [mode, setMode] = useState("round_robin");
   const [saving, setSaving] = useState(false);
+  const [agents, setAgents] = useState<Array<{ id: string; name?: string; full_name?: string; max_conversations: number | null; open_count?: number }>>([]);
+  const [agentCapacities, setAgentCapacities] = useState<Record<string, string>>({});
+  const [savingCapacity, setSavingCapacity] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     api.get<any>('/auto-distribution-config').then(data => {
       if (data.is_active !== undefined) setEnabled(data.is_active);
       if (data.mode) setMode(data.mode);
     }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api.get<any>('/supervisor/live').then(data => {
+      if (data?.agentStats) {
+        setAgents(data.agentStats);
+        const caps: Record<string, string> = {};
+        for (const a of data.agentStats) {
+          caps[a.id] = a.max_conversations != null ? String(a.max_conversations) : '';
+        }
+        setAgentCapacities(caps);
+      }
+    }).catch(() => {
+      api.get<any[]>('/users').then(rows => {
+        const filtered = (rows || []).filter((u: any) => ['agent','supervisor'].includes(u.role));
+        setAgents(filtered);
+        const caps: Record<string, string> = {};
+        for (const a of filtered) caps[a.id] = a.max_conversations != null ? String(a.max_conversations) : '';
+        setAgentCapacities(caps);
+      }).catch(() => {});
+    });
   }, []);
 
   const handleSave = async () => {
@@ -1035,6 +1060,24 @@ const DistribuicaoTab = () => {
       toast.error("Erro ao salvar configurações");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveCapacity = async (agentId: string) => {
+    setSavingCapacity(prev => ({ ...prev, [agentId]: true }));
+    try {
+      const val = agentCapacities[agentId];
+      const maxConv = val === '' || val === '0' ? null : parseInt(val) || null;
+      if (agentId === user?.id) {
+        await api.patch('/auth/me', { max_conversations: maxConv });
+      } else {
+        await api.patch(`/users/${agentId}`, { max_conversations: maxConv });
+      }
+      toast.success("Capacidade salva!");
+    } catch {
+      toast.error("Erro ao salvar capacidade");
+    } finally {
+      setSavingCapacity(prev => ({ ...prev, [agentId]: false }));
     }
   };
 
@@ -1106,6 +1149,50 @@ const DistribuicaoTab = () => {
           </div>
         </>
       )}
+
+      {/* Capacidade por Agente */}
+      <Card className="p-4 space-y-4">
+        <div>
+          <p className="font-semibold text-foreground">Capacidade por Atendente</p>
+          <p className="text-sm text-muted-foreground">Defina o número máximo de conversas simultâneas por atendente. Deixe em branco ou zero para ilimitado.</p>
+        </div>
+        {agents.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nenhum atendente encontrado.</p>
+        ) : (
+          <div className="space-y-2">
+            {agents.map(a => {
+              const displayName = a.full_name || a.name || a.id;
+              return (
+                <div key={a.id} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                  <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xs font-bold shrink-0">
+                    {(displayName as string).charAt(0).toUpperCase()}
+                  </div>
+                  <p className="flex-1 text-sm font-medium text-foreground truncate">{displayName as string}</p>
+                  {a.open_count !== undefined && (
+                    <span className="text-xs text-muted-foreground shrink-0">{a.open_count} abertas</span>
+                  )}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={999}
+                      placeholder="Ilimitado"
+                      value={agentCapacities[a.id] ?? ''}
+                      onChange={e => setAgentCapacities(prev => ({ ...prev, [a.id]: e.target.value }))}
+                      className="w-28 h-8 text-sm"
+                    />
+                    <Button size="sm" variant="outline" className="h-8 px-3"
+                      disabled={savingCapacity[a.id]}
+                      onClick={() => handleSaveCapacity(a.id)}>
+                      {savingCapacity[a.id] ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
     </div>
   );
 };
