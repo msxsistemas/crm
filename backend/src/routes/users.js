@@ -55,7 +55,10 @@ export default async function userRoutes(fastify) {
     if (!password) {
       notifyTempPassword({ email: email.toLowerCase(), name, tempPassword }).catch(err => console.error('notifyTempPassword failed:', err.message));
     }
-    return reply.status(201).send({ ...rows[0], ...(password ? {} : { tempPassword }) });
+    const newUser = rows[0];
+    await query("INSERT INTO audit_log (actor_id, action, entity_type, entity_id, details) VALUES ($1,'user_created','user',$2,$3)",
+      [req.user?.id || null, newUser.id, JSON.stringify({ name: newUser.name, email: newUser.email })]).catch(() => {});
+    return reply.status(201).send({ ...newUser, ...(password ? {} : { tempPassword }) });
   });
 
   fastify.patch('/users/:id', adminOnly, async (req, reply) => {

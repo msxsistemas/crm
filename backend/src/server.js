@@ -357,6 +357,30 @@ try {
   process.exit(1);
 }
 
+// Appointment reminders — runs every minute
+setInterval(async () => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT a.*, ct.phone, c.connection_name as instance_name
+      FROM appointments a
+      JOIN contacts ct ON ct.id=a.contact_id
+      JOIN conversations cv ON cv.contact_id=ct.id AND cv.status='open'
+      JOIN connections c ON c.name=cv.connection_name
+      WHERE a.notify_via_whatsapp=true AND a.notified=false AND a.scheduled_at <= NOW() + interval '15 minutes' AND a.scheduled_at > NOW()
+    `);
+    for (const appt of rows) {
+      try {
+        await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${appt.instance_name}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+          body: JSON.stringify({ number: appt.phone, text: `⏰ Lembrete: ${appt.title} em 15 minutos!` })
+        });
+        await pool.query('UPDATE appointments SET notified=true WHERE id=$1', [appt.id]);
+      } catch(e) {}
+    }
+  } catch(e) {}
+}, 60000);
+
 // Graceful shutdown
 const shutdown = async () => {
   console.log('\nEncerrando servidor...');

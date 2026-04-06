@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { db } from "@/lib/db";
+import api from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,149 +27,119 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Download, Eye, ChevronLeft, ChevronRight, Shield } from "lucide-react";
+import { ShieldCheck, Eye, ChevronDown } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 interface AuditEntry {
   id: string;
-  user_id: string | null;
-  user_name: string | null;
+  actor_id: string | null;
+  actor_name: string | null;
   action: string;
-  resource_type: string | null;
-  resource_id: string | null;
-  resource_name: string | null;
-  ip_address: string | null;
-  user_agent: string | null;
-  metadata: Record<string, unknown> | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  details: Record<string, unknown> | null;
   created_at: string;
 }
 
 const ACTION_LABELS: Record<string, string> = {
-  view_contact: "👁️ Visualizou contato",
-  edit_contact: "✏️ Editou contato",
-  delete_contact: "🗑️ Deletou contato",
-  export_contacts: "📤 Exportou contatos",
-  view_conversation: "💬 Visualizou conversa",
-  export_conversation: "📤 Exportou conversa",
-  send_campaign: "📧 Enviou campanha",
-  view_report: "📊 Visualizou relatório",
-  login: "🔑 Login",
-  logout: "🚪 Logout",
-  api_access: "🔌 Acesso API",
+  user_created: "Usuário criado",
+  user_updated: "Usuário atualizado",
+  user_deleted: "Usuário excluído",
+  login: "Login",
+  logout: "Logout",
+  contact_created: "Contato criado",
+  contact_updated: "Contato atualizado",
+  contact_deleted: "Contato excluído",
+  conversation_closed: "Conversa encerrada",
+  campaign_sent: "Campanha enviada",
+  settings_changed: "Configuração alterada",
 };
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 50;
 
 export default function AuditLog() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [totalCount, setTotalCount] = useState(0);
-  const [page, setPage] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Filters
   const [filterAction, setFilterAction] = useState("all");
-  const [filterUser, setFilterUser] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
 
   // Detail modal
   const [detailEntry, setDetailEntry] = useState<AuditEntry | null>(null);
 
-  const fetchEntries = useCallback(async () => {
-    setLoading(true);
+  useEffect(() => {
+    if (user && !["admin", "supervisor"].includes(user.role || "")) {
+      navigate("/");
+    }
+  }, [user, navigate]);
+
+  const fetchEntries = useCallback(async (reset = false) => {
+    const currentOffset = reset ? 0 : offset;
+    if (reset) setLoading(true);
+    else setLoadingMore(true);
     try {
-      let query = db
-        .from("access_audit")
-        .select("*", { count: "exact" })
-        .order("created_at", { ascending: false })
-        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-
-      if (filterAction && filterAction !== "all") {
-        query = query.eq("action", filterAction);
+      const data = await api.get(`/admin/audit-log?limit=${PAGE_SIZE}&offset=${currentOffset}`);
+      const rows: AuditEntry[] = Array.isArray(data) ? data : [];
+      if (reset) {
+        setEntries(rows);
+        setOffset(rows.length);
+      } else {
+        setEntries(prev => [...prev, ...rows]);
+        setOffset(prev => prev + rows.length);
       }
-      if (filterUser.trim()) {
-        query = query.ilike("user_name", `%${filterUser.trim()}%`);
-      }
-      if (filterDateFrom) {
-        query = query.gte("created_at", new Date(filterDateFrom).toISOString());
-      }
-      if (filterDateTo) {
-        const to = new Date(filterDateTo);
-        to.setDate(to.getDate() + 1);
-        query = query.lt("created_at", to.toISOString());
-      }
-
-      const { data, count, error } = await query;
-      if (error) throw error;
-      setEntries((data as AuditEntry[]) || []);
-      setTotalCount(count || 0);
+      setHasMore(rows.length === PAGE_SIZE);
     } catch (err: unknown) {
       toast.error("Erro ao carregar log de auditoria");
       console.error(err);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  }, [page, filterAction, filterUser, filterDateFrom, filterDateTo]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offset]);
 
   useEffect(() => {
-    fetchEntries();
-  }, [fetchEntries]);
+    fetchEntries(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const handleExportCSV = () => {
-    if (entries.length === 0) {
-      toast.error("Nenhum registro para exportar");
-      return;
+  const displayedEntries = entries.filter(e => {
+    if (filterAction && filterAction !== "all" && e.action !== filterAction) return false;
+    if (filterDateFrom && new Date(e.created_at) < new Date(filterDateFrom)) return false;
+    if (filterDateTo) {
+      const to = new Date(filterDateTo);
+      to.setDate(to.getDate() + 1);
+      if (new Date(e.created_at) >= to) return false;
     }
-    const headers = ["Data/Hora", "Usuário", "Ação", "Tipo de Recurso", "ID do Recurso", "Nome do Recurso"];
-    const rows = entries.map((e) => [
-      format(new Date(e.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR }),
-      e.user_name || "",
-      ACTION_LABELS[e.action] || e.action,
-      e.resource_type || "",
-      e.resource_id || "",
-      e.resource_name || "",
-    ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","));
-    const csv = [headers.join(","), ...rows].join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `auditoria_${new Date().toISOString().split("T")[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("CSV exportado");
-  };
-
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+    return true;
+  });
 
   return (
     <div className="flex flex-col h-full bg-background">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border">
         <div className="flex items-center gap-3">
-          <Shield className="h-6 w-6 text-blue-600" />
+          <ShieldCheck className="h-6 w-6 text-blue-600" />
           <div>
-            <h1 className="text-xl font-bold text-foreground">Log de Auditoria (LGPD)</h1>
-            <p className="text-sm text-muted-foreground">Registro de acessos e operações sobre dados</p>
+            <h1 className="text-xl font-bold text-foreground">Log de Auditoria</h1>
+            <p className="text-sm text-muted-foreground">Histórico de ações importantes no sistema</p>
           </div>
         </div>
-        <Button
-          onClick={handleExportCSV}
-          variant="outline"
-          className="gap-2 border-blue-300 text-blue-600 hover:bg-blue-50"
-        >
-          <Download className="h-4 w-4" />
-          Exportar CSV
-        </Button>
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-border bg-muted/30">
         <Select
           value={filterAction}
-          onValueChange={(v) => { setFilterAction(v); setPage(0); }}
+          onValueChange={v => setFilterAction(v)}
         >
           <SelectTrigger className="w-52 h-9 text-sm">
             <SelectValue placeholder="Tipo de ação" />
@@ -181,19 +152,12 @@ export default function AuditLog() {
           </SelectContent>
         </Select>
 
-        <Input
-          placeholder="Filtrar por usuário..."
-          value={filterUser}
-          onChange={(e) => { setFilterUser(e.target.value); setPage(0); }}
-          className="w-48 h-9 text-sm"
-        />
-
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">De:</span>
           <Input
             type="date"
             value={filterDateFrom}
-            onChange={(e) => { setFilterDateFrom(e.target.value); setPage(0); }}
+            onChange={e => setFilterDateFrom(e.target.value)}
             className="w-36 h-9 text-sm"
           />
         </div>
@@ -203,7 +167,7 @@ export default function AuditLog() {
           <Input
             type="date"
             value={filterDateTo}
-            onChange={(e) => { setFilterDateTo(e.target.value); setPage(0); }}
+            onChange={e => setFilterDateTo(e.target.value)}
             className="w-36 h-9 text-sm"
           />
         </div>
@@ -211,20 +175,14 @@ export default function AuditLog() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => {
-            setFilterAction("all");
-            setFilterUser("");
-            setFilterDateFrom("");
-            setFilterDateTo("");
-            setPage(0);
-          }}
+          onClick={() => { setFilterAction("all"); setFilterDateFrom(""); setFilterDateTo(""); }}
           className="text-muted-foreground hover:text-foreground"
         >
           Limpar filtros
         </Button>
 
         <div className="ml-auto text-sm text-muted-foreground">
-          {totalCount} registro{totalCount !== 1 ? "s" : ""}
+          {displayedEntries.length} registro{displayedEntries.length !== 1 ? "s" : ""}
         </div>
       </div>
 
@@ -234,35 +192,34 @@ export default function AuditLog() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-44">Data/Hora</TableHead>
-              <TableHead className="w-40">Usuário</TableHead>
+              <TableHead className="w-40">Ator</TableHead>
               <TableHead className="w-52">Ação</TableHead>
-              <TableHead className="w-32">Recurso</TableHead>
-              <TableHead className="w-40">ID</TableHead>
-              <TableHead>Nome</TableHead>
-              <TableHead className="w-20 text-center">Detalhes</TableHead>
+              <TableHead className="w-32">Entidade</TableHead>
+              <TableHead>Detalhes</TableHead>
+              <TableHead className="w-20 text-center">Ver</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
+                <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
                   Carregando...
                 </TableCell>
               </TableRow>
-            ) : entries.length === 0 ? (
+            ) : displayedEntries.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
+                <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
                   Nenhum registro encontrado
                 </TableCell>
               </TableRow>
             ) : (
-              entries.map((entry) => (
+              displayedEntries.map(entry => (
                 <TableRow key={entry.id} className="hover:bg-muted/30">
                   <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                     {format(new Date(entry.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
                   </TableCell>
                   <TableCell className="text-sm">
-                    <span className="font-medium">{entry.user_name || "—"}</span>
+                    <span className="font-medium">{entry.actor_name || "—"}</span>
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary" className="text-xs font-normal">
@@ -270,13 +227,10 @@ export default function AuditLog() {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
-                    {entry.resource_type || "—"}
+                    {entry.entity_type || "—"}
                   </TableCell>
-                  <TableCell className="text-xs font-mono text-muted-foreground truncate max-w-[160px]">
-                    {entry.resource_id || "—"}
-                  </TableCell>
-                  <TableCell className="text-sm">
-                    {entry.resource_name || "—"}
+                  <TableCell className="text-xs text-muted-foreground truncate max-w-[240px]">
+                    {entry.details ? JSON.stringify(entry.details).slice(0, 80) : "—"}
                   </TableCell>
                   <TableCell className="text-center">
                     <Button
@@ -296,31 +250,18 @@ export default function AuditLog() {
         </Table>
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-center gap-4 px-6 py-3 border-t border-border">
+      {/* Load more */}
+      {!loading && hasMore && (
+        <div className="flex justify-center px-6 py-3 border-t border-border">
           <Button
             variant="outline"
             size="sm"
-            disabled={page === 0}
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            className="gap-1"
+            disabled={loadingMore}
+            onClick={() => fetchEntries(false)}
+            className="gap-2"
           >
-            <ChevronLeft className="h-4 w-4" />
-            Anterior
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            Página {page + 1} de {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= totalPages - 1}
-            onClick={() => setPage((p) => p + 1)}
-            className="gap-1"
-          >
-            Próxima
-            <ChevronRight className="h-4 w-4" />
+            <ChevronDown className="h-4 w-4" />
+            {loadingMore ? "Carregando..." : "Carregar mais"}
           </Button>
         </div>
       )}
@@ -339,30 +280,26 @@ export default function AuditLog() {
                   <p>{format(new Date(detailEntry.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Usuário</p>
-                  <p>{detailEntry.user_name || "—"}</p>
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Ator</p>
+                  <p>{detailEntry.actor_name || "—"}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Ação</p>
                   <p>{ACTION_LABELS[detailEntry.action] || detailEntry.action}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Recurso</p>
-                  <p>{detailEntry.resource_type || "—"}</p>
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Entidade</p>
+                  <p>{detailEntry.entity_type || "—"}</p>
                 </div>
                 <div className="col-span-2">
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">ID do Recurso</p>
-                  <p className="font-mono text-xs break-all">{detailEntry.resource_id || "—"}</p>
-                </div>
-                <div className="col-span-2">
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Nome do Recurso</p>
-                  <p>{detailEntry.resource_name || "—"}</p>
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">ID da Entidade</p>
+                  <p className="font-mono text-xs break-all">{detailEntry.entity_id || "—"}</p>
                 </div>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">Metadados</p>
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">Detalhes</p>
                 <pre className="bg-muted rounded-md p-3 text-xs overflow-auto max-h-48 text-foreground">
-                  {JSON.stringify(detailEntry.metadata || {}, null, 2)}
+                  {JSON.stringify(detailEntry.details || {}, null, 2)}
                 </pre>
               </div>
             </div>
