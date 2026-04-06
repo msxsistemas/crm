@@ -1015,24 +1015,45 @@ const RespostasRapidasTab = () => {
   const [shortcut, setShortcut] = useState("");
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
-  const [replies, setReplies] = useState<{ id: string; shortcut: string; message: string }[]>([]);
+  const [replies, setReplies] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
+  // Approval workflow
+  const [approvalEnabled, setApprovalEnabled] = useState(false);
+  const [pendingTemplates, setPendingTemplates] = useState<any[]>([]);
+  const [approving, setApproving] = useState<string | null>(null);
+  const [rejectOpen, setRejectOpen] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
 
   const loadReplies = useCallback(async () => {
     try {
       const data = await api.get<any[]>('/quick-replies');
-      setReplies((data || []).map((r: any) => ({ id: r.id, shortcut: r.shortcut, message: r.content || r.message || '' })));
+      setReplies((data || []).map((r: any) => ({ ...r, message: r.content || r.message || '' })));
     } catch {}
   }, []);
 
-  useEffect(() => { loadReplies(); }, [loadReplies]);
+  const loadApprovalSettings = useCallback(async () => {
+    try {
+      const data = await api.get<any>('/settings/template-approval');
+      setApprovalEnabled(data?.enabled || false);
+      if (data?.enabled && ['admin','supervisor'].includes(user?.role || '')) {
+        const pending = await api.get<any[]>('/templates/pending');
+        setPendingTemplates(pending || []);
+      }
+    } catch {}
+  }, [user?.role]);
+
+  useEffect(() => { loadReplies(); loadApprovalSettings(); }, [loadReplies, loadApprovalSettings]);
 
   const handleSave = async () => {
     if (!shortcut.trim() || !message.trim()) { toast.error("Preencha atalho e mensagem"); return; }
     setSaving(true);
     try {
-      await api.post('/quick-replies', { shortcut: shortcut.trim().replace(/\//g, ""), message: message.trim(), title: title.trim() });
-      toast.success("Resposta criada!");
+      const result = await api.post<any>('/quick-replies', { shortcut: shortcut.trim().replace(/\//g, ""), message: message.trim(), title: title.trim() });
+      if (result?.approval_status === 'pending') {
+        toast.success("Resposta enviada para aprovação!");
+      } else {
+        toast.success("Resposta criada!");
+      }
       setNewOpen(false);
       setShortcut(""); setTitle(""); setMessage("");
       loadReplies();
@@ -1040,18 +1061,98 @@ const RespostasRapidasTab = () => {
     setSaving(false);
   };
 
-  const filtered = replies.filter(r => r.shortcut.toLowerCase().includes(search.toLowerCase()) || r.message.toLowerCase().includes(search.toLowerCase()));
+  const handleApprove = async (id: string) => {
+    setApproving(id);
+    try {
+      await api.patch(`/templates/${id}/approve`, { approved: true });
+      toast.success("Template aprovado!");
+      loadApprovalSettings();
+      loadReplies();
+    } catch { toast.error("Erro ao aprovar template"); }
+    setApproving(null);
+  };
+
+  const handleReject = async (id: string) => {
+    setApproving(id);
+    try {
+      await api.patch(`/templates/${id}/approve`, { approved: false, rejection_reason: rejectReason });
+      toast.success("Template rejeitado");
+      setRejectOpen(null);
+      setRejectReason("");
+      loadApprovalSettings();
+    } catch { toast.error("Erro ao rejeitar template"); }
+    setApproving(null);
+  };
+
+  const filtered = replies.filter(r => r.shortcut?.toLowerCase().includes(search.toLowerCase()) || r.message?.toLowerCase().includes(search.toLowerCase()));
+  const canManageApproval = ['admin', 'supervisor'].includes(user?.role || '');
 
   return (
     <div className="space-y-6">
+      {/* Approval Toggle (admin only) */}
+      {user?.role === 'admin' && (
+        <Card className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center"><ShieldAlert className="h-5 w-5 text-amber-500" /></div>
+              <div>
+                <p className="text-sm font-medium text-foreground">Exigir aprovação para novos templates</p>
+                <p className="text-xs text-muted-foreground">Novos templates criados por agentes ficarão "pendentes" até aprovação</p>
+              </div>
+            </div>
+            <Switch checked={approvalEnabled} onCheckedChange={async (val) => {
+              setApprovalEnabled(val);
+              try {
+                await api.patch('/settings/template-approval', { enabled: val });
+                toast.success(val ? "Aprovação de templates ativada" : "Aprovação de templates desativada");
+                loadApprovalSettings();
+              } catch { toast.error("Erro ao salvar configuração"); setApprovalEnabled(!val); }
+            }} />
+          </div>
+        </Card>
+      )}
+
+      {/* Pending templates (admin/supervisor) */}
+      {canManageApproval && approvalEnabled && pendingTemplates.length > 0 && (
+        <Card className="p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Clock className="h-4 w-4 text-amber-500" />
+            <p className="text-sm font-semibold text-foreground">Templates Aguardando Aprovação ({pendingTemplates.length})</p>
+          </div>
+          <div className="space-y-2">
+            {pendingTemplates.map(t => (
+              <div key={t.id} className="flex items-start gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Badge variant="secondary" className="text-xs font-mono">/{t.shortcut}</Badge>
+                    <span className="text-xs text-muted-foreground">por {t.created_by_name || 'Agente'}</span>
+                    <span className="text-xs text-muted-foreground">{new Date(t.created_at).toLocaleDateString('pt-BR')}</span>
+                  </div>
+                  <p className="text-sm text-foreground truncate">{t.content || t.message}</p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button size="sm" className="h-7 gap-1 bg-green-600 hover:bg-green-700 text-white" onClick={() => handleApprove(t.id)} disabled={approving === t.id}>
+                    {approving === t.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
+                    Aprovar
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 gap-1 border-destructive/30 text-destructive hover:bg-destructive/10" onClick={() => { setRejectOpen(t.id); setRejectReason(""); }} disabled={approving === t.id}>
+                    <X className="h-3 w-3" /> Rejeitar
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         <Card className="p-4 flex items-center gap-3">
           <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center"><Zap className="h-5 w-5 text-amber-500" /></div>
-          <div><p className="text-2xl font-bold text-foreground">{replies.length}</p><p className="text-xs text-muted-foreground">Respostas rápidas</p></div>
+          <div><p className="text-2xl font-bold text-foreground">{replies.filter(r => r.approval_status === 'approved' || !r.approval_status).length}</p><p className="text-xs text-muted-foreground">Respostas rápidas</p></div>
         </Card>
         <Card className="p-4 flex items-center gap-3">
-          <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center"><CheckCircle className="h-5 w-5 text-emerald-500" /></div>
-          <div><p className="text-2xl font-bold text-foreground">{replies.length}</p><p className="text-xs text-muted-foreground">Ativas</p></div>
+          <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center"><Clock className="h-5 w-5 text-amber-500" /></div>
+          <div><p className="text-2xl font-bold text-foreground">{replies.filter(r => r.approval_status === 'pending').length}</p><p className="text-xs text-muted-foreground">Aguardando aprovação</p></div>
         </Card>
       </div>
       <Card className="p-4">
@@ -1072,9 +1173,16 @@ const RespostasRapidasTab = () => {
         ) : (
           <div className="space-y-2">
             {filtered.map(r => (
-              <div key={r.id} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/30">
+              <div key={r.id} className={cn("flex items-center gap-3 p-3 rounded-lg border bg-muted/30",
+                r.approval_status === 'pending' ? "border-amber-300 bg-amber-50 dark:bg-amber-950/20" : "border-border")}>
                 <Badge variant="secondary" className="text-xs font-mono shrink-0">/{r.shortcut}</Badge>
-                <p className="text-sm text-foreground truncate flex-1">{r.message || (r as any).content}</p>
+                <p className="text-sm text-foreground truncate flex-1">{r.message || r.content}</p>
+                {r.approval_status === 'pending' && (
+                  <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700 border border-amber-200 shrink-0">Aguardando aprovação</span>
+                )}
+                {r.approval_status === 'approved' && approvalEnabled && (
+                  <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700 border border-green-200 shrink-0">Aprovado</span>
+                )}
                 <button
                   onClick={async () => {
                     try {
@@ -1130,6 +1238,27 @@ const RespostasRapidasTab = () => {
           <DialogFooter className="gap-2">
             <Button variant="outline" className="flex-1" onClick={() => setNewOpen(false)}>Cancelar</Button>
             <Button className="flex-1" onClick={handleSave} disabled={saving}>{saving ? "Salvando..." : "Salvar"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rejection reason dialog */}
+      <Dialog open={!!rejectOpen} onOpenChange={(o) => { if (!o) { setRejectOpen(null); setRejectReason(""); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Motivo da Rejeição</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">Informe o motivo da rejeição para que o agente possa corrigir o template.</p>
+            <div>
+              <label className="text-sm font-medium text-foreground">Motivo (opcional)</label>
+              <Textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Ex: Conteúdo inadequado, linguagem informal..." rows={3} className="mt-1" />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setRejectOpen(null); setRejectReason(""); }}>Cancelar</Button>
+            <Button variant="destructive" onClick={() => rejectOpen && handleReject(rejectOpen)} disabled={approving === rejectOpen}>
+              {approving === rejectOpen ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Rejeitar Template
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -4328,6 +4457,295 @@ const CustomFieldsTab = () => {
   );
 };
 
+// ── Turnos Tab ────────────────────────────────────────────────────────────────
+const DAY_LABELS_SHIFTS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
+interface Shift {
+  id: string;
+  name: string;
+  start_time: string;
+  end_time: string;
+  days: number[];
+  is_active: boolean;
+  agents: { id: string; name: string }[] | null;
+}
+
+interface AgentProfileShift {
+  id: string;
+  full_name: string | null;
+  email: string;
+}
+
+const TurnosTab = () => {
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [currentShift, setCurrentShift] = useState<Shift | null>(null);
+  const [agentsList, setAgentsList] = useState<AgentProfileShift[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingShift, setEditingShift] = useState<Shift | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const [formName, setFormName] = useState("");
+  const [formStart, setFormStart] = useState("08:00");
+  const [formEnd, setFormEnd] = useState("18:00");
+  const [formDays, setFormDays] = useState<number[]>([1,2,3,4,5]);
+  const [formAgents, setFormAgents] = useState<string[]>([]);
+  const [formActive, setFormActive] = useState(true);
+
+  const loadShifts = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [shiftsData, currentData, agentsData] = await Promise.all([
+        api.get<Shift[]>('/shifts'),
+        api.get<Shift | null>('/shifts/current'),
+        api.get<AgentProfileShift[]>('/users'),
+      ]);
+      setShifts(Array.isArray(shiftsData) ? shiftsData : []);
+      setCurrentShift(currentData || null);
+      setAgentsList(Array.isArray(agentsData) ? agentsData : []);
+    } catch {
+      toast.error("Erro ao carregar turnos");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadShifts(); }, [loadShifts]);
+
+  const openNew = () => {
+    setEditingShift(null);
+    setFormName("");
+    setFormStart("08:00");
+    setFormEnd("18:00");
+    setFormDays([1,2,3,4,5]);
+    setFormAgents([]);
+    setFormActive(true);
+    setDialogOpen(true);
+  };
+
+  const openEdit = (s: Shift) => {
+    setEditingShift(s);
+    setFormName(s.name);
+    setFormStart(s.start_time);
+    setFormEnd(s.end_time);
+    setFormDays(s.days || [1,2,3,4,5]);
+    setFormAgents((s.agents || []).map(a => a.id));
+    setFormActive(s.is_active);
+    setDialogOpen(true);
+  };
+
+  const toggleShiftDay = (day: number) => {
+    setFormDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
+  };
+
+  const toggleShiftAgent = (id: string) => {
+    setFormAgents(prev => prev.includes(id) ? prev.filter(a => a !== id) : [...prev, id]);
+  };
+
+  const handleSaveShift = async () => {
+    if (!formName.trim()) { toast.error("Informe o nome do turno"); return; }
+    setSaving(true);
+    try {
+      const body = {
+        name: formName.trim(),
+        start_time: formStart,
+        end_time: formEnd,
+        days: formDays,
+        agent_ids: formAgents,
+        is_active: formActive,
+      };
+      if (editingShift) {
+        await api.patch(`/shifts/${editingShift.id}`, body);
+        toast.success("Turno atualizado");
+      } else {
+        await api.post('/shifts', body);
+        toast.success("Turno criado");
+      }
+      setDialogOpen(false);
+      loadShifts();
+    } catch (e: any) {
+      toast.error(e.message || "Erro ao salvar turno");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteShift = async (id: string) => {
+    if (!confirm("Excluir este turno?")) return;
+    try {
+      await api.delete(`/shifts/${id}`);
+      toast.success("Turno excluído");
+      loadShifts();
+    } catch (e: any) {
+      toast.error(e.message || "Erro ao excluir");
+    }
+  };
+
+  const handleToggleShiftActive = async (s: Shift) => {
+    try {
+      await api.patch(`/shifts/${s.id}`, { is_active: !s.is_active });
+      loadShifts();
+    } catch {
+      toast.error("Erro ao atualizar turno");
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card className="p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Clock className="h-4 w-4 text-primary" />
+          <span className="text-sm font-semibold text-foreground">Turno Atual</span>
+        </div>
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Carregando...</p>
+        ) : currentShift ? (
+          <div className="flex items-center gap-3 flex-wrap">
+            <Badge className="bg-green-100 text-green-700 border-green-200">Ativo</Badge>
+            <span className="text-sm font-medium text-foreground">{currentShift.name}</span>
+            <span className="text-sm text-muted-foreground">{currentShift.start_time} – {currentShift.end_time}</span>
+            {currentShift.agents && currentShift.agents.length > 0 && (
+              <span className="text-sm text-muted-foreground">{currentShift.agents.length} agente(s)</span>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Nenhum turno ativo no momento</p>
+        )}
+      </Card>
+
+      <div className="flex items-center justify-between">
+        <h2 className="text-base font-semibold text-foreground">Turnos de Atendimento</h2>
+        <Button onClick={openNew} className="gap-2" size="sm">
+          <Plus className="h-4 w-4" /> Novo Turno
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+      ) : shifts.length === 0 ? (
+        <Card className="p-8 text-center text-sm text-muted-foreground">
+          Nenhum turno cadastrado. Clique em "Novo Turno" para começar.
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {shifts.map(s => (
+            <Card key={s.id} className="p-4">
+              <div className="flex items-center gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-foreground">{s.name}</span>
+                    <Badge variant={s.is_active ? "default" : "secondary"} className="text-[10px]">
+                      {s.is_active ? "Ativo" : "Inativo"}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1 flex-wrap">
+                    <span className="text-xs text-muted-foreground">{s.start_time} – {s.end_time}</span>
+                    <div className="flex gap-0.5">
+                      {DAY_LABELS_SHIFTS.map((label, idx) => (
+                        <span
+                          key={idx}
+                          className={cn(
+                            "text-[10px] px-1.5 py-0.5 rounded font-medium",
+                            (s.days || []).includes(idx)
+                              ? "bg-primary/10 text-primary"
+                              : "bg-muted text-muted-foreground"
+                          )}
+                        >
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {(s.agents || []).length} agente(s)
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch checked={s.is_active} onCheckedChange={() => handleToggleShiftActive(s)} />
+                  <Button size="sm" variant="ghost" className="h-8 px-2" onClick={() => openEdit(s)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-8 px-2 text-destructive hover:text-destructive" onClick={() => handleDeleteShift(s.id)}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingShift ? "Editar Turno" : "Novo Turno"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="text-xs font-medium text-foreground mb-1 block">Nome do Turno</label>
+              <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ex: Manhã, Tarde, Noite" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-foreground mb-1 block">Início</label>
+                <Input type="time" value={formStart} onChange={e => setFormStart(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-foreground mb-1 block">Fim</label>
+                <Input type="time" value={formEnd} onChange={e => setFormEnd(e.target.value)} />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-foreground mb-2 block">Dias da Semana</label>
+              <div className="flex gap-1.5 flex-wrap">
+                {DAY_LABELS_SHIFTS.map((label, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => toggleShiftDay(idx)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-md text-xs font-medium border transition-colors",
+                      formDays.includes(idx)
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-foreground border-border hover:bg-muted"
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-foreground mb-2 block">Agentes</label>
+              <div className="max-h-40 overflow-y-auto space-y-1 border border-border rounded-md p-2">
+                {agentsList.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Nenhum agente disponível</p>
+                ) : agentsList.map(a => (
+                  <label key={a.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5">
+                    <Checkbox checked={formAgents.includes(a.id)} onCheckedChange={() => toggleShiftAgent(a.id)} />
+                    <span className="text-sm text-foreground">{a.full_name || a.email}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={formActive} onCheckedChange={setFormActive} />
+              <span className="text-sm text-foreground">Turno ativo</span>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSaveShift} disabled={saving || !formName.trim()}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              {editingShift ? "Atualizar" : "Criar Turno"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("geral");
 
@@ -4366,6 +4784,7 @@ const Settings = () => {
             <TabsTrigger value="out_of_hours" className="gap-1.5"><Clock className="h-3.5 w-3.5" /> Bot Fora do Horário</TabsTrigger>
             <TabsTrigger value="roteamento" className="gap-1.5"><Shuffle className="h-3.5 w-3.5" /> Roteamento</TabsTrigger>
             <TabsTrigger value="campos_customizados" className="gap-1.5"><SettingsIcon className="h-3.5 w-3.5" /> Campos Personalizados</TabsTrigger>
+            <TabsTrigger value="turnos" className="gap-1.5"><Clock className="h-3.5 w-3.5" /> Turnos</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -4394,6 +4813,7 @@ const Settings = () => {
           <TabsContent value="out_of_hours"><OutOfHoursBotTab /></TabsContent>
           <TabsContent value="roteamento"><RotamentoTab /></TabsContent>
           <TabsContent value="campos_customizados"><CustomFieldsTab /></TabsContent>
+          <TabsContent value="turnos"><TurnosTab /></TabsContent>
         </Tabs>
       </div>
     </div>

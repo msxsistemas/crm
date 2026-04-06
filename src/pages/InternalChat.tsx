@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getSocket } from "@/lib/socket";
 import api from "@/lib/api";
-import { MessagesSquare, Users, X, Send, Plus } from "lucide-react";
+import { MessagesSquare, Users, X, Send, Plus, Bell, BellOff } from "lucide-react";
+import { useChatSound } from "@/hooks/useChatSound";
 import { Button } from "@/components/ui/button";
 import { FloatingInput } from "@/components/ui/floating-input";
 import { Input } from "@/components/ui/input";
@@ -38,12 +39,14 @@ interface Message {
 const InternalChat = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const { playNotification } = useChatSound();
   const [selectedConvoId, setSelectedConvoId] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem('chat_sound_enabled') !== 'false');
 
   // TanStack Query: conversations
   const { data: conversations = [] } = useQuery<Conversation[]>({
@@ -123,6 +126,9 @@ const InternalChat = () => {
         return [...prev, msg];
       });
       queryClient.invalidateQueries({ queryKey: ['internal-channels'] });
+      if (msg.sender_id !== user?.id) {
+        playNotification();
+      }
     };
     socket.on(event, handler);
     return () => { socket.off(event, handler); };
@@ -168,6 +174,19 @@ const InternalChat = () => {
         <h1 className="text-2xl font-bold text-foreground">Chat Interno</h1>
         <Button onClick={() => setDialogOpen(true)} size="sm" className="gap-1">
           <Plus className="h-4 w-4" /> Nova Conversa
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className={cn("h-8 w-8 ml-auto", soundEnabled ? "text-primary" : "text-muted-foreground")}
+          title={soundEnabled ? "Desativar som" : "Ativar som"}
+          onClick={() => {
+            const next = !soundEnabled;
+            setSoundEnabled(next);
+            localStorage.setItem('chat_sound_enabled', String(next));
+          }}
+        >
+          {soundEnabled ? <Bell className="h-4 w-4" /> : <BellOff className="h-4 w-4" />}
         </Button>
       </div>
 

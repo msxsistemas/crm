@@ -59,6 +59,7 @@ import { useMessageQueue } from "@/hooks/useMessageQueue";
 import { loadDistributionConfig, distributeConversation } from "@/lib/autoDistribution";
 import type { DistributionConfig } from "@/lib/autoDistribution";
 import { useSocketEvent } from "@/hooks/useSocketEvent";
+import { useChatSound } from "@/hooks/useChatSound";
 
 const tailwindColorMap: Record<string, string> = {
   "bg-white": "#ffffff", "bg-red-500": "#ef4444", "bg-orange-500": "#f97316",
@@ -189,6 +190,7 @@ const Inbox = () => {
   const { user } = useAuth();
   const { isOnline } = useOnlineStatus();
   const { queue, enqueue, dequeue } = useMessageQueue();
+  const { playNotification: playWebAudioNotification } = useChatSound();
 
   // Detect dark mode and select wallpaper
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
@@ -871,10 +873,19 @@ const Inbox = () => {
     refreshContactTags();
   }, [user, refreshContactTags]);
 
-  // Load quick replies for slash autocomplete
+  // Load quick replies for slash autocomplete (filter pending if approval required)
   useEffect(() => {
-    api.get<any[]>('/quick-replies').then(data => {
-      if (data) setQuickRepliesForSlash(data.map(r => ({ shortcut: r.shortcut, message: r.content || r.message || '' })));
+    Promise.all([
+      api.get<any[]>('/quick-replies'),
+      api.get<any>('/settings/template-approval').catch(() => ({ enabled: false })),
+    ]).then(([data, approvalSettings]) => {
+      if (data) {
+        const approvalRequired = approvalSettings?.enabled || false;
+        const filtered = approvalRequired
+          ? data.filter(r => r.approval_status === 'approved' || !r.approval_status)
+          : data;
+        setQuickRepliesForSlash(filtered.map(r => ({ shortcut: r.shortcut, message: r.content || r.message || '' })));
+      }
     }).catch(() => {
       // fallback to Supabase if API fails
       db.from("quick_replies").select("shortcut, message").order("created_at").then(({ data }) => {
@@ -1081,9 +1092,13 @@ const Inbox = () => {
         }
         // Play notification sound + browser notification for incoming messages
         if (!newMsg.from_me) {
-          if (soundEnabled && notificationAudioRef.current) {
-            notificationAudioRef.current.currentTime = 0;
-            notificationAudioRef.current.play().catch(() => {});
+          if (soundEnabled) {
+            if (notificationAudioRef.current) {
+              notificationAudioRef.current.currentTime = 0;
+              notificationAudioRef.current.play().catch(() => { playWebAudioNotification(); });
+            } else {
+              playWebAudioNotification();
+            }
           }
           // Browser notification when tab is not focused
           if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {

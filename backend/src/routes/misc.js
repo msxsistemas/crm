@@ -71,9 +71,13 @@ export default async function miscRoutes(fastify) {
     const contentVal = content || message || '';
     const shortcutVal = shortcut || title || '';
     const messageVal = message || content || '';
+    // Check if approval is required
+    const { rows: settingsRows } = await query('SELECT template_approval_required FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+    const approvalRequired = settingsRows[0]?.template_approval_required || false;
+    const approvalStatus = (approvalRequired && !['admin','supervisor'].includes(req.user.role)) ? 'pending' : 'approved';
     const { rows } = await query(
-      'INSERT INTO quick_replies (title, content, shortcut, message, tags, user_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [titleVal, contentVal, shortcutVal, messageVal, tags || [], user_id || req.user.id]
+      'INSERT INTO quick_replies (title, content, shortcut, message, tags, user_id, created_by, approval_status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+      [titleVal, contentVal, shortcutVal, messageVal, tags || [], user_id || req.user.id, req.user.id, approvalStatus]
     );
     return reply.status(201).send(rows[0]);
   });

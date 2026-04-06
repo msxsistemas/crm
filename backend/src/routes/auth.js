@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { createHash } from 'crypto';
 import { query } from '../database.js';
 import { generateTokens, verifyToken, verifyRefreshToken } from '../auth.js';
 import { refreshCsrfToken } from '../middleware/csrf.js';
@@ -39,6 +40,12 @@ export default async function authRoutes(fastify) {
 
     const { token, refreshToken } = generateTokens(user);
     await query('UPDATE profiles SET last_login = NOW() WHERE id = $1', [user.id]);
+
+    // Log the login session
+    await query(
+      "INSERT INTO login_sessions (user_id, ip_address, user_agent, token_hash) VALUES ($1,$2,$3,$4)",
+      [user.id, req.ip, req.headers['user-agent'] || '', createHash('sha256').update(token).digest('hex').substring(0,16)]
+    ).catch(() => {});
 
     setCookies(reply, token, refreshToken);
     const csrfToken = refreshCsrfToken(reply);
@@ -208,6 +215,8 @@ export default async function authRoutes(fastify) {
           redis.set(`logout:${payload.id}`, logoutTs, 'EX', 60 * 60 * 24 * 30),
           redis.del(`auth:me:${payload.id}`),
         ]).catch(() => null);
+        // Mark session as logged out
+        await query("UPDATE login_sessions SET logged_out_at=NOW() WHERE user_id=$1 AND logged_out_at IS NULL AND created_at > NOW() - interval '30 days'", [payload.id]).catch(() => {});
       } catch {}
     }
     const secure = process.env.NODE_ENV === 'production';
