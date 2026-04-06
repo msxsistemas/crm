@@ -1981,35 +1981,23 @@ const Inbox = () => {
     setLoadingSuggestions(true);
     setAiSuggestions([]);
     try {
-      const last10 = messages.slice(-10);
-      const contextMessages = last10.map((m) => ({
-        role: m.from_me ? "assistant" : "user",
-        content: m.body,
+      const ctx = messages.slice(-10).map((m) => ({
+        role: m.direction === 'inbound' ? 'user' : (m.from_me ? 'assistant' : 'user'),
+        content: m.body || m.caption || '[mídia]',
       }));
-      contextMessages.push({
-        role: "user",
-        content:
-          "Sugira 3 respostas curtas e profissionais em português para esta conversa. Retorne apenas as 3 sugestões numeradas, uma por linha.",
+      const contactName = conversations.find((c) => c.id === selected)?.contacts?.name;
+      const res = await api.post<{ suggestion: string }>('/ai/suggest-reply', {
+        messages: ctx,
+        contact_name: contactName,
       });
-
-      const { data, error } = await db.functions.invoke("ai-agent", {
-        body: { messages: contextMessages },
-      });
-
-      if (error || !data?.reply) {
-        toast.error("Erro ao buscar sugestões de IA");
-        return;
+      if (res.suggestion) {
+        setAiSuggestions([res.suggestion]);
+        setMessageInput(res.suggestion);
+      } else {
+        toast.error("Não foi possível gerar sugestão de IA");
       }
-
-      const lines = (data.reply as string)
-        .split("\n")
-        .map((l: string) => l.replace(/^\d+[\.\)]\s*/, "").trim())
-        .filter((l: string) => l.length > 0)
-        .slice(0, 3);
-
-      setAiSuggestions(lines);
     } catch (err: any) {
-      toast.error("Erro ao sugerir respostas: " + (err?.message || "Tente novamente"));
+      toast.error("Erro ao sugerir resposta: " + (err?.message || "Tente novamente"));
     } finally {
       setLoadingSuggestions(false);
     }

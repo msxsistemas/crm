@@ -121,6 +121,7 @@ const userNavSections: NavSection[] = [
           { to: "/kanban/grupos", icon: LayoutGrid, label: "Kanban Grupos" },
           { to: "/kanban/visao-geral", icon: Eye, label: "Kanban Visão Geral" },
           { to: "/kanban/filas", icon: GitBranch, label: "Kanban Filas" },
+          { to: "/kanban-conversas", icon: LayoutGrid, label: "Kanban Conversas" },
         ],
       },
       {

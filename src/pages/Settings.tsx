@@ -2490,6 +2490,158 @@ const WebhookLogTab = () => {
   );
 };
 
+// ── HSM Templates Tab ──────────────────────────────────────────────────────
+const HsmTemplatesTab = () => {
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [formOpen, setFormOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    name: "", language: "pt_BR", category: "UTILITY",
+    body_text: "", header_text: "", footer_text: "", template_id: ""
+  });
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await api.get<any[]>('/hsm-templates-local');
+      setTemplates(data || []);
+    } catch { toast.error("Erro ao carregar templates HSM"); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSave = async () => {
+    if (!form.name || !form.body_text) { toast.error("Nome e corpo são obrigatórios"); return; }
+    setSaving(true);
+    try {
+      await api.post('/hsm-templates-local', form);
+      toast.success("Template criado!");
+      setFormOpen(false);
+      setForm({ name: "", language: "pt_BR", category: "UTILITY", body_text: "", header_text: "", footer_text: "", template_id: "" });
+      await load();
+    } catch { toast.error("Erro ao salvar template"); }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await api.delete(`/hsm-templates-local/${id}`);
+      toast.success("Template removido");
+      setTemplates(prev => prev.filter(t => t.id !== id));
+    } catch { toast.error("Erro ao remover template"); }
+  };
+
+  const categoryColor = (cat: string) => {
+    if (cat === "MARKETING") return "bg-purple-100 text-purple-700";
+    if (cat === "AUTHENTICATION") return "bg-blue-100 text-blue-700";
+    return "bg-green-100 text-green-700";
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-foreground">Templates HSM</h3>
+          <p className="text-sm text-muted-foreground">Templates aprovados na Meta para envio fora da janela de 24h</p>
+        </div>
+        <Button size="sm" className="gap-1.5" onClick={() => setFormOpen(true)}>
+          <Plus className="h-4 w-4" /> Novo Template
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+      ) : templates.length === 0 ? (
+        <div className="text-center py-10 text-sm text-muted-foreground">Nenhum template cadastrado</div>
+      ) : (
+        <div className="space-y-2">
+          {templates.map(t => (
+            <Card key={t.id} className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-sm text-foreground">{t.name}</span>
+                    <Badge variant="outline" className="text-[10px]">{t.language}</Badge>
+                    <span className={`text-[10px] px-2 py-0.5 rounded font-medium ${categoryColor(t.category)}`}>{t.category}</span>
+                    {t.template_id && <span className="text-[10px] text-muted-foreground font-mono">ID: {t.template_id}</span>}
+                  </div>
+                  {t.header_text && <p className="text-xs text-muted-foreground mt-1 font-medium">{t.header_text}</p>}
+                  <p className="text-sm text-foreground mt-1 line-clamp-2">{t.body_text}</p>
+                  {t.footer_text && <p className="text-xs text-muted-foreground mt-1 italic">{t.footer_text}</p>}
+                </div>
+                <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-red-500 shrink-0" onClick={() => handleDelete(t.id)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={formOpen} onOpenChange={(o) => !saving && setFormOpen(o)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Novo Template HSM</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Nome do Template *</label>
+                <Input placeholder="ex: boas_vindas" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Idioma</label>
+                <Select value={form.language} onValueChange={v => setForm(p => ({ ...p, language: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pt_BR">pt_BR</SelectItem>
+                    <SelectItem value="en_US">en_US</SelectItem>
+                    <SelectItem value="es_AR">es_AR</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Categoria</label>
+                <Select value={form.category} onValueChange={v => setForm(p => ({ ...p, category: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="UTILITY">UTILITY</SelectItem>
+                    <SelectItem value="MARKETING">MARKETING</SelectItem>
+                    <SelectItem value="AUTHENTICATION">AUTHENTICATION</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="col-span-2">
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Cabeçalho (opcional)</label>
+                <Input placeholder="Texto do cabeçalho" value={form.header_text} onChange={e => setForm(p => ({ ...p, header_text: e.target.value }))} />
+              </div>
+              <div className="col-span-2">
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Corpo *</label>
+                <Textarea placeholder="Olá {{1}}, seu pedido {{2}} foi confirmado!" rows={4} value={form.body_text} onChange={e => setForm(p => ({ ...p, body_text: e.target.value }))} />
+                <p className="text-[10px] text-muted-foreground mt-1">Use {"{{1}}, {{2}}"} para variáveis dinâmicas</p>
+              </div>
+              <div className="col-span-2">
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Rodapé (opcional)</label>
+                <Input placeholder="Texto do rodapé" value={form.footer_text} onChange={e => setForm(p => ({ ...p, footer_text: e.target.value }))} />
+              </div>
+              <div className="col-span-2">
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Template ID na Meta (opcional)</label>
+                <Input placeholder="ID do template aprovado na Meta" value={form.template_id} onChange={e => setForm(p => ({ ...p, template_id: e.target.value }))} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFormOpen(false)} disabled={saving}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={saving} className="gap-1.5">
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("geral");
 
@@ -2518,6 +2670,7 @@ const Settings = () => {
             <TabsTrigger value="auto_tags" className="gap-1.5"><Tag className="h-3.5 w-3.5" /> Tags Auto</TabsTrigger>
             <TabsTrigger value="blacklist_kw" className="gap-1.5"><Ban className="h-3.5 w-3.5" /> Palavras Bloqueadas</TabsTrigger>
             <TabsTrigger value="webhook_log" className="gap-1.5"><Globe className="h-3.5 w-3.5" /> Log Webhooks</TabsTrigger>
+            <TabsTrigger value="hsm_templates_local" className="gap-1.5"><Zap className="h-3.5 w-3.5" /> Templates HSM</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -2536,6 +2689,7 @@ const Settings = () => {
           <TabsContent value="auto_tags"><AutoTagRulesTab /></TabsContent>
           <TabsContent value="blacklist_kw"><BlacklistKeywordsTab /></TabsContent>
           <TabsContent value="webhook_log"><WebhookLogTab /></TabsContent>
+          <TabsContent value="hsm_templates_local"><HsmTemplatesTab /></TabsContent>
         </Tabs>
       </div>
     </div>

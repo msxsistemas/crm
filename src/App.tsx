@@ -100,6 +100,7 @@ const ContactForms = lazy(() => import("./pages/ContactForms"));
 const PublicContactForm = lazy(() => import("./pages/PublicContactForm"));
 const AutoDistribution = lazy(() => import("./pages/AutoDistribution"));
 const CustomReports = lazy(() => import("./pages/CustomReports"));
+const KanbanConversas = lazy(() => import("./pages/Kanban"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -196,6 +197,7 @@ const App = () => (
                     <Route path="/formularios-captacao" element={<ContactForms />} />
                     <Route path="/distribuicao-automatica" element={<AutoDistribution />} />
                     <Route path="/relatorios-customizados" element={<CustomReports />} />
+                    <Route path="/kanban-conversas" element={<KanbanConversas />} />
                     <Route path="/bots" element={<Bots />} />
                   </Route>
                   <Route

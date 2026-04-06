@@ -15,6 +15,18 @@
 //   request_body JSONB, response_body TEXT, error TEXT,
 //   created_at TIMESTAMPTZ DEFAULT NOW()
 // );
+//
+// CREATE TABLE IF NOT EXISTS hsm_templates_local (
+//   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+//   name TEXT NOT NULL,
+//   language TEXT DEFAULT 'pt_BR',
+//   category TEXT DEFAULT 'UTILITY',
+//   body_text TEXT,
+//   header_text TEXT,
+//   footer_text TEXT,
+//   template_id TEXT,
+//   created_at TIMESTAMPTZ DEFAULT NOW()
+// );
 
 import { query } from '../database.js';
 
@@ -486,6 +498,77 @@ export default async function misc3Routes(fastify) {
       ORDER BY p.status = 'online' DESC, open_count ASC
     `);
     return rows;
+  });
+
+  // ── AI Response Suggestion ──────────────────────────────────────────────────
+  fastify.post('/ai/suggest-reply', auth, async (req) => {
+    const { messages, contact_name } = req.body;
+    // messages = array of {role: 'user'|'assistant', content: string}
+    const apiKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+    if (!apiKey) return { suggestion: '' };
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 300,
+        system: `Você é um assistente de atendimento ao cliente. Sugira uma resposta profissional, amigável e concisa em português para a conversa com ${contact_name || 'o cliente'}. Retorne APENAS o texto da resposta, sem explicações adicionais.`,
+        messages: messages.slice(-10) // last 10 messages for context
+      })
+    });
+
+    if (!resp.ok) return { suggestion: '' };
+    const data = await resp.json();
+    return { suggestion: data.content?.[0]?.text || '' };
+  });
+
+  // ── HSM Templates Local ────────────────────────────────────────────────────
+  // Templates criados localmente (espelho dos aprovados na Meta)
+  fastify.get('/hsm-templates-local', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM hsm_templates_local ORDER BY name ASC');
+    return rows;
+  });
+  fastify.post('/hsm-templates-local', auth, async (req, reply) => {
+    const { name, language, category, body_text, header_text, footer_text, template_id } = req.body;
+    const { rows } = await query(
+      'INSERT INTO hsm_templates_local (name, language, category, body_text, header_text, footer_text, template_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [name, language || 'pt_BR', category || 'UTILITY', body_text, header_text, footer_text, template_id]
+    );
+    return reply.code(201).send(rows[0]);
+  });
+  fastify.delete('/hsm-templates-local/:id', auth, async (req) => {
+    await query('DELETE FROM hsm_templates_local WHERE id=$1', [req.params.id]);
+    return { ok: true };
+  });
+  // Send HSM template to a conversation
+  fastify.post('/conversations/:id/send-hsm', auth, async (req) => {
+    const { template_name, language_code, variables } = req.body;
+    const { rows } = await query(
+      'SELECT c.instance_name, ct.phone FROM conversations c JOIN contacts ct ON ct.id=c.contact_id WHERE c.id=$1',
+      [req.params.id]
+    );
+    if (!rows[0]) return { ok: false };
+
+    // Build components with variables
+    const components = variables && variables.length ? [{
+      type: 'body',
+      parameters: variables.map(v => ({ type: 'text', text: v }))
+    }] : [];
+
+    const resp = await fetch(`${process.env.EVOLUTION_API_URL}/message/sendTemplate/${rows[0].instance_name}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+      body: JSON.stringify({
+        number: rows[0].phone,
+        template: { name: template_name, language: { code: language_code || 'pt_BR' }, components }
+      })
+    });
+    return { ok: resp.ok };
   });
 
   // ── Link preview proxy ────────────────────────────────────────────────────
