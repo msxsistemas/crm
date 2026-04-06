@@ -867,50 +867,42 @@ const Contacts = () => {
   };
 
   const handleCsvImportExecute = async () => {
-    if (!csvMapNome || !csvMapTelefone) {
-      toast.error("Mapeie pelo menos Nome e Telefone");
+    if (!csvFile) {
+      toast.error("Nenhum arquivo selecionado");
       return;
     }
-    const nomeIdx = csvHeaders.indexOf(csvMapNome);
-    const telIdx = csvHeaders.indexOf(csvMapTelefone);
-    const emailIdx = csvMapEmail ? csvHeaders.indexOf(csvMapEmail) : -1;
-    const tagsIdx = csvMapTags ? csvHeaders.indexOf(csvMapTags) : -1;
 
     setCsvImportStep("preview");
-    setCsvImportProgress(0);
+    setCsvImportProgress(30);
 
-    let imported = 0;
-    let skipped = 0;
-    let errors = 0;
-    const total = csvRows.length;
-
-    for (let i = 0; i < total; i++) {
-      const row = csvRows[i];
-      const name = nomeIdx >= 0 ? (row[nomeIdx] || "").trim() : "";
-      const phone = telIdx >= 0 ? (row[telIdx] || "").replace(/\D/g, "") : "";
-      const email = emailIdx >= 0 ? (row[emailIdx] || "").trim() : undefined;
-      const tagsRaw = tagsIdx >= 0 ? (row[tagsIdx] || "").trim() : "";
-      const tagsArray = tagsRaw ? tagsRaw.split(";").map(t => t.trim()).filter(Boolean) : undefined;
-
-      if (!phone || phone.length < 8) { errors++; setCsvImportProgress(Math.round(((i + 1) / total) * 100)); continue; }
-
-      // Duplicate check
-      const { data: existing } = await db.from("contacts").select("id").eq("phone", phone).single();
-      if (existing) { skipped++; setCsvImportProgress(Math.round(((i + 1) / total) * 100)); continue; }
-
-      const { error } = await db.from("contacts").insert({
-        name: name || null,
-        phone,
-        email: email || null,
-        tags: tagsArray as any,
+    try {
+      const BASE_URL = import.meta.env.VITE_API_URL || 'https://api.msxzap.pro';
+      const formData = new FormData();
+      formData.append('file', csvFile);
+      const res = await fetch(`${BASE_URL}/contacts/import-csv`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
       });
-      if (error) { errors++; } else { imported++; }
-      setCsvImportProgress(Math.round(((i + 1) / total) * 100));
+      setCsvImportProgress(100);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || 'Erro ao importar CSV');
+        setCsvImportStep("mapping");
+        return;
+      }
+      const result = await res.json();
+      setCsvImportResult({
+        imported: result.imported || 0,
+        skipped: result.skipped || 0,
+        errors: result.errors?.length || 0,
+      });
+      setCsvImportStep("result");
+      if ((result.imported || 0) > 0) fetchContacts();
+    } catch (e) {
+      toast.error("Erro ao importar CSV");
+      setCsvImportStep("mapping");
     }
-
-    setCsvImportResult({ imported, skipped, errors });
-    setCsvImportStep("result");
-    if (imported > 0) fetchContacts();
   };
 
   // ── Segment helpers ──
@@ -1895,36 +1887,27 @@ const Contacts = () => {
               </div>
             )}
 
-            {/* Step 2: Column Mapping */}
+            {/* Step 2: Preview */}
             {csvImportStep === "mapping" && (
               <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  Arquivo: <strong>{csvFile?.name}</strong> — {csvRows.length} linhas encontradas
-                </p>
-                <div className="space-y-3">
-                  {[
-                    { label: "Nome *", state: csvMapNome, setter: setCsvMapNome, required: true },
-                    { label: "Telefone *", state: csvMapTelefone, setter: setCsvMapTelefone, required: true },
-                    { label: "Email", state: csvMapEmail, setter: setCsvMapEmail, required: false },
-                    { label: "Tags (separadas por ;)", state: csvMapTags, setter: setCsvMapTags, required: false },
-                  ].map(({ label, state, setter, required }) => (
-                    <div key={label} className="grid grid-cols-2 gap-3 items-center">
-                      <label className="text-sm font-medium text-foreground">{label}</label>
-                      <select
-                        value={state}
-                        onChange={(e) => setter(e.target.value)}
-                        className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                      >
-                        <option value="">{required ? "— selecione —" : "— não mapear —"}</option>
-                        {csvHeaders.map((h) => (
-                          <option key={h} value={h}>{h}</option>
-                        ))}
-                      </select>
-                    </div>
-                  ))}
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    Arquivo: <strong>{csvFile?.name}</strong> — {csvRows.length} linhas encontradas
+                  </p>
+                  <a
+                    href={`${import.meta.env.VITE_API_URL || 'https://api.msxzap.pro'}/contacts/import-csv/template`}
+                    className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                    download
+                  >
+                    <Download className="h-3 w-3" />
+                    Baixar template CSV
+                  </a>
                 </div>
                 <div className="bg-muted/50 rounded-lg p-3 overflow-x-auto">
-                  <p className="text-xs font-semibold text-muted-foreground mb-2">Pré-visualização (primeiras 3 linhas)</p>
+                  <p className="text-xs font-semibold text-muted-foreground mb-2">Pré-visualização (primeiras 5 linhas)</p>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Colunas detectadas automaticamente: <strong>nome, telefone, email, empresa, tags</strong>
+                  </p>
                   <table className="text-xs w-full">
                     <thead>
                       <tr>
@@ -1934,7 +1917,7 @@ const Contacts = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {csvRows.slice(0, 3).map((row, ri) => (
+                      {csvRows.slice(0, 5).map((row, ri) => (
                         <tr key={ri}>
                           {row.map((cell, ci) => (
                             <td key={ci} className="pr-3 pb-1 text-foreground">{cell}</td>
@@ -1947,11 +1930,11 @@ const Contacts = () => {
               </div>
             )}
 
-            {/* Step 3: Preview & importing */}
+            {/* Step 3: Uploading */}
             {csvImportStep === "preview" && (
               <div className="space-y-4">
                 <p className="text-sm text-foreground">
-                  Importando <strong>{csvRows.length} contatos</strong>...
+                  Enviando arquivo para importação...
                 </p>
                 <div className="space-y-1">
                   <div className="flex justify-between text-xs text-muted-foreground">
@@ -1963,21 +1946,6 @@ const Contacts = () => {
                       className="h-full bg-blue-500 rounded-full transition-all duration-200"
                       style={{ width: `${csvImportProgress}%` }}
                     />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">Pré-visualização (primeiras 5 linhas):</p>
-                  <div className="divide-y border rounded-lg overflow-hidden">
-                    {csvRows.slice(0, 5).map((row, i) => {
-                      const nomeIdx = csvHeaders.indexOf(csvMapNome);
-                      const telIdx = csvHeaders.indexOf(csvMapTelefone);
-                      return (
-                        <div key={i} className="flex items-center gap-3 px-3 py-2">
-                          <span className="text-sm font-medium text-foreground">{nomeIdx >= 0 ? row[nomeIdx] : "—"}</span>
-                          <span className="text-xs text-muted-foreground">{telIdx >= 0 ? row[telIdx] : "—"}</span>
-                        </div>
-                      );
-                    })}
                   </div>
                 </div>
               </div>
@@ -2015,7 +1983,6 @@ const Contacts = () => {
                 <Button
                   className="bg-blue-600 hover:bg-blue-700 text-white"
                   onClick={handleCsvImportExecute}
-                  disabled={!csvMapNome || !csvMapTelefone}
                 >
                   Importar {csvRows.length} contatos
                 </Button>

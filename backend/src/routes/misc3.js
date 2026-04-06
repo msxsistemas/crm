@@ -1083,4 +1083,174 @@ export default async function misc3Routes(fastify) {
     );
     return rows;
   });
+
+  // ── Chat Widgets ──────────────────────────────────────────────────────────────
+  fastify.get('/chat-widget', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query('SELECT * FROM chat_widgets ORDER BY created_at DESC');
+    return rows;
+  });
+
+  fastify.post('/chat-widget', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { name, greeting, color, team_id, collect_email } = req.body;
+    const crypto = await import('crypto');
+    const token = crypto.randomBytes(16).toString('hex');
+    const { rows } = await query(
+      'INSERT INTO chat_widgets (name, greeting, color, team_id, collect_email, token) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [name, greeting || 'Olá! Como posso ajudar?', color || '#25D366', team_id || null, collect_email || false, token]
+    );
+    return rows[0];
+  });
+
+  fastify.delete('/chat-widget/:id', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    await query('DELETE FROM chat_widgets WHERE id=$1', [req.params.id]);
+    return { success: true };
+  });
+
+  // Public widget endpoints (no auth)
+  fastify.get('/widget/:token/config', async (req, reply) => {
+    const { rows } = await query('SELECT id, name, greeting, color, collect_email FROM chat_widgets WHERE token=$1', [req.params.token]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Widget not found' });
+    return rows[0];
+  });
+
+  fastify.post('/widget/:token/start', async (req, reply) => {
+    const { name, phone, email, message } = req.body;
+    const { rows: w } = await query('SELECT * FROM chat_widgets WHERE token=$1', [req.params.token]);
+    if (!w[0]) return reply.status(404).send({ error: 'Widget not found' });
+
+    // Create or find contact
+    const { rows: contacts } = await query(
+      'INSERT INTO contacts (name, phone, email) VALUES ($1,$2,$3) ON CONFLICT (phone) WHERE phone IS NOT NULL DO UPDATE SET name=EXCLUDED.name RETURNING id',
+      [name || 'Visitante', phone || null, email || null]
+    );
+    const contactId = contacts[0].id;
+
+    // Create conversation
+    const { rows: convs } = await query(
+      "INSERT INTO conversations (contact_id, status, channel, assigned_team_id, origin) VALUES ($1,'open','web',$2,'widget') RETURNING id",
+      [contactId, w[0].team_id]
+    );
+    const convId = convs[0].id;
+
+    // Save initial message
+    if (message) {
+      await query("INSERT INTO messages (conversation_id, content, sender_type) VALUES ($1,$2,'contact')", [convId, message]);
+    }
+
+    return { conversation_id: convId, contact_id: contactId };
+  });
+
+  // ── AI Labels Settings ────────────────────────────────────────────────────────
+  fastify.get('/settings/ai-labels', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query("SELECT ai_labels_enabled FROM settings WHERE id=1");
+    return { enabled: rows[0]?.ai_labels_enabled || false };
+  });
+
+  fastify.patch('/settings/ai-labels', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { enabled } = req.body;
+    await query("UPDATE settings SET ai_labels_enabled=$1 WHERE id=1", [enabled]);
+    return { success: true };
+  });
+
+  // ── Out-of-Hours Bot Settings ─────────────────────────────────────────────────
+  fastify.get('/settings/out-of-hours', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query("SELECT out_of_hours_enabled, out_of_hours_message FROM settings WHERE id=1");
+    return rows[0] || { out_of_hours_enabled: false, out_of_hours_message: '' };
+  });
+
+  fastify.patch('/settings/out-of-hours', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { enabled, message } = req.body;
+    await query("UPDATE settings SET out_of_hours_enabled=$1, out_of_hours_message=$2 WHERE id=1", [enabled, message]);
+    return { success: true };
+  });
+
+  // ── AI Conversation Summarize ─────────────────────────────────────────────────
+  fastify.post('/conversations/:id/summarize', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows: msgs } = await query(
+      "SELECT content, sender_type, created_at FROM messages WHERE conversation_id=$1 AND content IS NOT NULL ORDER BY created_at ASC LIMIT 100",
+      [req.params.id]
+    );
+    if (!msgs.length) return { summary: 'Conversa sem mensagens.' };
+
+    const transcript = msgs.map(m => `[${m.sender_type === 'agent' ? 'Agente' : 'Cliente'}]: ${m.content}`).join('\n');
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 500,
+        messages: [{
+          role: 'user',
+          content: `Resuma esta conversa de atendimento em 3-5 pontos principais. Seja conciso e objetivo. Destaque: motivo do contato, ações tomadas, situação atual.\n\nConversa:\n${transcript}`
+        }]
+      })
+    });
+    const ai = await response.json();
+    const summary = ai.content?.[0]?.text || 'Não foi possível gerar resumo.';
+
+    // Save summary to conversation
+    await query('UPDATE conversations SET ai_summary=$1, ai_summary_at=NOW() WHERE id=$2', [summary, req.params.id]);
+
+    return { summary };
+  });
+
+  // ── Automation Rules ─────────────────────────────────────────────────────────
+  fastify.get('/automations', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query('SELECT * FROM automation_rules ORDER BY created_at DESC');
+    return rows;
+  });
+
+  fastify.post('/automations', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { name, trigger, conditions, actions, is_active } = req.body;
+    const { rows } = await query(
+      'INSERT INTO automation_rules (name, trigger, conditions, actions, is_active) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [name, trigger, JSON.stringify(conditions || []), JSON.stringify(actions || []), is_active !== false]
+    );
+    return rows[0];
+  });
+
+  fastify.patch('/automations/:id', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { name, trigger, conditions, actions, is_active } = req.body;
+    const fields = [];
+    const vals = [];
+    let i = 1;
+    if (name !== undefined) { fields.push(`name=$${i++}`); vals.push(name); }
+    if (trigger !== undefined) { fields.push(`trigger=$${i++}`); vals.push(trigger); }
+    if (conditions !== undefined) { fields.push(`conditions=$${i++}`); vals.push(JSON.stringify(conditions)); }
+    if (actions !== undefined) { fields.push(`actions=$${i++}`); vals.push(JSON.stringify(actions)); }
+    if (is_active !== undefined) { fields.push(`is_active=$${i++}`); vals.push(is_active); }
+    if (!fields.length) return reply.status(400).send({ error: 'No fields' });
+    vals.push(req.params.id);
+    const { rows } = await query(`UPDATE automation_rules SET ${fields.join(',')} WHERE id=$${i} RETURNING *`, vals);
+    return rows[0];
+  });
+
+  fastify.delete('/automations/:id', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    await query('DELETE FROM automation_rules WHERE id=$1', [req.params.id]);
+    return { success: true };
+  });
+
+  // ── Push Subscriptions ────────────────────────────────────────────────────────
+  fastify.post('/push/subscribe', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { subscription } = req.body;
+    await query(
+      'INSERT INTO push_subscriptions (user_id, subscription) VALUES ($1,$2) ON CONFLICT (user_id) DO UPDATE SET subscription=$2',
+      [req.user.id, JSON.stringify(subscription)]
+    );
+    return { success: true };
+  });
+
+  fastify.delete('/push/unsubscribe', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    await query('DELETE FROM push_subscriptions WHERE user_id=$1', [req.user.id]);
+    return { success: true };
+  });
+
+  fastify.get('/push/vapid-public-key', async (req, reply) => {
+    return { key: process.env.VAPID_PUBLIC_KEY || '' };
+  });
 }

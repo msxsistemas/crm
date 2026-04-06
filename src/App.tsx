@@ -109,6 +109,10 @@ const ContactProfile = lazy(() => import("./pages/ContactProfile"));
 const TagsAnalytics = lazy(() => import("./pages/TagsAnalytics"));
 const CampaignsDashboard = lazy(() => import("./pages/CampaignsDashboard"));
 const AppointmentsPage = lazy(() => import("./pages/Appointments"));
+const ChatWidgetConfig = lazy(() => import("./pages/ChatWidgetConfig"));
+const ChannelReport = lazy(() => import("./pages/ChannelReport"));
+const Automations = lazy(() => import("./pages/Automations"));
+const SLADashboard = lazy(() => import("./pages/SLADashboard"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -214,6 +218,10 @@ const App = () => (
                     <Route path="/campaigns-dashboard" element={<CampaignsDashboard />} />
                     <Route path="/capture-forms" element={<CaptureFormBuilder />} />
                     <Route path="/agent-report" element={<AgentReport />} />
+                    <Route path="/chat-widget" element={<ChatWidgetConfig />} />
+                    <Route path="/channel-report" element={<ChannelReport />} />
+                    <Route path="/automations" element={<Automations />} />
+                    <Route path="/sla-dashboard" element={<SLADashboard />} />
                   </Route>
                   <Route
                     element={

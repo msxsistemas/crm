@@ -385,6 +385,52 @@ export default async function contactRoutes(fastify) {
     return rows;
   });
 
+  // Import contacts via CSV (multipart file upload)
+  fastify.post('/contacts/import-csv', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const data = await req.file();
+    if (!data) return reply.status(400).send({ error: 'Arquivo não enviado' });
+    const csv = (await data.toBuffer()).toString('utf8');
+    const lines = csv.split('\n').filter(l => l.trim());
+    if (lines.length < 2) return reply.status(400).send({ error: 'CSV vazio' });
+
+    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
+    const results = { imported: 0, errors: [], skipped: 0 };
+
+    for (let i = 1; i < lines.length; i++) {
+      const vals = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+      const row = {};
+      headers.forEach((h, idx) => { row[h] = vals[idx] || ''; });
+
+      const name = row['nome'] || row['name'] || row['contato'] || '';
+      const phone = (row['telefone'] || row['phone'] || row['fone'] || '').replace(/\D/g, '');
+      const email = row['email'] || row['e-mail'] || '';
+      const tags = row['tags'] || row['etiquetas'] || '';
+
+      if (!name && !phone) { results.skipped++; continue; }
+
+      try {
+        await query(
+          `INSERT INTO contacts (name, phone, email, tags, created_at)
+           VALUES ($1,$2,$3,$4,NOW())
+           ON CONFLICT (phone) WHERE phone IS NOT NULL DO UPDATE SET name=EXCLUDED.name, email=EXCLUDED.email`,
+          [name, phone || null, email || null, tags ? tags.split(';') : null]
+        );
+        results.imported++;
+      } catch(e) {
+        results.errors.push({ row: i, error: e.message });
+      }
+    }
+    return results;
+  });
+
+  // GET template CSV
+  fastify.get('/contacts/import-csv/template', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const csv = 'nome,telefone,email,empresa,tags\nJoão Silva,5511999990000,joao@email.com,Empresa X,cliente;vip\n';
+    reply.header('Content-Type', 'text/csv');
+    reply.header('Content-Disposition', 'attachment; filename="template_contatos.csv"');
+    return csv;
+  });
+
   // Import contacts via vCard (.vcf)
   fastify.post('/contacts/import-vcf', auth, async (req, reply) => {
     const { vcf } = req.body;

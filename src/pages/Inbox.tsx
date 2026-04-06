@@ -2144,17 +2144,9 @@ const Inbox = () => {
     setSummaryOpen(true);
     setSummary('');
 
-    const context = messages.slice(-20).map(m =>
-      `${!m.from_me ? 'Cliente' : 'Agente'}: ${m.body}`
-    ).join('\n');
-
-    const prompt = `Resuma esta conversa de atendimento em 3-5 frases em português. Inclua: qual é o assunto principal, o que o cliente precisa, e qual foi o desfecho ou status atual.\n\nConversa:\n${context}`;
-
     try {
-      const { data } = await db.functions.invoke('ai-agent', {
-        body: { messages: [{ role: 'user', content: prompt }], model: 'claude-haiku-4-5-20251001' }
-      });
-      setSummary(data?.response || data?.content || data?.message || data?.reply || '');
+      const result = await api.post<{ summary: string }>(`/conversations/${selected}/summarize`, {});
+      setSummary(result.summary || 'Não foi possível gerar o resumo.');
     } catch {
       setSummary('Não foi possível gerar o resumo.');
     } finally {

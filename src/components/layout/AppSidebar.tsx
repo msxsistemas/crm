@@ -77,6 +77,8 @@ import {
   Bell,
   X,
   FormInput,
+  MessageSquarePlus,
+  Timer,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -150,6 +152,7 @@ const userNavSections: NavSection[] = [
       { to: "/deduplicacao", icon: GitMerge, label: "Deduplicação" },
       { to: "/formularios-captacao", icon: QrCode, label: "Formulários de Captação" },
       { to: "/capture-forms", icon: FormInput, label: "Formulários" },
+      { to: "/chat-widget", icon: MessageSquarePlus, label: "Widget de Chat" },
     ],
   },
   {
@@ -178,6 +181,7 @@ const userNavSections: NavSection[] = [
       { to: "/gerenciador-arquivos", icon: FolderOpen, label: "Gerenciador de Arquivos" },
       { to: "/hsm-templates", icon: LayoutTemplate, label: "Templates HSM" },
       { to: "/distribuicao-automatica", icon: Shuffle, label: "Distribuição Automática" },
+      { to: "/automations", icon: Zap, label: "Automações" },
     ],
   },
   {
@@ -187,6 +191,7 @@ const userNavSections: NavSection[] = [
       { to: "/tags-analytics", icon: Tag, label: "Analytics de Tags" },
       { to: "/agent-report", icon: FileText, label: "Relatório Agente" },
       { to: "/campaigns-dashboard", icon: BarChart3, label: "Métricas de Campanha" },
+      { to: "/channel-report", icon: Radio, label: "Relatório por Canal" },
     ],
   },
   {
