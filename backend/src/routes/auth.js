@@ -138,11 +138,12 @@ export default async function authRoutes(fastify) {
   // Update profile
   // -- ALTER TABLE profiles ADD COLUMN IF NOT EXISTS theme_preference TEXT DEFAULT 'dark';
   fastify.patch('/auth/me', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { name, avatar_url, permissions, two_factor_enabled, signing_enabled, signature, signature_html, signature_enabled, status, max_conversations, absence_enabled, absence_start, absence_end, absence_message, theme_preference } = req.body;
+    const { name, full_name, avatar_url, permissions, two_factor_enabled, signing_enabled, signature, signature_html, signature_enabled, status, max_conversations, absence_enabled, absence_start, absence_end, absence_message, theme_preference, onboarding_completed } = req.body;
     const updates = [];
     const params = [];
     let p = 1;
-    if (name !== undefined) { updates.push(`name = $${p}`); params.push(name); p++; }
+    const resolvedName = name !== undefined ? name : (full_name !== undefined ? full_name : undefined);
+    if (resolvedName !== undefined) { updates.push(`name = $${p}`); params.push(resolvedName); p++; }
     if (avatar_url !== undefined) { updates.push(`avatar_url = $${p}`); params.push(avatar_url); p++; }
     if (permissions !== undefined) { updates.push(`permissions = $${p}`); params.push(JSON.stringify(permissions)); p++; }
     if (two_factor_enabled !== undefined) { updates.push(`two_factor_enabled = $${p}`); params.push(two_factor_enabled); p++; }
@@ -157,6 +158,7 @@ export default async function authRoutes(fastify) {
     if (absence_end !== undefined) { updates.push(`absence_end = $${p}`); params.push(absence_end || null); p++; }
     if (absence_message !== undefined) { updates.push(`absence_message = $${p}`); params.push(absence_message || null); p++; }
     if (theme_preference !== undefined && ['dark','light'].includes(theme_preference)) { updates.push(`theme_preference = $${p}`); params.push(theme_preference); p++; }
+    if (onboarding_completed !== undefined) { updates.push(`onboarding_completed = $${p}`); params.push(onboarding_completed); p++; }
     if (!updates.length) return reply.status(400).send({ error: 'Nada para atualizar' });
     updates.push(`updated_at = NOW()`);
     params.push(req.user.id);

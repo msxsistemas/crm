@@ -1446,6 +1446,33 @@ export default async function misc3Routes(fastify) {
     return rows[0];
   });
 
+  // ── Conversation Priority ─────────────────────────────────────────────────
+  // Migration: ALTER TABLE conversations ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'normal';
+  fastify.patch('/conversations/:id/priority', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { priority } = req.body;
+    const validPriorities = ['low', 'normal', 'high', 'urgent'];
+    if (!validPriorities.includes(priority)) return reply.status(400).send({ error: 'Invalid priority' });
+    const { rows } = await query('UPDATE conversations SET priority=$1 WHERE id=$2 RETURNING id, priority', [priority, req.params.id]);
+    if (rows[0] && fastify.io) fastify.io.emit('conversation:updated', { id: rows[0].id, priority: rows[0].priority });
+    return rows[0] || {};
+  });
+
+  // ── Pin Message ───────────────────────────────────────────────────────────
+  // Migration: ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pinned_message_id UUID REFERENCES messages(id) ON DELETE SET NULL;
+  fastify.post('/conversations/:id/pin-message', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { message_id } = req.body;
+    await query('UPDATE conversations SET pinned_message_id=$1 WHERE id=$2', [message_id, req.params.id]);
+    const { rows } = await query('SELECT m.*, p.full_name as sender_name FROM messages m LEFT JOIN profiles p ON p.id=m.sender_id WHERE m.id=$1', [message_id]);
+    if (fastify.io) fastify.io.emit('conversation:message_pinned', { conversation_id: req.params.id, message: rows[0] });
+    return { success: true, message: rows[0] };
+  });
+
+  fastify.delete('/conversations/:id/pin-message', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    await query('UPDATE conversations SET pinned_message_id=NULL WHERE id=$1', [req.params.id]);
+    if (fastify.io) fastify.io.emit('conversation:message_unpinned', { conversation_id: req.params.id });
+    return { success: true };
+  });
+
   // ── AI Routing Settings ────────────────────────────────────────────────────
   fastify.get('/settings/ai-routing', auth, async (req, reply) => {
     const { rows } = await query("SELECT ai_routing_enabled FROM settings WHERE id=1");
@@ -1455,6 +1482,99 @@ export default async function misc3Routes(fastify) {
   fastify.patch('/settings/ai-routing', auth, async (req, reply) => {
     const { enabled } = req.body;
     await query("UPDATE settings SET ai_routing_enabled=$1 WHERE id=1", [enabled]);
+    return { success: true };
+  });
+
+  // ── ViaCEP proxy (avoid CORS) ──────────────────────────────────────────────
+  fastify.get('/viacep/:cep', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const cep = req.params.cep.replace(/\D/g, '');
+    if (cep.length !== 8) return reply.status(400).send({ error: 'CEP inválido' });
+    const res = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+    const data = await res.json();
+    if (data.erro) return reply.status(404).send({ error: 'CEP não encontrado' });
+    return data;
+  });
+
+  // ── Conversation Transfer with Mandatory Note ──────────────────────────────
+  fastify.post('/conversations/:id/transfer', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { agent_id, team_id, note } = req.body;
+    if (!note || note.trim().length < 5) return reply.status(400).send({ error: 'Nota de transferência obrigatória (mínimo 5 caracteres)' });
+
+    const updates = [];
+    const vals = [];
+    let i = 1;
+    if (agent_id) { updates.push(`assigned_to=$${i++}`); vals.push(agent_id); }
+    if (team_id) { updates.push(`assigned_team_id=$${i++}`); vals.push(team_id); }
+    if (!updates.length) return reply.status(400).send({ error: 'Informe agente ou time' });
+
+    vals.push(req.params.id);
+    await query(`UPDATE conversations SET ${updates.join(',')} WHERE id=$${i}`, vals);
+
+    // Save transfer note as an internal note
+    await query(
+      "INSERT INTO messages (conversation_id, content, sender_type, sender_id, metadata) VALUES ($1,$2,'note',$3,$4)",
+      [req.params.id, `🔀 Transferência: ${note}`, req.user.id, JSON.stringify({ transfer_note: true, to_agent: agent_id, to_team: team_id })]
+    );
+
+    // Log event
+    await query(
+      "INSERT INTO conversation_events (conversation_id, event_type, actor_name, new_value) VALUES ($1,'transferred',$2,$3)",
+      [req.params.id, req.user.full_name || req.user.id, note]
+    ).catch(() => {});
+
+    if (fastify.io) fastify.io.emit('conversation:transferred', { conversation_id: req.params.id, agent_id, team_id, note });
+
+    return { success: true };
+  });
+
+  // ── Custom Field Definitions ──────────────────────────────────────────────
+  fastify.get('/custom-fields', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query('SELECT * FROM custom_field_definitions ORDER BY position ASC');
+    return rows;
+  });
+
+  fastify.post('/custom-fields', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    if (!['admin', 'supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { label, field_type, options, required, position } = req.body;
+    const { rows: maxPos } = await query('SELECT COALESCE(MAX(position),0) as max FROM custom_field_definitions');
+    const { rows } = await query(
+      'INSERT INTO custom_field_definitions (label, field_type, options, required, position) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [label, field_type || 'text', JSON.stringify(options || []), required || false, position || maxPos[0].max + 1]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.patch('/custom-fields/:id', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    if (!['admin', 'supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    const { label, field_type, options, required, position } = req.body;
+    const { rows } = await query(
+      'UPDATE custom_field_definitions SET label=COALESCE($1,label), field_type=COALESCE($2,field_type), options=COALESCE($3,options), required=COALESCE($4,required), position=COALESCE($5,position) WHERE id=$6 RETURNING *',
+      [label, field_type, options ? JSON.stringify(options) : null, required, position, req.params.id]
+    );
+    return rows[0];
+  });
+
+  fastify.delete('/custom-fields/:id', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    if (!['admin', 'supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+    await query('DELETE FROM custom_field_definitions WHERE id=$1', [req.params.id]);
+    return { success: true };
+  });
+
+  // ── Contact Custom Field Values ───────────────────────────────────────────
+  fastify.get('/contacts/:id/custom-fields', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows: defs } = await query('SELECT * FROM custom_field_definitions ORDER BY position ASC');
+    const { rows: vals } = await query('SELECT * FROM contact_custom_values WHERE contact_id=$1', [req.params.id]);
+    const valMap = {};
+    vals.forEach(v => { valMap[v.field_id] = v.value; });
+    return defs.map(d => ({ ...d, value: valMap[d.id] || null }));
+  });
+
+  fastify.post('/contacts/:id/custom-fields', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { field_id, value } = req.body;
+    await query(
+      'INSERT INTO contact_custom_values (contact_id, field_id, value) VALUES ($1,$2,$3) ON CONFLICT (contact_id, field_id) DO UPDATE SET value=$3',
+      [req.params.id, field_id, value]
+    );
     return { success: true };
   });
 

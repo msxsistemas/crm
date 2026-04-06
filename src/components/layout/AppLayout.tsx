@@ -10,6 +10,7 @@ import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import OnboardingTour from "@/components/onboarding/OnboardingTour";
 import GlobalSearch from "@/components/GlobalSearch";
 import { SessionTimeoutWarning } from "@/components/SessionTimeoutWarning";
+import OnboardingWizard from "@/components/OnboardingWizard";
 
 const AppLayout = () => {
   const { user } = useAuth();
@@ -77,6 +78,7 @@ const AppLayout = () => {
       />
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
       <SessionTimeoutWarning />
+      <OnboardingWizard />
     </div>
   );
 };

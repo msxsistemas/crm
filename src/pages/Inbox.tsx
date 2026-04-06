@@ -12,6 +12,7 @@ import {
   Trash2, Copy, Forward, Reply, Pencil, Check, AlertCircle, Bot, Clock, Target, Sparkles,
   LayoutTemplate, Tag, History, Ban, LayoutList, List, GitMerge, ShoppingBag, Download,
   CheckSquare, Users, Languages, UserCheck, Archive, LayoutGrid, AlignJustify, CreditCard,
+  Pin, PinOff,
 } from "lucide-react";
 import { useFollowupReminders } from "@/hooks/useFollowupReminders";
 import FollowupDialog from "@/components/followup/FollowupDialog";
@@ -117,7 +118,11 @@ interface DBConversation {
   created_at?: string;
   is_merged?: boolean;
   merged_into?: string | null;
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
+  pinned_message_id?: string | null;
   contacts: DBContact;
+  contact_conv_count?: number;
+  contact_is_blocked?: boolean;
 }
 
 interface DBMessage {
@@ -346,6 +351,8 @@ const Inbox = () => {
   // SLA filter state
   const [slaFilterOnly, setSlaFilterOnly] = useState(false);
   const [contactDisableChatbot, setContactDisableChatbot] = useState(false);
+  const [filterPriority, setFilterPriority] = useState("");
+  const [pinnedMessages, setPinnedMessages] = useState<Record<string, DBMessage>>({});
 
   // Date range filter
   const [dateFrom, setDateFrom] = useState<string>("");
@@ -1036,6 +1043,27 @@ const Inbox = () => {
     }
   }, [selected]);
 
+  useSocketEvent('conversation:updated', (data: any) => {
+    if (data?.id) {
+      setConversations(prev => prev.map(c => c.id === data.id ? { ...c, ...data } : c));
+    }
+  }, []);
+
+  useSocketEvent('conversation:message_pinned', (data: any) => {
+    if (data?.conversation_id) {
+      setConversations(prev => prev.map(c => c.id === data.conversation_id ? { ...c, pinned_message_id: data.message?.id } : c));
+      if (data.message?.id) {
+        setPinnedMessages(prev => ({ ...prev, [data.message.id]: data.message }));
+      }
+    }
+  }, []);
+
+  useSocketEvent('conversation:message_unpinned', (data: any) => {
+    if (data?.conversation_id) {
+      setConversations(prev => prev.map(c => c.id === data.conversation_id ? { ...c, pinned_message_id: null } : c));
+    }
+  }, []);
+
   // Realtime subscriptions
   useEffect(() => {
     const messagesChannel = db
@@ -1153,6 +1181,13 @@ const Inbox = () => {
     api.get<any[]>(`/conversations/${id}/scheduled-messages`).then(data => {
       if (data) setConvScheduledMsgs(data);
     }).catch(() => {});
+    // Load pinned message if any
+    const convo = conversations.find((c) => c.id === id);
+    if (convo?.pinned_message_id) {
+      db.from('messages').select('*').eq('id', convo.pinned_message_id).maybeSingle().then(({ data }) => {
+        if (data) setPinnedMessages(prev => ({ ...prev, [convo.pinned_message_id!]: data as unknown as DBMessage }));
+      }).catch(() => {});
+    }
   };
 
 
@@ -2286,6 +2321,10 @@ const Inbox = () => {
       if (filterLabel) {
         if (!c.label_ids || !c.label_ids.includes(filterLabel)) return false;
       }
+      if (filterPriority) {
+        const cp = c.priority || 'normal';
+        if (cp !== filterPriority) return false;
+      }
       return true;
     })
     .filter((c) =>
@@ -2694,6 +2733,13 @@ const Inbox = () => {
                 <option value="">Etiqueta</option>
                 {allLabels.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
+              <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} className="h-9 rounded-md border border-border bg-muted/50 px-3 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary">
+                <option value="">Prioridade</option>
+                <option value="urgent">Urgente</option>
+                <option value="high">Alta</option>
+                <option value="normal">Normal</option>
+                <option value="low">Baixa</option>
+              </select>
             </div>
             <div className="flex items-center gap-2 text-xs">
               <span className="text-muted-foreground">Ordenar:</span>
@@ -3031,8 +3077,11 @@ const Inbox = () => {
 
                     {/* Name */}
                     <span className="font-medium text-sm truncate flex-1 text-foreground">
-                      {blacklistedPhones.has(convo.contacts?.phone || "") && (
+                      {(blacklistedPhones.has(convo.contacts?.phone || "") || convo.contacts?.is_blocked || convo.contact_is_blocked) && (
                         <span className="mr-0.5" title="Número bloqueado">🚫</span>
+                      )}
+                      {(convo.contact_conv_count ?? 0) > 2 && (
+                        <span className="mr-0.5" title="Cliente recorrente">🔁</span>
                       )}
                       {convo.contacts?.name || convo.contacts?.phone}
                     </span>
@@ -3137,13 +3186,25 @@ const Inbox = () => {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-0.5">
-                      <span className="text-sm font-medium text-foreground truncate">
-                        {blacklistedPhones.has(convo.contacts?.phone || "") && (
-                          <span className="mr-1" title="Número bloqueado">🚫</span>
+                      <span className="text-sm font-medium text-foreground truncate flex items-center gap-1 flex-wrap">
+                        {(blacklistedPhones.has(convo.contacts?.phone || "") || convo.contacts?.is_blocked || convo.contact_is_blocked) && (
+                          <span title="Número bloqueado">🚫</span>
+                        )}
+                        {(convo.contact_conv_count ?? 0) > 2 && (
+                          <span title="Cliente recorrente">🔁</span>
                         )}
                         {convo.contacts?.name || convo.contacts?.phone}
                         {" "}
                         <span className="text-[11px] text-green-500 font-normal">({formatTime(convo.last_message_at)})</span>
+                        {convo.priority === 'urgent' && (
+                          <span className="inline-flex items-center rounded px-1 py-0.5 text-[9px] font-bold text-white bg-red-600 uppercase shrink-0">URGENTE</span>
+                        )}
+                        {convo.priority === 'high' && (
+                          <span className="inline-flex items-center rounded px-1 py-0.5 text-[9px] font-bold text-white bg-orange-500 uppercase shrink-0">ALTA</span>
+                        )}
+                        {convo.priority === 'low' && (
+                          <span className="inline-flex items-center rounded px-1 py-0.5 text-[9px] font-bold text-white bg-gray-500 uppercase shrink-0">BAIXA</span>
+                        )}
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground truncate mb-1.5">
@@ -3452,6 +3513,29 @@ const Inbox = () => {
                         </div>
                       );
                     })()}
+                    {/* Priority selector inline */}
+                    <select
+                      value={selectedConvo.priority || 'normal'}
+                      onChange={async (e) => {
+                        const p = e.target.value;
+                        try {
+                          await api.patch(`/conversations/${selectedConvo.id}/priority`, { priority: p });
+                          setConversations(prev => prev.map(c => c.id === selectedConvo.id ? { ...c, priority: p as DBConversation['priority'] } : c));
+                        } catch { toast.error('Erro ao alterar prioridade'); }
+                      }}
+                      className={cn(
+                        "h-6 rounded-full text-[10px] font-semibold px-2 border cursor-pointer focus:outline-none",
+                        selectedConvo.priority === 'urgent' ? "bg-red-600 text-white border-red-600" :
+                        selectedConvo.priority === 'high' ? "bg-orange-500 text-white border-orange-500" :
+                        selectedConvo.priority === 'low' ? "bg-gray-500 text-white border-gray-500" :
+                        "bg-muted text-muted-foreground border-border"
+                      )}
+                    >
+                      <option value="low">Baixa</option>
+                      <option value="normal">Normal</option>
+                      <option value="high">Alta</option>
+                      <option value="urgent">Urgente</option>
+                    </select>
                   </div>
                 </div>
               </div>
@@ -3729,6 +3813,40 @@ const Inbox = () => {
               }} />
             </div>
 
+            {/* Pinned message banner */}
+            {selectedConvo.pinned_message_id && (() => {
+              const pinned = pinnedMessages[selectedConvo.pinned_message_id];
+              if (!pinned) return null;
+              return (
+                <div
+                  className="flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800 cursor-pointer hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors"
+                  onClick={() => {
+                    const el = document.getElementById(`msg-${selectedConvo.pinned_message_id}`);
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }}
+                >
+                  <Pin className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">Mensagem fixada</p>
+                    <p className="text-xs text-amber-800 dark:text-amber-300 truncate">{pinned.body || pinned.content || ''}</p>
+                  </div>
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        await api.delete(`/conversations/${selectedConvo.id}/pin-message`);
+                        setConversations(prev => prev.map(c => c.id === selectedConvo.id ? { ...c, pinned_message_id: null } : c));
+                      } catch { toast.error('Erro ao desafixar mensagem'); }
+                    }}
+                    className="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 transition-colors"
+                    title="Desafixar mensagem"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              );
+            })()}
+
             {/* Messages - WhatsApp style */}
             <div
               className="flex-1 p-4 space-y-1 overflow-y-auto scrollbar-thin"
@@ -3743,7 +3861,7 @@ const Inbox = () => {
               {displayMessages.map((msg, i) => {
                 const showDate = i > 0 && getDateLabel(msg.created_at) !== getDateLabel(displayMessages[i - 1].created_at);
                 return (
-                  <div key={msg.id}>
+                  <div key={msg.id} id={`msg-${msg.id}`}>
                     {showDate && (
                       <div className="flex justify-center my-3">
                         <span className="bg-card text-muted-foreground text-[11px] px-3 py-1 rounded-lg shadow-sm">
@@ -3827,6 +3945,30 @@ const Inbox = () => {
                                 >
                                   Responder
                                 </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="text-[14px] cursor-pointer hover:bg-accent focus:bg-accent focus:text-accent-foreground rounded px-3 py-2 flex items-center gap-2"
+                                  onClick={async () => {
+                                    const isPinned = selectedConvo.pinned_message_id === msg.id;
+                                    try {
+                                      if (isPinned) {
+                                        await api.delete(`/conversations/${selectedConvo.id}/pin-message`);
+                                        setConversations(prev => prev.map(c => c.id === selectedConvo.id ? { ...c, pinned_message_id: null } : c));
+                                      } else {
+                                        const res = await api.post(`/conversations/${selectedConvo.id}/pin-message`, { message_id: msg.id }) as any;
+                                        setConversations(prev => prev.map(c => c.id === selectedConvo.id ? { ...c, pinned_message_id: msg.id } : c));
+                                        if (res?.message) setPinnedMessages(prev => ({ ...prev, [msg.id]: res.message }));
+                                        else setPinnedMessages(prev => ({ ...prev, [msg.id]: msg }));
+                                      }
+                                      toast.success(isPinned ? 'Mensagem desafixada' : 'Mensagem fixada');
+                                    } catch { toast.error('Erro ao fixar mensagem'); }
+                                  }}
+                                >
+                                  {selectedConvo.pinned_message_id === msg.id ? (
+                                    <><PinOff className="h-3.5 w-3.5" /> Desafixar</>
+                                  ) : (
+                                    <><Pin className="h-3.5 w-3.5" /> Fixar</>
+                                  )}
+                                </DropdownMenuItem>
                               </>
                             ) : (
                               <>
@@ -3844,6 +3986,30 @@ const Inbox = () => {
                                   }}
                                 >
                                   Copiar
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="text-[14px] cursor-pointer hover:bg-accent focus:bg-accent focus:text-accent-foreground rounded px-3 py-2 flex items-center gap-2"
+                                  onClick={async () => {
+                                    const isPinned = selectedConvo.pinned_message_id === msg.id;
+                                    try {
+                                      if (isPinned) {
+                                        await api.delete(`/conversations/${selectedConvo.id}/pin-message`);
+                                        setConversations(prev => prev.map(c => c.id === selectedConvo.id ? { ...c, pinned_message_id: null } : c));
+                                      } else {
+                                        const res = await api.post(`/conversations/${selectedConvo.id}/pin-message`, { message_id: msg.id }) as any;
+                                        setConversations(prev => prev.map(c => c.id === selectedConvo.id ? { ...c, pinned_message_id: msg.id } : c));
+                                        if (res?.message) setPinnedMessages(prev => ({ ...prev, [msg.id]: res.message }));
+                                        else setPinnedMessages(prev => ({ ...prev, [msg.id]: msg }));
+                                      }
+                                      toast.success(isPinned ? 'Mensagem desafixada' : 'Mensagem fixada');
+                                    } catch { toast.error('Erro ao fixar mensagem'); }
+                                  }}
+                                >
+                                  {selectedConvo.pinned_message_id === msg.id ? (
+                                    <><PinOff className="h-3.5 w-3.5" /> Desafixar</>
+                                  ) : (
+                                    <><Pin className="h-3.5 w-3.5" /> Fixar</>
+                                  )}
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                   className="text-[14px] cursor-pointer hover:bg-accent focus:bg-accent focus:text-accent-foreground rounded px-3 py-2 text-destructive focus:text-destructive"
