@@ -1,3 +1,7 @@
+// Migration SQL (run manually on DB):
+// ALTER TABLE messages ADD COLUMN IF NOT EXISTS transcription TEXT;
+// ALTER TABLE conversations ADD COLUMN IF NOT EXISTS sentiment TEXT;
+
 import { query, pool } from '../database.js';
 import { sendMetaMessage } from './meta-whatsapp.js';
 import { enqueueSend } from '../jobs/messageQueue.js';
@@ -395,6 +399,77 @@ async function handleEvolutionWebhook(payload, fastify) {
     fastify.io?.emit('message:new', { ...msgRow, conversation_id: conv.id });
     fastify.io?.emit('conversation:updated', { id: conv.id });
 
+    // ── Audio transcription — non-blocking ────────────────────────────────
+    if (type === 'audio' || messageContent?.audioMessage) {
+      const openaiKey = process.env.OPENAI_API_KEY;
+      const evolutionUrl = process.env.EVOLUTION_API_URL;
+      const evolutionKey = process.env.EVOLUTION_API_KEY;
+      if (openaiKey && evolutionUrl && msgRow.id) {
+        (async () => {
+          try {
+            const audioResp = await fetch(`${evolutionUrl}/message/download/base64/${instance}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
+              body: JSON.stringify({ messageId: key?.id })
+            });
+            if (!audioResp.ok) return;
+            const audioJson = await audioResp.json();
+            const base64 = audioJson?.base64;
+            if (!base64) return;
+
+            const audioBuffer = Buffer.from(base64, 'base64');
+            const formData = new FormData();
+            const blob = new Blob([audioBuffer], { type: 'audio/ogg' });
+            formData.append('file', blob, 'audio.ogg');
+            formData.append('model', 'whisper-1');
+            formData.append('language', 'pt');
+
+            const whisperResp = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${openaiKey}` },
+              body: formData
+            });
+            if (!whisperResp.ok) return;
+            const { text } = await whisperResp.json();
+            if (text) {
+              await query('UPDATE messages SET transcription=$1 WHERE id=$2', [text, msgRow.id]);
+              fastify.io?.to(`conversation:${conv.id}`).emit('message:transcription', { message_id: msgRow.id, transcription: text });
+            }
+          } catch (e) { /* silent */ }
+        })();
+      }
+    }
+
+    // ── Sentiment analysis — non-blocking, inbound text only ─────────────
+    if (textContent) {
+      const anthropicKey = process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+      if (anthropicKey) {
+        (async () => {
+          try {
+            const msgType = messageContent?.conversation ? 'conversation' : (messageContent?.extendedTextMessage ? 'extendedTextMessage' : null);
+            if (!msgType) return;
+            const resp = await fetch('https://api.anthropic.com/v1/messages', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },
+              body: JSON.stringify({
+                model: 'claude-haiku-4-5-20251001',
+                max_tokens: 10,
+                system: 'Classifique o sentimento desta mensagem de cliente. Responda com APENAS uma palavra: positivo, neutro ou negativo.',
+                messages: [{ role: 'user', content: textContent }]
+              })
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const sentiment = data.content?.[0]?.text?.trim().toLowerCase();
+            if (['positivo', 'neutro', 'negativo'].includes(sentiment)) {
+              await query('UPDATE conversations SET sentiment=$1 WHERE id=$2', [sentiment, conv.id]);
+              fastify.io?.emit('conversation:sentiment', { conversation_id: conv.id, sentiment });
+            }
+          } catch (e) { /* silent */ }
+        })();
+      }
+    }
+
     // ── Auto-tag rules ────────────────────────────────────────────────────
     if (textContent) {
       query('SELECT keyword, tag, match_type FROM auto_tag_rules WHERE is_active=true').then(async ({ rows: tagRules }) => {
@@ -455,10 +530,21 @@ async function handleEvolutionWebhook(payload, fastify) {
     // ── CSAT automático: detectar resposta 1-5 para conversas fechadas com csat_sent_at ──
     if (textContent) {
       const bodyNum = parseInt(textContent.trim());
+      let csatHandled = false;
       if (!isNaN(bodyNum) && bodyNum >= 1 && bodyNum <= 5) {
         const { rows: csatRows } = await query('SELECT csat_sent_at, status FROM conversations WHERE id=$1', [conv.id]).catch(() => ({ rows: [] }));
         if (csatRows[0]?.csat_sent_at && csatRows[0]?.status === 'closed') {
           await query('UPDATE conversations SET csat_score=$1, csat_responded_at=NOW() WHERE id=$2', [bodyNum, conv.id]).catch(() => {});
+          csatHandled = true;
+          return; // não processar mais
+        }
+      }
+
+      // ── NPS response: detect 0-10 for closed conversations with nps_sent_at ──
+      if (!isNaN(bodyNum) && bodyNum >= 0 && bodyNum <= 10 && !csatHandled) {
+        const { rows: npsRows } = await query('SELECT nps_sent_at, status FROM conversations WHERE id=$1', [conv.id]).catch(() => ({ rows: [] }));
+        if (npsRows[0]?.nps_sent_at && npsRows[0]?.status === 'closed') {
+          await query('UPDATE conversations SET nps_score=$1, nps_responded_at=NOW() WHERE id=$2', [bodyNum, conv.id]).catch(() => {});
           return; // não processar mais
         }
       }

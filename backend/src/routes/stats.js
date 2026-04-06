@@ -401,6 +401,27 @@ export default async function statsRoutes(fastify) {
     return rows[0];
   });
 
+  // NPS stats
+  fastify.get('/stats/nps', auth, async (req) => {
+    const { start, end } = req.query;
+    const { rows } = await query(`
+      SELECT
+        COUNT(*) FILTER (WHERE nps_score >= 9) as promoters,
+        COUNT(*) FILTER (WHERE nps_score >= 7 AND nps_score <= 8) as passives,
+        COUNT(*) FILTER (WHERE nps_score <= 6 AND nps_score IS NOT NULL) as detractors,
+        COUNT(*) FILTER (WHERE nps_score IS NOT NULL) as total_responses,
+        COUNT(*) FILTER (WHERE nps_sent_at IS NOT NULL) as total_sent,
+        ROUND(AVG(nps_score)::numeric, 1) as avg_score,
+        ROUND(
+          (COUNT(*) FILTER (WHERE nps_score >= 9)::numeric - COUNT(*) FILTER (WHERE nps_score <= 6 AND nps_score IS NOT NULL)::numeric)
+          / NULLIF(COUNT(*) FILTER (WHERE nps_score IS NOT NULL), 0)::numeric * 100, 1
+        ) as nps_score
+      FROM conversations
+      WHERE ($1::date IS NULL OR created_at >= $1) AND ($2::date IS NULL OR created_at <= $2)
+    `, [start || null, end || null]);
+    return rows[0];
+  });
+
   // Agent stats for today
   fastify.get('/stats/agents-today', auth, async (req) => {
     const { rows } = await query(`

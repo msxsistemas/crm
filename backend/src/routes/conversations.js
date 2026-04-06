@@ -1,4 +1,14 @@
 // Migration SQL (run manually on DB):
+// ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS instance_name TEXT;
+// ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS template_name TEXT;
+// ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS message TEXT;
+// ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'draft';
+// ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+// ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+// ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS total_contacts INTEGER DEFAULT 0;
+// ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS sent_count INTEGER DEFAULT 0;
+// ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS failed_count INTEGER DEFAULT 0;
+// CREATE TABLE IF NOT EXISTS campaign_contacts (id UUID PRIMARY KEY DEFAULT uuid_generate_v4(), campaign_id UUID REFERENCES campaigns(id) ON DELETE CASCADE, contact_id UUID REFERENCES contacts(id) ON DELETE CASCADE, UNIQUE(campaign_id, contact_id));
 // ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_sent_at TIMESTAMPTZ;
 // ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_score INTEGER;
 // ALTER TABLE conversations ADD COLUMN IF NOT EXISTS csat_responded_at TIMESTAMPTZ;
@@ -8,6 +18,11 @@
 // ALTER TABLE conversations ADD COLUMN IF NOT EXISTS sla_alerted BOOLEAN DEFAULT false;
 // ALTER TABLE categories ADD COLUMN IF NOT EXISTS sla_hours INTEGER;
 // ALTER TABLE profiles ADD COLUMN IF NOT EXISTS max_conversations INTEGER;
+// ALTER TABLE conversations ADD COLUMN IF NOT EXISTS nps_sent_at TIMESTAMPTZ;
+// ALTER TABLE conversations ADD COLUMN IF NOT EXISTS nps_score INTEGER;
+// ALTER TABLE conversations ADD COLUMN IF NOT EXISTS nps_responded_at TIMESTAMPTZ;
+// ALTER TABLE settings ADD COLUMN IF NOT EXISTS nps_enabled BOOLEAN DEFAULT false;
+// ALTER TABLE settings ADD COLUMN IF NOT EXISTS nps_message TEXT;
 
 import { query, pool, withTransaction } from '../database.js';
 import { cached, invalidate } from '../redis.js';
@@ -299,6 +314,31 @@ export default async function conversationRoutes(fastify) {
       }
     }
 
+    // NPS automático: enviar pesquisa NPS ao fechar conversa se nps_enabled=true
+    if (req.body.status === 'closed') {
+      const { rows: npsSettings } = await query('SELECT nps_enabled, nps_message FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+      if (npsSettings[0]?.nps_enabled) {
+        const npsMsg = npsSettings[0].nps_message || 'Em uma escala de 0 a 10, quanto você recomendaria nosso atendimento? Responda apenas com o número.';
+        try {
+          const { rows: cRows2 } = await query(
+            'SELECT c.connection_name, ct.phone FROM conversations c JOIN contacts ct ON ct.id=c.contact_id WHERE c.id=$1',
+            [req.params.id]
+          );
+          if (cRows2[0]) {
+            const { rows: sEvo2 } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+            if (sEvo2[0]?.evolution_url) {
+              fetch(`${sEvo2[0].evolution_url}/message/sendText/${cRows2[0].connection_name}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'apikey': sEvo2[0].evolution_key },
+                body: JSON.stringify({ number: cRows2[0].phone, text: npsMsg })
+              }).catch(() => {});
+              query('UPDATE conversations SET nps_sent_at=NOW() WHERE id=$1', [req.params.id]).catch(() => {});
+            }
+          }
+        } catch (e) { /* silent */ }
+      }
+    }
+
     return rows[0];
   });
 
@@ -584,5 +624,81 @@ ${'─'.repeat(60)}
     `);
 
     return { queue, agentStats };
+  });
+
+  // Mass campaign dispatch
+  fastify.post('/campaigns/:id/dispatch', auth, async (req, reply) => {
+    const { rows: campaign } = await query('SELECT * FROM campaigns WHERE id=$1', [req.params.id]);
+    if (!campaign[0]) return reply.code(404).send({ error: 'Not found' });
+
+    const { rows: contacts } = await query(`
+      SELECT DISTINCT ct.id, ct.phone, ct.name
+      FROM campaign_contacts cc
+      JOIN contacts ct ON ct.id = cc.contact_id
+      WHERE cc.campaign_id = $1 AND ct.phone IS NOT NULL
+    `, [req.params.id]);
+
+    if (!contacts.length) return { ok: true, sent: 0 };
+
+    await query("UPDATE campaigns SET status='sending', started_at=NOW(), total_contacts=$1 WHERE id=$2", [contacts.length, req.params.id]);
+
+    const instance = campaign[0].instance_name || campaign[0].connection_name;
+    const template = campaign[0].template_name;
+    const message = campaign[0].message || campaign[0].message_template;
+
+    (async () => {
+      let sent = 0, failed = 0;
+      for (const contact of contacts) {
+        try {
+          if (template) {
+            await fetch(`${process.env.EVOLUTION_API_URL}/message/sendTemplate/${instance}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+              body: JSON.stringify({ number: contact.phone, template: { name: template, language: { code: 'pt_BR' }, components: [] } })
+            });
+          } else if (message) {
+            await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${instance}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+              body: JSON.stringify({ number: contact.phone, text: message })
+            });
+          }
+          sent++;
+          await query("UPDATE campaigns SET sent_count=$1 WHERE id=$2", [sent, req.params.id]);
+          await new Promise(r => setTimeout(r, 1500));
+        } catch(e) {
+          failed++;
+          await query("UPDATE campaigns SET failed_count=$1 WHERE id=$2", [failed, req.params.id]);
+        }
+      }
+      await query("UPDATE campaigns SET status='completed', completed_at=NOW() WHERE id=$1", [req.params.id]);
+    })();
+
+    return { ok: true, total: contacts.length };
+  });
+
+  // Add contacts to campaign from segment
+  fastify.post('/campaigns/:id/add-from-segment', auth, async (req, reply) => {
+    const { segment_id } = req.body;
+    const segResult = await query(`
+      SELECT DISTINCT ct.id FROM contacts ct
+      JOIN contact_segments cs ON cs.contact_id = ct.id
+      WHERE cs.segment_id = $1
+    `, [segment_id]).catch(() => ({ rows: [] }));
+
+    const segContacts = segResult.rows;
+    if (!segContacts.length) return { added: 0 };
+
+    const values = segContacts.map((c, i) => `($1,$${i+2})`).join(',');
+    const params = [req.params.id, ...segContacts.map(c => c.id)];
+    await query(`INSERT INTO campaign_contacts (campaign_id, contact_id) VALUES ${values} ON CONFLICT DO NOTHING`, params);
+    return { added: segContacts.length };
+  });
+
+  // Get campaign dispatch status
+  fastify.get('/campaigns/:id/status', auth, async (req, reply) => {
+    const { rows } = await query('SELECT id, status, sent_count, failed_count, total_contacts, started_at, completed_at FROM campaigns WHERE id=$1', [req.params.id]);
+    if (!rows[0]) return reply.code(404).send({ error: 'Not found' });
+    return rows[0];
   });
 }

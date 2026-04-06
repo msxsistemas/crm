@@ -821,6 +821,8 @@ const HorariosTab = () => {
   const [offMessage, setOffMessage] = useState("No momento estamos fora do horário de atendimento. Retornaremos em breve!");
   const [csatEnabled, setCsatEnabled] = useState(false);
   const [csatMessage, setCsatMessage] = useState("Como você avalia nosso atendimento? Responda com um número de 1 a 5 (1=péssimo, 5=ótimo)");
+  const [npsEnabled, setNpsEnabled] = useState(false);
+  const [npsMessage, setNpsMessage] = useState("Em uma escala de 0 a 10, quanto você recomendaria nosso atendimento? Responda apenas com o número.");
   const [schedule, setSchedule] = useState(DEFAULT_DAYS);
   const [saving, setSaving] = useState(false);
   const [autoAssignEnabled, setAutoAssignEnabled] = useState(false);
@@ -834,6 +836,8 @@ const HorariosTab = () => {
       if (data.auto_csat_enabled !== undefined) setCsatEnabled(data.auto_csat_enabled);
       if (data.csat_enabled !== undefined) setCsatEnabled(data.csat_enabled);
       if (data.csat_message) setCsatMessage(data.csat_message);
+      if (data.nps_enabled !== undefined) setNpsEnabled(data.nps_enabled);
+      if (data.nps_message) setNpsMessage(data.nps_message);
       if (data.auto_assign_enabled !== undefined) setAutoAssignEnabled(data.auto_assign_enabled);
       if (data.auto_close_days !== undefined) setAutoCloseDays(parseInt(data.auto_close_days) || 0);
     }).catch(() => {});
@@ -859,6 +863,8 @@ const HorariosTab = () => {
         auto_csat_enabled: csatEnabled,
         csat_enabled: csatEnabled,
         csat_message: csatMessage,
+        nps_enabled: npsEnabled,
+        nps_message: npsMessage,
         auto_assign_enabled: autoAssignEnabled,
         auto_close_days: autoCloseDays,
       });
@@ -913,6 +919,34 @@ const HorariosTab = () => {
               placeholder="Mensagem enviada ao cliente ao encerrar a conversa..."
             />
             <p className="text-xs text-muted-foreground">O cliente deve responder com um número de 1 a 5</p>
+          </div>
+        )}
+      </Card>
+
+      {/* NPS Survey Toggle */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center">
+              <TrendingUp className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <p className="font-semibold text-foreground">Pesquisa NPS Automática</p>
+              <p className="text-sm text-muted-foreground">Enviar pesquisa NPS (0–10) ao encerrar conversa para calcular Net Promoter Score</p>
+            </div>
+          </div>
+          <Switch checked={npsEnabled} onCheckedChange={setNpsEnabled} />
+        </div>
+        {npsEnabled && (
+          <div className="mt-3 space-y-2">
+            <label className="text-sm font-medium text-foreground">Mensagem NPS</label>
+            <Textarea
+              value={npsMessage}
+              onChange={e => setNpsMessage(e.target.value)}
+              rows={3}
+              placeholder="Mensagem enviada ao cliente ao encerrar a conversa..."
+            />
+            <p className="text-xs text-muted-foreground">O cliente deve responder com um número de 0 a 10. Promotores (9–10), Passivos (7–8), Detratores (0–6).</p>
           </div>
         )}
       </Card>

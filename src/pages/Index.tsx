@@ -495,6 +495,15 @@ const Index = () => {
       .catch(() => {});
   }, [startDate, endDate]);
 
+  // NPS stats
+  const [npsStats, setNpsStats] = useState<{ nps_score: string | null; promoters: number; passives: number; detractors: number; total_responses: number; total_sent: number; avg_score: string | null } | null>(null);
+  useEffect(() => {
+    if (!startDate || !endDate) return;
+    api.get<any>(`/stats/nps?start=${startDate}&end=${endDate}`)
+      .then(d => setNpsStats(d))
+      .catch(() => {});
+  }, [startDate, endDate]);
+
   // Extra widget data — deferred until after primary render
   const { topContacts } = useTopContacts(widgetsReady);
   const { activities } = useRecentActivity(widgetsReady);
@@ -1082,6 +1091,45 @@ const Index = () => {
                   : "Sem dados no período"}
               </p>
             </div>
+
+            {/* NPS Card */}
+            {(() => {
+              const npsScore = npsStats?.nps_score != null ? Number(npsStats.nps_score) : null;
+              const npsColor = npsScore == null ? "border-border bg-card" : npsScore > 50 ? "border-green-200 dark:border-green-800 bg-green-50/60 dark:bg-green-950/20" : npsScore > 0 ? "border-yellow-200 dark:border-yellow-800 bg-yellow-50/60 dark:bg-yellow-950/20" : "border-red-200 dark:border-red-800 bg-red-50/60 dark:bg-red-950/20";
+              const npsIconColor = npsScore == null ? "bg-muted" : npsScore > 50 ? "bg-green-100 dark:bg-green-900/40" : npsScore > 0 ? "bg-yellow-100 dark:bg-yellow-900/40" : "bg-red-100 dark:bg-red-900/40";
+              const npsTextColor = npsScore == null ? "text-foreground" : npsScore > 50 ? "text-green-600 dark:text-green-400" : npsScore > 0 ? "text-yellow-600 dark:text-yellow-400" : "text-red-600 dark:text-red-400";
+              const total = (npsStats?.promoters ?? 0) + (npsStats?.passives ?? 0) + (npsStats?.detractors ?? 0);
+              return (
+                <div className={`rounded-xl border ${npsColor} px-5 py-6 relative`}>
+                  <div className={`absolute top-5 right-5 p-2.5 rounded-xl ${npsIconColor}`}>
+                    <TrendingUp className="h-5 w-5 text-primary" />
+                  </div>
+                  <p className="text-[10px] font-bold text-muted-foreground tracking-wider uppercase mb-3">NPS</p>
+                  <p className={`text-4xl font-bold ${npsTextColor}`}>
+                    {npsScore != null ? (npsScore > 0 ? `+${npsScore}` : `${npsScore}`) : "—"}
+                  </p>
+                  {total > 0 && (
+                    <div className="mt-2 space-y-1">
+                      <div className="flex items-center gap-1.5">
+                        <div className="h-1.5 rounded-full bg-green-500" style={{ width: `${Math.round(((npsStats?.promoters ?? 0) / total) * 100)}%`, minWidth: 4, maxWidth: '60%' }} />
+                        <span className="text-[10px] text-muted-foreground">{npsStats?.promoters} prom.</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="h-1.5 rounded-full bg-yellow-400" style={{ width: `${Math.round(((npsStats?.passives ?? 0) / total) * 100)}%`, minWidth: 4, maxWidth: '60%' }} />
+                        <span className="text-[10px] text-muted-foreground">{npsStats?.passives} pass.</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="h-1.5 rounded-full bg-red-500" style={{ width: `${Math.round(((npsStats?.detractors ?? 0) / total) * 100)}%`, minWidth: 4, maxWidth: '60%' }} />
+                        <span className="text-[10px] text-muted-foreground">{npsStats?.detractors} detr.</span>
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-[10px] text-muted-foreground mt-2">
+                    {npsStats?.total_responses ? `${npsStats.total_responses} respostas` : "Sem dados no período"}
+                  </p>
+                </div>
+              );
+            })()}
           </div>
         </div>
         ); // end stats_cards
