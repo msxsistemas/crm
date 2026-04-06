@@ -161,7 +161,9 @@ const Contacts = () => {
   const debouncedSearch = useDebounce(search, 350);
   const csvInputRef = useRef<HTMLInputElement>(null);
   const vcfInputRef = useRef<HTMLInputElement>(null);
+  const historyInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+  const [historyContactId, setHistoryContactId] = useState<string | null>(null);
 
   // WhatsApp import
   const [whatsappImportOpen, setWhatsappImportOpen] = useState(false);
@@ -375,6 +377,18 @@ const Contacts = () => {
     setSelectedWAInstance("");
     loadWhatsAppConnections();
     setWhatsappImportOpen(true);
+  };
+
+  const handleImportHistory = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !historyContactId) return;
+    const content = await file.text();
+    try {
+      const res = await api.post(`/contacts/${historyContactId}/import-chat-history`, { content });
+      toast.success(`${(res as any).imported} mensagens importadas!`);
+    } catch { toast.error('Erro ao importar histórico'); }
+    e.target.value = '';
+    setHistoryContactId(null);
   };
 
   const handleImportFromWhatsApp = async () => {
@@ -1265,6 +1279,13 @@ const Contacts = () => {
         className="hidden"
         onChange={handleImportVCF}
       />
+      <input
+        ref={historyInputRef}
+        type="file"
+        accept=".txt"
+        style={{ display: 'none' }}
+        onChange={handleImportHistory}
+      />
 
       {/* CONTACTS TAB */}
       {mainTab === "contacts" && (
@@ -1413,6 +1434,9 @@ const Contacts = () => {
                             </Button>
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => openEdit(contact)} title="Editar">
                               <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-orange-500 hover:text-orange-600 hover:bg-orange-50" title="Importar histórico (.txt)" onClick={() => { setHistoryContactId(contact.id); setTimeout(() => historyInputRef.current?.click(), 50); }}>
+                              <Download className="h-4 w-4" />
                             </Button>
                             {can("delete_contacts") && (
                               <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => confirmDelete(contact)} title="Excluir">

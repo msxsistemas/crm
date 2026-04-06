@@ -118,6 +118,71 @@ export default async function contactRoutes(fastify) {
     return { message: 'Contato excluído' };
   });
 
+  // Import WhatsApp chat history (.txt export)
+  fastify.post('/contacts/:id/import-chat-history', auth, async (req, reply) => {
+    const { content, instance_name } = req.body;
+    if (!content) return reply.code(400).send({ error: 'content é obrigatório' });
+
+    const contactId = req.params.id;
+
+    // Get or create conversation for this contact
+    const { rows: convs } = await query(
+      "SELECT id FROM conversations WHERE contact_id=$1 AND status='closed' ORDER BY created_at DESC LIMIT 1",
+      [contactId]
+    );
+
+    let conversationId;
+    if (convs[0]) {
+      conversationId = convs[0].id;
+    } else {
+      const { rows: contact } = await query('SELECT * FROM contacts WHERE id=$1', [contactId]);
+      if (!contact[0]) return reply.code(404).send({ error: 'Contact not found' });
+      const { rows: newConv } = await query(
+        "INSERT INTO conversations (contact_id, status, instance_name, created_at) VALUES ($1,'closed',$2,NOW()) RETURNING id",
+        [contactId, instance_name || 'imported']
+      );
+      conversationId = newConv[0].id;
+    }
+
+    // Parse WhatsApp export format: "DD/MM/YYYY, HH:MM - Name: message"
+    const lines = content.split('\n');
+    const msgRegex = /^(\d{1,2}\/\d{1,2}\/\d{2,4}),\s(\d{2}:\d{2})\s-\s([^:]+):\s(.+)$/;
+
+    let imported = 0;
+    const contactInfo = await query('SELECT name, phone FROM contacts WHERE id=$1', [contactId]);
+    const contactName = contactInfo.rows[0]?.name || '';
+    const contactPhone = contactInfo.rows[0]?.phone || '';
+
+    for (const line of lines) {
+      const match = line.match(msgRegex);
+      if (!match) continue;
+
+      const [, dateStr, timeStr, sender, message] = match;
+      // Determine direction: if sender matches contact name or phone → inbound, else outbound
+      const isContact = sender.includes(contactName) || sender.includes(contactPhone) || sender === contactName;
+      const direction = isContact ? 'inbound' : 'outbound';
+
+      // Parse date
+      const [day, month, year] = dateStr.split('/');
+      const msgDate = new Date(`${year}-${month}-${day}T${timeStr}:00`);
+
+      try {
+        await query(
+          "INSERT INTO messages (conversation_id, direction, body, message_type, created_at, status) VALUES ($1,$2,$3,'conversation',$4,'read') ON CONFLICT DO NOTHING",
+          [conversationId, direction, message, msgDate]
+        );
+        imported++;
+      } catch(e) { /* skip duplicate */ }
+    }
+
+    // Update conversation last_message_at
+    if (imported > 0) {
+      await query('UPDATE conversations SET last_message_at=NOW() WHERE id=$1', [conversationId]);
+    }
+
+    return { ok: true, imported, conversation_id: conversationId };
+  });
+
   // Sync avatars from Evolution API for contacts without avatar_url
   fastify.post('/contacts/sync-avatars', auth, async (req, reply) => {
     const { rows: settings } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');

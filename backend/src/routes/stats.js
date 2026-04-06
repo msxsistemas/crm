@@ -481,4 +481,39 @@ export default async function statsRoutes(fastify) {
     await redis.set(cacheKey, JSON.stringify(result), 'EX', 3600).catch(() => null);
     return result;
   });
+
+  // ── Tags Analytics ────────────────────────────────────────────────────────
+  fastify.get('/stats/tags', auth, async (req) => {
+    const { start, end } = req.query;
+
+    // Tag usage across contacts
+    const { rows: contactTags } = await query(`
+      SELECT tag, COUNT(*) as contact_count
+      FROM contacts, unnest(tags) as tag
+      WHERE ($1::date IS NULL OR created_at >= $1) AND ($2::date IS NULL OR created_at <= $2)
+      GROUP BY tag ORDER BY contact_count DESC LIMIT 30
+    `, [start || null, end || null]);
+
+    // Tag usage across conversations
+    const { rows: convTags } = await query(`
+      SELECT tag, COUNT(*) as conv_count
+      FROM conversations, unnest(label_ids) as tag
+      WHERE ($1::date IS NULL OR created_at >= $1) AND ($2::date IS NULL OR created_at <= $2)
+      GROUP BY tag ORDER BY conv_count DESC LIMIT 30
+    `, [start || null, end || null]);
+
+    // Weekly trend of most used tags (last 8 weeks)
+    const { rows: trend } = await query(`
+      SELECT
+        DATE_TRUNC('week', created_at) as week,
+        tag,
+        COUNT(*) as count
+      FROM contacts, unnest(tags) as tag
+      WHERE created_at > NOW() - interval '8 weeks'
+      GROUP BY week, tag
+      ORDER BY week DESC, count DESC
+    `);
+
+    return { contactTags, convTags, trend };
+  });
 }

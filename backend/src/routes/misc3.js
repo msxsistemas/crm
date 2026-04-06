@@ -571,6 +571,31 @@ export default async function misc3Routes(fastify) {
     return { ok: resp.ok };
   });
 
+  // ── WhatsApp Groups ──────────────────────────────────────────────────────────
+  fastify.get('/whatsapp/groups/:instance', auth, async (req) => {
+    const s = await getEvoSettings();
+    if (!s?.evolution_url) return [];
+    const resp = await fetch(`${s.evolution_url}/group/fetchAllGroups/${req.params.instance}?getParticipants=false`, {
+      headers: { 'apikey': s.evolution_key }
+    });
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    return Array.isArray(data) ? data.map(g => ({ id: g.id, subject: g.subject, size: g.size })) : [];
+  });
+
+  fastify.post('/whatsapp/groups/:instance/send', auth, async (req, reply) => {
+    const { group_id, text } = req.body;
+    if (!group_id || !text) return reply.code(400).send({ error: 'group_id e text são obrigatórios' });
+    const s = await getEvoSettings();
+    if (!s?.evolution_url) return reply.code(400).send({ error: 'Evolution API não configurada' });
+    const resp = await fetch(`${s.evolution_url}/message/sendText/${req.params.instance}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': s.evolution_key },
+      body: JSON.stringify({ number: group_id, text })
+    });
+    return { ok: resp.ok };
+  });
+
   // ── Link preview proxy ────────────────────────────────────────────────────
   fastify.get('/link-preview', auth, async (req, reply) => {
     const { url } = req.query;

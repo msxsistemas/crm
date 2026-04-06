@@ -180,6 +180,7 @@ const userNavSections: NavSection[] = [
     title: "RELATÓRIOS",
     items: [
       { to: "/relatorios-customizados", icon: PieChart, label: "Builder de Relatórios" },
+      { to: "/tags-analytics", icon: Tag, label: "Analytics de Tags" },
     ],
   },
   {

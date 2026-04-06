@@ -102,6 +102,7 @@ const AutoDistribution = lazy(() => import("./pages/AutoDistribution"));
 const CustomReports = lazy(() => import("./pages/CustomReports"));
 const KanbanConversas = lazy(() => import("./pages/Kanban"));
 const ContactProfile = lazy(() => import("./pages/ContactProfile"));
+const TagsAnalytics = lazy(() => import("./pages/TagsAnalytics"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -201,6 +202,7 @@ const App = () => (
                     <Route path="/kanban-conversas" element={<KanbanConversas />} />
                     <Route path="/bots" element={<Bots />} />
                     <Route path="/contatos/:id/profile" element={<ContactProfile />} />
+                    <Route path="/tags-analytics" element={<TagsAnalytics />} />
                   </Route>
                   <Route
                     element={

@@ -11,7 +11,7 @@ import {
   Shuffle, CheckCircle, X, Image, FileText, Mic, Folder, ChevronDown, Smartphone, Star,
   Trash2, Copy, Forward, Reply, Pencil, Check, AlertCircle, Bot, Clock, Target, Sparkles,
   LayoutTemplate, Tag, History, Ban, LayoutList, List, GitMerge, ShoppingBag, Download,
-  CheckSquare,
+  CheckSquare, Users,
 } from "lucide-react";
 import { useFollowupReminders } from "@/hooks/useFollowupReminders";
 import FollowupDialog from "@/components/followup/FollowupDialog";
@@ -445,6 +445,14 @@ const Inbox = () => {
   const [catalogSearch, setCatalogSearch] = useState("");
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   const [sendingCatalog, setSendingCatalog] = useState(false);
+
+  // WhatsApp Groups state
+  const [groupsOpen, setGroupsOpen] = useState(false);
+  const [groups, setGroups] = useState<any[]>([]);
+  const [groupMsg, setGroupMsg] = useState('');
+  const [selectedGroup, setSelectedGroup] = useState<any>(null);
+  const [groupsLoading, setGroupsLoading] = useState(false);
+  const [groupSending, setGroupSending] = useState(false);
 
   // Sentiment override dropdown
   const [sentimentDropdownOpen, setSentimentDropdownOpen] = useState(false);
@@ -3371,6 +3379,22 @@ const Inbox = () => {
                 <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => { setShowMsgSearch(v => !v); if (showMsgSearch) setMsgSearch(""); }} title="Buscar mensagem">
                   <Search className="h-4 w-4" />
                 </Button>
+                <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-green-600" title="Enviar para grupo" onClick={async () => {
+                  const currentConvo = conversations.find(c => c.id === selected);
+                  if (!currentConvo?.instance_name) return;
+                  setGroupsOpen(true);
+                  setGroupsLoading(true);
+                  setGroups([]);
+                  setSelectedGroup(null);
+                  setGroupMsg('');
+                  try {
+                    const data = await api.get<any[]>(`/whatsapp/groups/${currentConvo.instance_name}`);
+                    setGroups(data || []);
+                  } catch { toast.error('Erro ao buscar grupos'); }
+                  finally { setGroupsLoading(false); }
+                }}>
+                  <Users className="h-4 w-4" />
+                </Button>
               </div>
             </div>
 
@@ -4920,6 +4944,73 @@ const Inbox = () => {
         blocking={blocking}
         onConfirm={handleBlockNumber}
       />
+
+      {/* WhatsApp Groups Dialog */}
+      <Dialog open={groupsOpen} onOpenChange={(o) => { if (!o) { setGroupsOpen(false); setSelectedGroup(null); setGroupMsg(''); } }}>
+        <DialogContent className="sm:max-w-lg max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-green-600" />
+              Enviar para Grupo WhatsApp
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-hidden flex flex-col gap-3 py-2">
+            {groupsLoading ? (
+              <div className="flex items-center justify-center py-10 text-muted-foreground text-sm">Carregando grupos...</div>
+            ) : groups.length === 0 ? (
+              <div className="flex items-center justify-center py-10 text-muted-foreground text-sm">Nenhum grupo encontrado</div>
+            ) : (
+              <div className="overflow-y-auto max-h-60 border border-border rounded-lg divide-y divide-border">
+                {groups.map((g) => (
+                  <button
+                    key={g.id}
+                    onClick={() => setSelectedGroup(g)}
+                    className={cn(
+                      "w-full text-left px-4 py-3 hover:bg-muted/50 transition-colors text-sm",
+                      selectedGroup?.id === g.id && "bg-primary/10 font-medium"
+                    )}
+                  >
+                    <span className="block font-medium">{g.subject || g.id}</span>
+                    {g.size && <span className="text-xs text-muted-foreground">{g.size} participantes</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+            {selectedGroup && (
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">Grupo selecionado: <strong>{selectedGroup.subject}</strong></Label>
+                <Textarea
+                  placeholder="Digite a mensagem para o grupo..."
+                  value={groupMsg}
+                  onChange={e => setGroupMsg(e.target.value)}
+                  className="min-h-[80px] text-sm"
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGroupsOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={!selectedGroup || !groupMsg.trim() || groupSending}
+              onClick={async () => {
+                const currentConvo = conversations.find(c => c.id === selected);
+                if (!currentConvo?.instance_name || !selectedGroup || !groupMsg.trim()) return;
+                setGroupSending(true);
+                try {
+                  await api.post(`/whatsapp/groups/${currentConvo.instance_name}/send`, { group_id: selectedGroup.id, text: groupMsg.trim() });
+                  toast.success(`Mensagem enviada para "${selectedGroup.subject}"`);
+                  setGroupsOpen(false);
+                  setSelectedGroup(null);
+                  setGroupMsg('');
+                } catch { toast.error('Erro ao enviar mensagem para o grupo'); }
+                finally { setGroupSending(false); }
+              }}
+            >
+              {groupSending ? 'Enviando...' : 'Enviar para grupo'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       </div>
     </div>
   );
