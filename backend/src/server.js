@@ -1,4 +1,9 @@
 // Migration (run manually on VPS if table doesn't exist):
+// ALTER TABLE profiles ADD COLUMN IF NOT EXISTS absence_enabled BOOLEAN DEFAULT false;
+// ALTER TABLE profiles ADD COLUMN IF NOT EXISTS absence_start TIMESTAMPTZ;
+// ALTER TABLE profiles ADD COLUMN IF NOT EXISTS absence_end TIMESTAMPTZ;
+// ALTER TABLE profiles ADD COLUMN IF NOT EXISTS absence_message TEXT;
+// ALTER TABLE conversations ADD COLUMN IF NOT EXISTS absence_redirected BOOLEAN DEFAULT false;
 // CREATE TABLE IF NOT EXISTS scheduled_messages (
 //   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
 //   conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
@@ -164,6 +169,7 @@ await fastify.register(proposalRoutes);
 await fastify.register(internalChatRoutes);
 await fastify.register(metaWhatsAppRoutes);
 await fastify.register(statsRoutes);
+await fastify.register(import('./routes/pipeline.js'));
 await fastify.register(import('./routes/webhooks-out.js'));
 
 // 404 handler
@@ -206,6 +212,34 @@ setInterval(async () => {
     for (const c of rows) {
       await pool.query('UPDATE conversations SET sla_alerted=true WHERE id=$1', [c.id]);
       if (io) io.emit('sla:violated', { conversation_id: c.id, assigned_to: c.assigned_to });
+    }
+  } catch(e) { /* silent */ }
+}, 300000);
+
+// Absence redistribution job — runs every 5 minutes
+setInterval(async () => {
+  try {
+    const { rows: absentConvos } = await pool.query(`
+      SELECT c.id FROM conversations c
+      JOIN profiles p ON p.id = c.assigned_to
+      WHERE c.status = 'open'
+        AND p.absence_enabled = true
+        AND p.absence_start <= NOW()
+        AND (p.absence_end IS NULL OR p.absence_end >= NOW())
+        AND c.absence_redirected != true
+    `);
+    for (const conv of absentConvos) {
+      const { rows: agents } = await pool.query(`
+        SELECT p.id, COUNT(c2.id) as open_count
+        FROM profiles p
+        LEFT JOIN conversations c2 ON c2.assigned_to = p.id AND c2.status = 'open'
+        WHERE p.role IN ('agent','supervisor') AND p.status = 'online'
+          AND (p.absence_enabled = false OR p.absence_enabled IS NULL OR p.absence_end < NOW())
+        GROUP BY p.id ORDER BY open_count ASC LIMIT 1
+      `);
+      if (agents[0]) {
+        await pool.query('UPDATE conversations SET assigned_to=$1, absence_redirected=true WHERE id=$2', [agents[0].id, conv.id]);
+      }
     }
   } catch(e) { /* silent */ }
 }, 300000);

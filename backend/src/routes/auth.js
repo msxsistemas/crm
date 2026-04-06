@@ -137,7 +137,7 @@ export default async function authRoutes(fastify) {
 
   // Update profile
   fastify.patch('/auth/me', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { name, avatar_url, permissions, two_factor_enabled, signing_enabled, signature, status, max_conversations } = req.body;
+    const { name, avatar_url, permissions, two_factor_enabled, signing_enabled, signature, status, max_conversations, absence_enabled, absence_start, absence_end, absence_message } = req.body;
     const updates = [];
     const params = [];
     let p = 1;
@@ -149,6 +149,10 @@ export default async function authRoutes(fastify) {
     if (signature !== undefined) { updates.push(`signature = $${p}`); params.push(signature); p++; }
     if (status !== undefined && ['online','offline','away'].includes(status)) { updates.push(`status = $${p}`); params.push(status); p++; }
     if (max_conversations !== undefined) { updates.push(`max_conversations = $${p}`); params.push(max_conversations === 0 || max_conversations === null ? null : parseInt(max_conversations) || null); p++; }
+    if (absence_enabled !== undefined) { updates.push(`absence_enabled = $${p}`); params.push(absence_enabled); p++; }
+    if (absence_start !== undefined) { updates.push(`absence_start = $${p}`); params.push(absence_start || null); p++; }
+    if (absence_end !== undefined) { updates.push(`absence_end = $${p}`); params.push(absence_end || null); p++; }
+    if (absence_message !== undefined) { updates.push(`absence_message = $${p}`); params.push(absence_message || null); p++; }
     if (!updates.length) return reply.status(400).send({ error: 'Nada para atualizar' });
     updates.push(`updated_at = NOW()`);
     params.push(req.user.id);

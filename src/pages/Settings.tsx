@@ -428,7 +428,122 @@ const GeralTab = () => {
 
       {/* Two-Factor Authentication */}
       <TwoFactorSection userId={user?.id ?? null} />
+
+      {/* Absence / Vacation Mode */}
+      <AusenciaSection userId={user?.id ?? null} />
     </div>
+  );
+};
+
+// ─── Ausência Section ───
+const AusenciaSection = ({ userId }: { userId: string | null }) => {
+  const [enabled, setEnabled] = useState(false);
+  const [absenceStart, setAbsenceStart] = useState("");
+  const [absenceEnd, setAbsenceEnd] = useState("");
+  const [absenceMessage, setAbsenceMessage] = useState("");
+  const [loadingA, setLoadingA] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    api.get<any>('/auth/me').then(data => {
+      setEnabled(data?.absence_enabled ?? false);
+      setAbsenceStart(data?.absence_start ? data.absence_start.slice(0, 16) : "");
+      setAbsenceEnd(data?.absence_end ? data.absence_end.slice(0, 16) : "");
+      setAbsenceMessage(data?.absence_message ?? "");
+      setLoadingA(false);
+    }).catch(() => setLoadingA(false));
+  }, [userId]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.patch('/auth/me', {
+        absence_enabled: enabled,
+        absence_start: absenceStart || null,
+        absence_end: absenceEnd || null,
+        absence_message: absenceMessage || null,
+      });
+      toast.success("Configurações de ausência salvas!");
+    } catch {
+      toast.error("Erro ao salvar configurações de ausência");
+    }
+    setSaving(false);
+  };
+
+  return (
+    <Card className="p-6">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
+          <Clock className="h-5 w-5 text-primary" />
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-foreground">Modo Férias / Ausência</h3>
+            {enabled && (
+              <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
+                EM AUSÊNCIA
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-muted-foreground">Configure período de ausência — conversas serão redistribuídas automaticamente</p>
+        </div>
+      </div>
+
+      {loadingA ? (
+        <div className="flex items-center gap-2 text-muted-foreground text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" /> Carregando...
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/20">
+            <div>
+              <p className="text-sm font-medium text-foreground">Ativar modo ausência</p>
+              <p className="text-xs text-muted-foreground">Quando ativo, novas conversas atribuídas a você serão redistribuídas</p>
+            </div>
+            <Switch checked={enabled} onCheckedChange={setEnabled} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="text-sm font-medium text-foreground">Início da ausência</label>
+              <input
+                type="datetime-local"
+                value={absenceStart}
+                onChange={e => setAbsenceStart(e.target.value)}
+                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">Fim da ausência</label>
+              <input
+                type="datetime-local"
+                value={absenceEnd}
+                onChange={e => setAbsenceEnd(e.target.value)}
+                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-foreground">Mensagem automática para o cliente</label>
+            <Textarea
+              value={absenceMessage}
+              onChange={e => setAbsenceMessage(e.target.value)}
+              placeholder="Ex: Olá! Estou em férias até 15/02. Sua mensagem foi recebida e será respondida ao meu retorno."
+              rows={3}
+              className="mt-1 text-sm"
+            />
+            <p className="text-xs text-muted-foreground mt-1">Enviada automaticamente quando alguém tenta entrar em contato durante sua ausência</p>
+          </div>
+
+          <Button className="gap-2" onClick={handleSave} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Salvar configurações de ausência
+          </Button>
+        </div>
+      )}
+    </Card>
   );
 };
 
