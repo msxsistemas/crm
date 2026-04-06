@@ -356,6 +356,17 @@ ${'─'.repeat(60)}
     return rows;
   });
 
+  // Pin/unpin note
+  fastify.patch('/conversations/:id/notes/:noteId', auth, async (req, reply) => {
+    const { is_pinned } = req.body;
+    const { rows } = await query(
+      'UPDATE conversation_notes SET is_pinned=$1 WHERE id=$2 AND conversation_id=$3 RETURNING *',
+      [is_pinned, req.params.noteId, req.params.id]
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Nota não encontrada' });
+    return rows[0];
+  });
+
   // Bulk assign conversations from one agent to another
   fastify.post('/conversations/bulk-assign', auth, async (req) => {
     const { from_user, to_user } = req.body;

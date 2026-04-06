@@ -21,6 +21,8 @@ interface ConversationNote {
   content: string;
   created_at: string;
   user_id: string;
+  is_pinned?: boolean;
+  author_name?: string | null;
   profiles: { full_name: string | null } | null;
 }
 
@@ -596,16 +598,33 @@ const ContactDetailsSidebar = ({
           <span className="text-sm font-semibold text-foreground">Notas Internas</span>
         </div>
 
-        {/* Notes list */}
+        {/* Notes list — pinned first */}
         <div className="max-h-[220px] overflow-y-auto space-y-2 mb-3">
           {notes.length === 0 ? (
             <p className="text-xs text-muted-foreground">Nenhuma nota ainda</p>
           ) : (
-            notes.map((note) => (
-              <div key={note.id} className="bg-muted/50 rounded-md p-2.5 space-y-0.5">
-                <p className="text-[11px] text-muted-foreground font-medium">
-                  {note.profiles?.full_name || "Usuário"}
-                </p>
+            [...notes].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0)).map((note) => (
+              <div key={note.id} className={`rounded-md p-2.5 space-y-0.5 ${note.is_pinned ? 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800' : 'bg-muted/50'}`}>
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] text-muted-foreground font-medium">
+                    {note.author_name || note.profiles?.full_name || "Usuário"}
+                    {note.is_pinned && <span className="ml-1 text-yellow-600">📌</span>}
+                  </p>
+                  <button
+                    type="button"
+                    title={note.is_pinned ? "Desafixar" : "Fixar nota"}
+                    className="text-muted-foreground hover:text-yellow-500 transition-colors"
+                    onClick={async () => {
+                      try {
+                        const { api } = await import("@/lib/api");
+                        await api.patch(`/conversations/${conversationId}/notes/${note.id}`, { is_pinned: !note.is_pinned });
+                        setNotes(prev => prev.map(n => n.id === note.id ? { ...n, is_pinned: !n.is_pinned } : n));
+                      } catch {}
+                    }}
+                  >
+                    <span className="text-[11px]">{note.is_pinned ? "✕" : "📌"}</span>
+                  </button>
+                </div>
                 <p className="text-xs text-foreground whitespace-pre-wrap">
                   {renderNoteContent(note.content)}
                 </p>

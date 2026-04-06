@@ -3,7 +3,7 @@ import {
   Settings as SettingsIcon, User, Lock, Eye, EyeOff, Save, Tag, Search, Plus,
   Building2, Zap, CheckCircle, Clock, Users2, X, Info, Pencil,
   Shuffle, UserPlus, Building, Camera, Loader2, Globe, Play, XCircle, RefreshCw, Trash2,
-  Key, Copy, ChevronDown, ChevronUp, ShieldAlert, ShieldCheck, Monitor, TrendingUp, Star, Cake
+  Key, Copy, ChevronDown, ChevronUp, ShieldAlert, ShieldCheck, Monitor, TrendingUp, Star, Cake, Ban
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -232,6 +232,7 @@ const GeralTab = () => {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [signature, setSignature] = useState("");
   const [currentPwd, setCurrentPwd] = useState("");
   const [newPwd, setNewPwd] = useState("");
   const [confirmPwd, setConfirmPwd] = useState("");
@@ -244,6 +245,7 @@ const GeralTab = () => {
       api.get<any>('/auth/me').then(data => {
         if (data?.name || data?.full_name) setFullName(data.name || data.full_name);
         if (data?.avatar_url) setAvatarUrl(data.avatar_url);
+        if (data?.signature) setSignature(data.signature);
       }).catch(() => {});
     }
   }, [user]);
@@ -272,7 +274,7 @@ const GeralTab = () => {
     if (!user) return;
     setSaving(true);
     try {
-      await api.patch('/auth/me', { name: fullName });
+      await api.patch('/auth/me', { name: fullName, signature });
       toast.success("Perfil atualizado!");
     } catch {
       toast.error("Erro ao salvar perfil");
@@ -353,6 +355,17 @@ const GeralTab = () => {
               <label className="text-sm font-medium text-foreground">E-mail</label>
               <Input value={user?.email || ""} disabled />
               <p className="text-xs text-muted-foreground mt-1">O e-mail não pode ser alterado</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">Assinatura personalizada</label>
+              <Textarea
+                value={signature}
+                onChange={e => setSignature(e.target.value)}
+                placeholder="Ex: João Silva | Suporte Técnico | (11) 99999-9999"
+                rows={2}
+                className="mt-1 text-sm"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Adicionada automaticamente ao final das mensagens quando a assinatura está ativa</p>
             </div>
           </div>
         </div>
@@ -2276,6 +2289,94 @@ const PixConfigTab = () => {
 };
 
 // ─── Main Component ───
+// ─── Auto-Tag Rules Tab ───
+const AutoTagRulesTab = () => {
+  const [rules, setRules] = useState<{ id: string; keyword: string; tag: string; match_type: string; is_active: boolean }[]>([]);
+  const [kw, setKw] = useState(""); const [tag, setTag] = useState(""); const [matchType, setMatchType] = useState("contains");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { api.get<any[]>('/auto-tag-rules').then(setRules).catch(() => {}); }, []);
+  const handleAdd = async () => {
+    if (!kw.trim() || !tag.trim()) return;
+    setSaving(true);
+    try {
+      const r = await api.post<any>('/auto-tag-rules', { keyword: kw, tag, match_type: matchType });
+      setRules(prev => [...prev, r]); setKw(""); setTag("");
+    } catch { toast.error("Erro ao salvar regra"); } finally { setSaving(false); }
+  };
+  return (
+    <div className="space-y-4">
+      <Card className="p-4 space-y-3">
+        <p className="font-semibold text-foreground">Tags Automáticas por Palavra-chave</p>
+        <p className="text-sm text-muted-foreground">Quando uma mensagem contiver a palavra, a tag é aplicada automaticamente ao contato.</p>
+        <div className="flex gap-2 flex-wrap">
+          <Input placeholder="Palavra-chave" value={kw} onChange={e => setKw(e.target.value)} className="flex-1 min-w-[120px]" />
+          <Input placeholder="Tag" value={tag} onChange={e => setTag(e.target.value)} className="flex-1 min-w-[100px]" />
+          <select value={matchType} onChange={e => setMatchType(e.target.value)} className="border border-border rounded-md px-2 py-1 text-sm bg-background text-foreground">
+            <option value="contains">Contém</option>
+            <option value="exact">Exato</option>
+            <option value="starts">Começa com</option>
+            <option value="regex">Regex</option>
+          </select>
+          <Button onClick={handleAdd} disabled={saving || !kw.trim() || !tag.trim()} className="gap-1"><Plus className="h-4 w-4" /> Adicionar</Button>
+        </div>
+      </Card>
+      <div className="space-y-2">
+        {rules.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma regra configurada</p> : rules.map(r => (
+          <div key={r.id} className="flex items-center gap-3 p-3 border border-border rounded-lg bg-card">
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-medium text-foreground">"{r.keyword}"</span>
+              <span className="text-muted-foreground text-sm"> → </span>
+              <span className="text-sm text-primary font-medium">{r.tag}</span>
+              <span className="ml-2 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{r.match_type}</span>
+            </div>
+            <Switch checked={r.is_active} onCheckedChange={async v => { await api.patch(`/auto-tag-rules/${r.id}`, { is_active: v }).catch(() => {}); setRules(prev => prev.map(x => x.id === r.id ? { ...x, is_active: v } : x)); }} />
+            <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={async () => { await api.delete(`/auto-tag-rules/${r.id}`).catch(() => {}); setRules(prev => prev.filter(x => x.id !== r.id)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ─── Blacklist Keywords Tab ───
+const BlacklistKeywordsTab = () => {
+  const [keywords, setKeywords] = useState<{ id: string; keyword: string; action: string; is_active: boolean }[]>([]);
+  const [kw, setKw] = useState(""); const [action, setAction] = useState("block"); const [saving, setSaving] = useState(false);
+  useEffect(() => { api.get<any[]>('/blacklist-keywords').then(setKeywords).catch(() => {}); }, []);
+  const handleAdd = async () => {
+    if (!kw.trim()) return;
+    setSaving(true);
+    try {
+      const r = await api.post<any>('/blacklist-keywords', { keyword: kw, action });
+      setKeywords(prev => [...prev, r]); setKw("");
+    } catch { toast.error("Erro ao salvar palavra"); } finally { setSaving(false); }
+  };
+  return (
+    <div className="space-y-4">
+      <Card className="p-4 space-y-3">
+        <p className="font-semibold text-foreground">Palavras Bloqueadas Automaticamente</p>
+        <p className="text-sm text-muted-foreground">Se a mensagem recebida contiver a palavra, o contato é bloqueado e a conversa encerrada.</p>
+        <div className="flex gap-2">
+          <Input placeholder="Palavra ou frase" value={kw} onChange={e => setKw(e.target.value)} className="flex-1" />
+          <select value={action} onChange={e => setAction(e.target.value)} className="border border-border rounded-md px-2 py-1 text-sm bg-background text-foreground">
+            <option value="block">Bloquear</option>
+          </select>
+          <Button onClick={handleAdd} disabled={saving || !kw.trim()} className="gap-1"><Plus className="h-4 w-4" /> Adicionar</Button>
+        </div>
+      </Card>
+      <div className="space-y-2">
+        {keywords.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma palavra cadastrada</p> : keywords.map(k => (
+          <div key={k.id} className="flex items-center gap-3 p-3 border border-border rounded-lg bg-card">
+            <div className="flex-1"><span className="text-sm font-medium text-foreground">"{k.keyword}"</span></div>
+            <Switch checked={k.is_active} onCheckedChange={async v => { await api.patch(`/blacklist-keywords/${k.id}`, { is_active: v }).catch(() => {}); setKeywords(prev => prev.map(x => x.id === k.id ? { ...x, is_active: v } : x)); }} />
+            <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={async () => { await api.delete(`/blacklist-keywords/${k.id}`).catch(() => {}); setKeywords(prev => prev.filter(x => x.id !== k.id)); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("geral");
 
@@ -2301,6 +2402,8 @@ const Settings = () => {
             <TabsTrigger value="lead_scoring" className="gap-1.5"><TrendingUp className="h-3.5 w-3.5" /> Lead Scoring</TabsTrigger>
             <TabsTrigger value="aniversarios" className="gap-1.5"><Cake className="h-3.5 w-3.5" /> Aniversários</TabsTrigger>
             <TabsTrigger value="pix" className="gap-1.5"><span className="text-sm">💸</span> Pix / Cobrança</TabsTrigger>
+            <TabsTrigger value="auto_tags" className="gap-1.5"><Tag className="h-3.5 w-3.5" /> Tags Auto</TabsTrigger>
+            <TabsTrigger value="blacklist_kw" className="gap-1.5"><Ban className="h-3.5 w-3.5" /> Palavras Bloqueadas</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -2316,6 +2419,8 @@ const Settings = () => {
           <TabsContent value="lead_scoring"><Suspense fallback={<TabFallback />}><LeadScoringTabLazy /></Suspense></TabsContent>
           <TabsContent value="aniversarios"><BirthdayAutoTab /></TabsContent>
           <TabsContent value="pix"><PixConfigTab /></TabsContent>
+          <TabsContent value="auto_tags"><AutoTagRulesTab /></TabsContent>
+          <TabsContent value="blacklist_kw"><BlacklistKeywordsTab /></TabsContent>
         </Tabs>
       </div>
     </div>

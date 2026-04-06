@@ -393,6 +393,50 @@ async function handleEvolutionWebhook(payload, fastify) {
     fastify.io?.emit('message:new', { ...msgRow, conversation_id: conv.id });
     fastify.io?.emit('conversation:updated', { id: conv.id });
 
+    // ── Auto-tag rules ────────────────────────────────────────────────────
+    if (textContent) {
+      query('SELECT keyword, tag, match_type FROM auto_tag_rules WHERE is_active=true').then(async ({ rows: tagRules }) => {
+        const msgLower = textContent.toLowerCase();
+        const tagsToAdd = [];
+        for (const rule of tagRules) {
+          const kw = (rule.keyword || '').toLowerCase();
+          let hit = false;
+          if (rule.match_type === 'exact') hit = msgLower === kw;
+          else if (rule.match_type === 'starts') hit = msgLower.startsWith(kw);
+          else if (rule.match_type === 'regex') { try { hit = new RegExp(kw, 'i').test(msgLower); } catch {} }
+          else hit = msgLower.includes(kw);
+          if (hit) tagsToAdd.push(rule.tag);
+        }
+        if (tagsToAdd.length) {
+          // Fetch current tags and merge
+          const { rows: ct } = await query('SELECT tags FROM contacts WHERE id=$1', [conv.contact_id]);
+          const existing = ct[0]?.tags || [];
+          const merged = [...new Set([...existing, ...tagsToAdd])];
+          query('UPDATE contacts SET tags=$1 WHERE id=$2', [merged, conv.contact_id]).catch(() => {});
+        }
+      }).catch(() => {});
+    }
+
+    // ── Blacklist keyword check ────────────────────────────────────────────
+    if (textContent) {
+      query('SELECT keyword, action FROM blacklist_keywords WHERE is_active=true').then(async ({ rows: kwRules }) => {
+        const msgLower = textContent.toLowerCase();
+        for (const kw of kwRules) {
+          if (msgLower.includes(kw.keyword.toLowerCase())) {
+            if (kw.action === 'block') {
+              await query(
+                'INSERT INTO blacklist (phone, reason, is_active) VALUES ($1,$2,true) ON CONFLICT (phone) DO UPDATE SET is_active=true, reason=$2',
+                [phone, `Keyword automático: "${kw.keyword}"`]
+              ).catch(() => {});
+              await query("UPDATE conversations SET status='closed' WHERE id=$1", [conv.id]).catch(() => {});
+              fastify.io?.emit('conversation:updated', { id: conv.id, status: 'closed' });
+            }
+            break;
+          }
+        }
+      }).catch(() => {});
+    }
+
     // ── CSAT response check ────────────────────────────────────────────────
     if (conv.awaiting_csat && textContent) {
       const rating = parseInt(textContent.trim());

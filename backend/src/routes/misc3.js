@@ -400,4 +400,98 @@ export default async function misc3Routes(fastify) {
       return reply.status(500).send({ error: e.message });
     }
   });
+
+  // ── Auto-tag rules ────────────────────────────────────────────────────────
+  fastify.get('/auto-tag-rules', auth, async () => {
+    const { rows } = await query('SELECT * FROM auto_tag_rules ORDER BY created_at ASC');
+    return rows;
+  });
+  fastify.post('/auto-tag-rules', auth, async (req, reply) => {
+    const { keyword, tag, match_type = 'contains' } = req.body;
+    if (!keyword || !tag) return reply.status(400).send({ error: 'keyword e tag obrigatórios' });
+    const { rows } = await query(
+      'INSERT INTO auto_tag_rules (keyword, tag, match_type) VALUES ($1,$2,$3) RETURNING *',
+      [keyword.trim(), tag.trim(), match_type]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+  fastify.patch('/auto-tag-rules/:id', auth, async (req) => {
+    const { keyword, tag, match_type, is_active } = req.body;
+    const sets = []; const vals = []; let p = 1;
+    if (keyword !== undefined) { sets.push(`keyword=$${p}`); vals.push(keyword); p++; }
+    if (tag !== undefined) { sets.push(`tag=$${p}`); vals.push(tag); p++; }
+    if (match_type !== undefined) { sets.push(`match_type=$${p}`); vals.push(match_type); p++; }
+    if (is_active !== undefined) { sets.push(`is_active=$${p}`); vals.push(is_active); p++; }
+    if (!sets.length) return {};
+    vals.push(req.params.id);
+    const { rows } = await query(`UPDATE auto_tag_rules SET ${sets.join(',')} WHERE id=$${p} RETURNING *`, vals);
+    return rows[0] || {};
+  });
+  fastify.delete('/auto-tag-rules/:id', auth, async (req) => {
+    await query('DELETE FROM auto_tag_rules WHERE id=$1', [req.params.id]);
+    return { ok: true };
+  });
+
+  // ── Blacklist keywords ────────────────────────────────────────────────────
+  fastify.get('/blacklist-keywords', auth, async () => {
+    const { rows } = await query('SELECT * FROM blacklist_keywords ORDER BY created_at ASC');
+    return rows;
+  });
+  fastify.post('/blacklist-keywords', auth, async (req, reply) => {
+    const { keyword, action = 'block' } = req.body;
+    if (!keyword) return reply.status(400).send({ error: 'keyword obrigatório' });
+    const { rows } = await query(
+      'INSERT INTO blacklist_keywords (keyword, action) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING *',
+      [keyword.trim(), action]
+    );
+    return reply.status(201).send(rows[0] || {});
+  });
+  fastify.patch('/blacklist-keywords/:id', auth, async (req) => {
+    const { is_active } = req.body;
+    const { rows } = await query('UPDATE blacklist_keywords SET is_active=$1 WHERE id=$2 RETURNING *', [is_active, req.params.id]);
+    return rows[0] || {};
+  });
+  fastify.delete('/blacklist-keywords/:id', auth, async (req) => {
+    await query('DELETE FROM blacklist_keywords WHERE id=$1', [req.params.id]);
+    return { ok: true };
+  });
+
+  // ── Agents online status ──────────────────────────────────────────────────
+  fastify.get('/agents/online', auth, async () => {
+    const { rows } = await query(`
+      SELECT p.id, p.name, p.avatar_url, p.status,
+        COUNT(c.id) FILTER (WHERE c.status != 'closed') as open_count
+      FROM profiles p
+      LEFT JOIN conversations c ON c.assigned_to = p.id
+      WHERE p.role IN ('agent','supervisor','admin')
+      GROUP BY p.id, p.name, p.avatar_url, p.status
+      ORDER BY p.status = 'online' DESC, open_count ASC
+    `);
+    return rows;
+  });
+
+  // ── Link preview proxy ────────────────────────────────────────────────────
+  fastify.get('/link-preview', auth, async (req, reply) => {
+    const { url } = req.query;
+    if (!url || !/^https?:\/\//.test(url)) return reply.status(400).send({ error: 'URL inválida' });
+    try {
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; MSXCRMBot/1.0)' },
+        signal: AbortSignal.timeout(5000),
+      });
+      const html = await res.text();
+      const get = (prop) => {
+        const m = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${prop}["'][^>]+content=["']([^"']+)["']`, 'i'))
+          || html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${prop}["']`, 'i'));
+        return m?.[1] || null;
+      };
+      const title = get('og:title') || get('twitter:title') || (html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]) || null;
+      const description = get('og:description') || get('twitter:description') || get('description') || null;
+      const image = get('og:image') || get('twitter:image') || null;
+      const siteName = get('og:site_name') || new URL(url).hostname;
+      return { url, title, description, image, siteName };
+    } catch {
+      return reply.status(422).send({ error: 'Não foi possível carregar preview' });
+    }
+  });
 }

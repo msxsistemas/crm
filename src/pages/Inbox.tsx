@@ -31,6 +31,7 @@ import SummaryDialog from "@/components/inbox/SummaryDialog";
 import MergeConversationsDialog from "@/components/inbox/MergeConversationsDialog";
 import FlowTemplateDialog from "@/components/inbox/FlowTemplateDialog";
 import MediaMessage from "@/components/chat/MediaMessage";
+import LinkPreview from "@/components/chat/LinkPreview";
 import { useMediaUpload } from "@/components/chat/useMediaUpload";
 import { EmojiPicker, StickerPicker } from "@/components/chat/EmojiStickerPicker";
 import { SignatureButton, QuickMessagesButton } from "@/components/chat/ChatActionButtons";
@@ -341,6 +342,23 @@ const Inbox = () => {
   // SLA filter state
   const [slaFilterOnly, setSlaFilterOnly] = useState(false);
   const [contactDisableChatbot, setContactDisableChatbot] = useState(false);
+
+  // Date range filter
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
+  const [dateFilterOpen, setDateFilterOpen] = useState(false);
+
+  // Agents panel
+  const [agentsPanelOpen, setAgentsPanelOpen] = useState(false);
+  const [agentsOnline, setAgentsOnline] = useState<{ id: string; name: string; avatar_url: string | null; status: string; open_count: number }[]>([]);
+
+  // Click-to-chat generator
+  const [ctcOpen, setCtcOpen] = useState(false);
+  const [ctcPhone, setCtcPhone] = useState("");
+  const [ctcMessage, setCtcMessage] = useState("");
+
+  // Profile signature
+  const [profileSignature, setProfileSignature] = useState<string>("");
 
   // Schedule message state
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
@@ -742,14 +760,15 @@ const Inbox = () => {
     }
   }, []);
 
-  // Fetch profile name and signing preference
+  // Fetch profile name, signing preference and signature
   useEffect(() => {
     if (!user) return;
-    db.from("profiles").select("full_name, signing_enabled").eq("id", user.id).single().then(({ data }) => {
+    db.from("profiles").select("full_name, signing_enabled, signature").eq("id", user.id).single().then(({ data }) => {
       setProfileName(data?.full_name || user.user_metadata?.full_name || null);
       if (data?.signing_enabled !== undefined && data?.signing_enabled !== null) {
         setSigning(data.signing_enabled);
       }
+      if (data?.signature) setProfileSignature(data.signature);
     });
   }, [user]);
 
@@ -1165,8 +1184,11 @@ const Inbox = () => {
     const convo = conversations.find((c) => c.id === selected);
     if (!convo) return;
 
-    const signaturePrefix = signing && profileName ? `${profileName}:\n` : "";
-    const text = signaturePrefix + messageInput;
+    const signaturePrefix = signing && profileName
+      ? (profileSignature ? `${profileName}:\n` : `${profileName}:\n`)
+      : "";
+    const signatureSuffix = signing && profileSignature ? `\n\n${profileSignature}` : "";
+    const text = signaturePrefix + messageInput + signatureSuffix;
 
     // If offline, queue the message instead of sending
     if (!isOnline) {
@@ -2075,11 +2097,21 @@ const Inbox = () => {
     : slaFiltered;
 
   // Blacklist filter: hide blocked convos by default
-  const focusFiltered = showBlockedConvos
+  const focusFiltered1 = showBlockedConvos
     ? focusFiltered0
     : focusFiltered0.filter(c => !blacklistedPhones.has(c.contacts?.phone || ""));
 
-  const blockedInView = focusFiltered0.filter(c => blacklistedPhones.has(c.contacts?.phone || "")).length;
+  // Date range filter
+  const focusFiltered = (dateFrom || dateTo)
+    ? focusFiltered1.filter(c => {
+        const ts = c.last_message_at ? new Date(c.last_message_at).getTime() : 0;
+        if (dateFrom && ts < new Date(dateFrom).getTime()) return false;
+        if (dateTo && ts > new Date(dateTo + "T23:59:59").getTime()) return false;
+        return true;
+      })
+    : focusFiltered1;
+
+  const blockedInView = focusFiltered1.filter(c => blacklistedPhones.has(c.contacts?.phone || "")).length;
 
   // Keyboard shortcuts (J/K/R/Esc/N/S/Ctrl+/) — must be after focusFiltered declaration
   useEffect(() => {
@@ -2351,6 +2383,12 @@ const Inbox = () => {
             <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => setGlobalSearchOpen(true)} title="Busca global (Ctrl+K)">
               <Search className="h-4 w-4" />
             </Button>
+            <Button size="icon" variant="ghost" className={cn("h-8 w-8", agentsPanelOpen ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-foreground")} title="Agentes online" onClick={async () => { if (!agentsPanelOpen) { const { api } = await import("@/lib/api"); const data = await api.get<any[]>('/agents/online').catch(() => []); setAgentsOnline(data || []); } setAgentsPanelOpen(v => !v); }}>
+              <User className="h-4 w-4" />
+            </Button>
+            <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground" title="Gerar link WhatsApp" onClick={() => setCtcOpen(true)}>
+              <MessageCircle className="h-4 w-4" />
+            </Button>
             <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => setShowNewConvo(true)} title="Nova conversa">
               <Plus className="h-4 w-4" />
             </Button>
@@ -2444,6 +2482,30 @@ const Inbox = () => {
                 Mostrar apenas vencidos (SLA &gt; 1h)
               </span>
             </label>
+
+            {/* Date range filter */}
+            <div className="space-y-1.5">
+              <button
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => setDateFilterOpen(v => !v)}
+              >
+                <Clock className="h-3.5 w-3.5" />
+                <span className="font-medium">Filtrar por período</span>
+                {(dateFrom || dateTo) && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+              </button>
+              {dateFilterOpen && (
+                <div className="flex items-center gap-2">
+                  <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                    className="flex-1 text-xs border border-border rounded px-2 py-1 bg-background text-foreground" />
+                  <span className="text-xs text-muted-foreground">–</span>
+                  <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                    className="flex-1 text-xs border border-border rounded px-2 py-1 bg-background text-foreground" />
+                  {(dateFrom || dateTo) && (
+                    <button onClick={() => { setDateFrom(""); setDateTo(""); }} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -3372,9 +3434,14 @@ const Inbox = () => {
                             </p>
                           </div>
                         ) : (
-                          <p className="whitespace-pre-wrap leading-[19px]">
-                            {highlightText(msg.body.replace(/\*(.*?)\*/g, '$1'), msgSearch)}
-                          </p>
+                          <>
+                            <p className="whitespace-pre-wrap leading-[19px]">
+                              {highlightText(msg.body.replace(/\*(.*?)\*/g, '$1'), msgSearch)}
+                            </p>
+                            {/https?:\/\//.test(msg.body) && (
+                              <LinkPreview text={msg.body} fromMe={msg.from_me} />
+                            )}
+                          </>
                         )}
                         <div className="flex items-center justify-end gap-1 -mb-0.5 mt-0.5">
                           <span className="text-[11px] text-[#667781] dark:text-[#ffffff99]">
@@ -3964,6 +4031,7 @@ const Inbox = () => {
         open={showTransfer}
         onOpenChange={setShowTransfer}
         onTransfer={handleTransfer}
+        recentMessages={messages.slice(-5)}
       />
 
       {/* Close Conversation Dialog */}
@@ -4111,6 +4179,71 @@ const Inbox = () => {
 
       {/* Keyboard Shortcuts Modal */}
       <ShortcutsModal open={showShortcutsModal} onOpenChange={setShowShortcutsModal} />
+
+      {/* Agents Online Panel */}
+      {agentsPanelOpen && (
+        <div className="fixed top-16 left-72 z-50 w-64 bg-card border border-border rounded-xl shadow-xl overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
+            <span className="text-sm font-semibold text-foreground">Agentes</span>
+            <button onClick={() => setAgentsPanelOpen(false)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+          </div>
+          <div className="max-h-72 overflow-y-auto">
+            {agentsOnline.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-6">Nenhum agente encontrado</p>
+            ) : agentsOnline.map(agent => (
+              <div key={agent.id} className="flex items-center gap-2.5 px-3 py-2 hover:bg-muted/50">
+                <div className="relative shrink-0">
+                  <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center text-xs font-semibold text-primary">
+                    {agent.name[0]?.toUpperCase()}
+                  </div>
+                  <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card ${agent.status === 'online' ? 'bg-green-500' : agent.status === 'away' ? 'bg-yellow-500' : 'bg-gray-400'}`} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-foreground truncate">{agent.name}</p>
+                  <p className="text-[10px] text-muted-foreground">{agent.open_count} conversa(s)</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Click-to-Chat generator */}
+      <Dialog open={ctcOpen} onOpenChange={setCtcOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageCircle className="h-5 w-5 text-green-500" /> Link WhatsApp
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-sm">Número (com DDD, sem +)</Label>
+              <Input placeholder="5511999999999" value={ctcPhone} onChange={e => setCtcPhone(e.target.value.replace(/\D/g, ''))} />
+            </div>
+            <div>
+              <Label className="text-sm">Mensagem pré-preenchida (opcional)</Label>
+              <Textarea rows={3} placeholder="Olá, gostaria de mais informações..." value={ctcMessage} onChange={e => setCtcMessage(e.target.value)} />
+            </div>
+            {ctcPhone && (
+              <div className="rounded-md bg-muted/50 border border-border p-3 space-y-2">
+                <p className="text-xs text-muted-foreground font-medium">Link gerado:</p>
+                <p className="text-xs text-primary break-all font-mono">
+                  {`https://wa.me/${ctcPhone}${ctcMessage ? `?text=${encodeURIComponent(ctcMessage)}` : ''}`}
+                </p>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" className="flex-1 text-xs" onClick={() => { navigator.clipboard.writeText(`https://wa.me/${ctcPhone}${ctcMessage ? `?text=${encodeURIComponent(ctcMessage)}` : ''}`); toast.success("Link copiado!"); }}>
+                    Copiar link
+                  </Button>
+                  <Button size="sm" className="flex-1 text-xs bg-green-600 hover:bg-green-700" onClick={() => window.open(`https://wa.me/${ctcPhone}${ctcMessage ? `?text=${encodeURIComponent(ctcMessage)}` : ''}`, '_blank')}>
+                    Abrir WhatsApp
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* File Manager Upload Input */}
       <input

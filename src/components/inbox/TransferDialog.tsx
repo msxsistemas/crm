@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Search, Users, Building2, ArrowRight, ClipboardList } from "lucide-react";
+import { Search, Users, Building2, ArrowRight, ClipboardList, MessageSquare } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -22,11 +22,13 @@ interface TransferDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onTransfer: (type: "user" | "department", targetId: string, targetName: string, note: string) => void;
+  conversationId?: string;
+  recentMessages?: { body: string; from_me: boolean; created_at: string }[];
 }
 
 const MAX_NOTE_CHARS = 300;
 
-const TransferDialog = ({ open, onOpenChange, onTransfer }: TransferDialogProps) => {
+const TransferDialog = ({ open, onOpenChange, onTransfer, recentMessages = [] }: TransferDialogProps) => {
   const [activeTab, setActiveTab] = useState<"atendente" | "categoria">("atendente");
   const [search, setSearch] = useState("");
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -172,6 +174,25 @@ const TransferDialog = ({ open, onOpenChange, onTransfer }: TransferDialogProps)
             )
           )}
         </div>
+
+        {/* Recent messages context */}
+        {recentMessages.length > 0 && (
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5">
+              <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs font-medium text-muted-foreground">Últimas mensagens (contexto)</span>
+            </div>
+            <div className="rounded-md border border-border bg-muted/30 p-2 space-y-1.5 max-h-28 overflow-y-auto">
+              {recentMessages.slice(-3).map((m, i) => (
+                <div key={i} className={cn("text-[11px] flex gap-1.5", m.from_me ? "justify-end" : "justify-start")}>
+                  <span className={cn("px-2 py-0.5 rounded max-w-[85%] truncate", m.from_me ? "bg-primary/10 text-primary" : "bg-muted text-foreground")}>
+                    {m.body?.slice(0, 80) || "..."}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Context note — shown once an agent is selected */}
         {selectedId && activeTab === "atendente" && (
