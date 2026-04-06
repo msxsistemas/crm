@@ -280,6 +280,7 @@ const Connections = () => {
         if (state === 'open' || state === 'connected') {
           stopNewQrPolling();
           setNewStep('connected');
+          try { await setupWebhook(name); } catch {}
           fetchInstances();
         }
       } catch {}

@@ -365,7 +365,7 @@ const Campaigns = () => {
 
     const { data: campData } = await db
       .from("campaigns")
-      .select("message_template, send_speed")
+      .select("message_template, send_speed, connection_name")
       .eq("id", campaignId)
       .single();
 
@@ -380,20 +380,23 @@ const Campaigns = () => {
     const sendSpeed: number = campData.send_speed || 20;
     const delayMs = Math.max(1000, Math.round(60000 / sendSpeed));
 
-    const { data: connData } = await db
-      .from("evolution_connections")
-      .select("instance_name")
-      .limit(1)
-      .single();
+    // Use campaign's own connection_name if set, otherwise fall back to first available
+    let instanceName: string = campData.connection_name || '';
+    if (!instanceName) {
+      const { data: connData } = await db
+        .from("evolution_connections")
+        .select("instance_name")
+        .limit(1)
+        .single();
+      instanceName = connData?.instance_name || '';
+    }
 
-    if (!connData?.instance_name) {
+    if (!instanceName) {
       toast.error("Nenhuma conexão Evolution API disponível");
       setExecutingCampaign(null);
       await db.from("campaigns").update({ status: "paused" }).eq("id", campaignId);
       return;
     }
-
-    const instanceName: string = connData.instance_name;
 
     const { data: contactsData } = await db
       .from("contacts")

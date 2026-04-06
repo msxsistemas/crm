@@ -172,16 +172,75 @@ async function sendEvolutionMessage({ evolutionUrl, evolutionKey, instance, phon
   return res.json();
 }
 
+// Extract media URL and type from Evolution message object
+function extractMedia(msg) {
+  if (!msg) return { mediaUrl: null, mediaType: null };
+  if (msg.imageMessage)    return { mediaUrl: msg.imageMessage.url    || msg.imageMessage.directPath, mediaType: 'image' };
+  if (msg.videoMessage)    return { mediaUrl: msg.videoMessage.url    || msg.videoMessage.directPath, mediaType: 'video' };
+  if (msg.audioMessage)    return { mediaUrl: msg.audioMessage.url    || msg.audioMessage.directPath, mediaType: 'audio' };
+  if (msg.documentMessage) return { mediaUrl: msg.documentMessage.url || msg.documentMessage.directPath, mediaType: 'document' };
+  if (msg.stickerMessage)  return { mediaUrl: msg.stickerMessage.url  || msg.stickerMessage.directPath, mediaType: 'image' };
+  return { mediaUrl: null, mediaType: null };
+}
+
 async function handleEvolutionWebhook(payload, fastify) {
   const { event, data, instance } = payload;
 
-  if (event === 'messages.upsert' && data?.message) {
-    const msg = data.message;
-    const phone = msg.key?.remoteJid?.replace('@s.whatsapp.net', '').replace('@g.us', '');
-    if (!phone || msg.key?.fromMe) return;
+  // ── Connection status update ──────────────────────────────────────────────
+  if (event === 'connection.update') {
+    const state = data?.state;
+    console.log('[webhook:evolution] connection.update', instance, state);
+    fastify.io?.emit('connection:status', { instance, state });
 
-    const content = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '[mídia]';
-    const type = msg.message?.conversation ? 'text' : 'media';
+    // Update evolution_connections table
+    if (state) {
+      query('UPDATE evolution_connections SET status=$1, updated_at=NOW() WHERE instance_name=$2', [state, instance]).catch(() => {});
+    }
+    return;
+  }
+
+  // ── Read receipts ─────────────────────────────────────────────────────────
+  if (event === 'messages.update') {
+    const updates = Array.isArray(data) ? data : [data];
+    for (const upd of updates) {
+      const externalId = upd?.key?.id;
+      const status = upd?.update?.status;
+      // Status 4 = READ in Evolution API
+      if (externalId && status >= 4) {
+        query('UPDATE messages SET read_at=NOW() WHERE external_id=$1 AND read_at IS NULL', [externalId]).catch(() => {});
+      }
+    }
+    return;
+  }
+
+  // ── New message ───────────────────────────────────────────────────────────
+  if (event === 'messages.upsert' && (data?.message || data?.key)) {
+    const key = data.key || data.message?.key;
+    const messageContent = data.message;
+    const remoteJid = key?.remoteJid || '';
+
+    // Filter group messages
+    if (remoteJid.endsWith('@g.us')) return;
+
+    const phone = remoteJid.replace('@s.whatsapp.net', '');
+    if (!phone || key?.fromMe) return;
+
+    // Ignore protocol/system messages
+    if (messageContent?.protocolMessage || messageContent?.senderKeyDistributionMessage) return;
+
+    // Extract text content
+    const textContent = messageContent?.conversation
+      || messageContent?.extendedTextMessage?.text
+      || messageContent?.imageMessage?.caption
+      || messageContent?.videoMessage?.caption
+      || messageContent?.documentMessage?.caption
+      || null;
+
+    // Extract media
+    const { mediaUrl, mediaType } = extractMedia(messageContent);
+
+    const content = textContent || (mediaType ? `[${mediaType}]` : '[mensagem]');
+    const type = mediaType || (textContent ? 'text' : 'media');
 
     // Use DB transaction for contact + conversation + message creation
     const client = await pool.connect();
@@ -211,8 +270,8 @@ async function handleEvolutionWebhook(payload, fastify) {
       }
 
       const { rows: msgRows } = await client.query(
-        'INSERT INTO messages (conversation_id, content, direction, type, external_id) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-        [conv.id, content, 'inbound', type, msg.key?.id]
+        'INSERT INTO messages (conversation_id, content, direction, type, media_url, external_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+        [conv.id, content, 'inbound', type, mediaUrl, key?.id]
       );
       msgRow = msgRows[0];
 

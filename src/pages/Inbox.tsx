@@ -54,6 +54,7 @@ import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { useMessageQueue } from "@/hooks/useMessageQueue";
 import { loadDistributionConfig, distributeConversation } from "@/lib/autoDistribution";
 import type { DistributionConfig } from "@/lib/autoDistribution";
+import { useSocketEvent } from "@/hooks/useSocketEvent";
 
 const tailwindColorMap: Record<string, string> = {
   "bg-white": "#ffffff", "bg-red-500": "#ef4444", "bg-orange-500": "#f97316",
@@ -734,6 +735,13 @@ const Inbox = () => {
     notificationAudioRef.current = audio;
   }, []);
 
+  // Request browser notification permission on mount
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+  }, []);
+
   // Fetch profile name and signing preference
   useEffect(() => {
     if (!user) return;
@@ -937,7 +945,7 @@ const Inbox = () => {
     reconnectIntervalRef.current = setInterval(async () => {
       try {
         const result = await getInstanceStatus(instanceName);
-        const state = result?.instance?.state || result?.state;
+        const state = result?.instance?.state || result?.state || result?.connectionStatus;
         const isConnected = state === "open";
         setConnected(isConnected);
       } catch {
@@ -948,6 +956,16 @@ const Inbox = () => {
     return () => {
       if (reconnectIntervalRef.current) clearInterval(reconnectIntervalRef.current);
     };
+  }, [instanceName]);
+
+  // Realtime connection status via socket (instant, no polling lag)
+  useSocketEvent('connection:status', (data: any) => {
+    if (!instanceName || data?.instance !== instanceName) return;
+    const state = data?.state;
+    setConnected(state === 'open');
+    if (state === 'close' || state === 'connecting') {
+      toast.warning(`WhatsApp desconectado (${instanceName}). Acesse Conexões para reconectar.`, { duration: 8000 });
+    }
   }, [instanceName]);
 
   // Realtime subscriptions
@@ -965,10 +983,21 @@ const Inbox = () => {
             return [...filtered, newMsg];
           });
         }
-        // Play notification sound for incoming messages
-        if (!newMsg.from_me && soundEnabled && notificationAudioRef.current) {
-          notificationAudioRef.current.currentTime = 0;
-          notificationAudioRef.current.play().catch(() => {});
+        // Play notification sound + browser notification for incoming messages
+        if (!newMsg.from_me) {
+          if (soundEnabled && notificationAudioRef.current) {
+            notificationAudioRef.current.currentTime = 0;
+            notificationAudioRef.current.play().catch(() => {});
+          }
+          // Browser notification when tab is not focused
+          if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+            const convo = conversationsRef.current.find(c => c.id === newMsg.conversation_id);
+            const name = convo?.contacts?.name || convo?.contacts?.phone || 'Nova mensagem';
+            const body = (newMsg.body || newMsg.content || '').slice(0, 100);
+            try {
+              new Notification(`💬 ${name}`, { body: body || 'Nova mensagem recebida', icon: '/favicon.ico', tag: newMsg.conversation_id });
+            } catch {}
+          }
         }
         // Analyze sentiment for new inbound messages
         if (!newMsg.from_me) {
@@ -1993,6 +2022,12 @@ const Inbox = () => {
   // Filter conversations
   const unreadCount = conversations.filter((c) => c.unread_count > 0).length;
 
+  // Update document title with unread badge
+  useEffect(() => {
+    document.title = unreadCount > 0 ? `(${unreadCount}) MSX CRM` : 'MSX CRM';
+    return () => { document.title = 'MSX CRM'; };
+  }, [unreadCount]);
+
   const statusCounts = useMemo(() => ({
     aguardando: conversations.filter(c => c.status === "open").length,
     atendendo: conversations.filter(c => c.status === "in_progress").length,
@@ -2300,7 +2335,20 @@ const Inbox = () => {
   };
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full flex-col">
+      {/* Disconnected banner */}
+      {instanceName && !connected && (
+        <div className="flex items-center justify-between gap-2 bg-destructive/10 border-b border-destructive/30 px-4 py-2 text-sm text-destructive">
+          <div className="flex items-center gap-2">
+            <WifiOff className="h-4 w-4 shrink-0" />
+            <span>WhatsApp desconectado — as mensagens não serão recebidas.</span>
+          </div>
+          <Button size="sm" variant="outline" className="h-7 text-xs border-destructive/40 text-destructive hover:bg-destructive/10" onClick={() => window.location.href = '/connections'}>
+            Reconectar
+          </Button>
+        </div>
+      )}
+      <div className="flex flex-1 min-h-0">
       {/* Conversations panel */}
       <div className="w-[380px] border-r border-border flex flex-col bg-card">
         {/* Header */}
@@ -4585,6 +4633,7 @@ const Inbox = () => {
         blocking={blocking}
         onConfirm={handleBlockNumber}
       />
+      </div>
     </div>
   );
 };

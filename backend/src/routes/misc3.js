@@ -341,10 +341,13 @@ export default async function misc3Routes(fastify) {
     const webhookUrl = req.body?.webhookUrl || `${process.env.BACKEND_URL || 'https://api.msxzap.pro'}/webhook/evolution`;
     try {
       const data = await evoFetch(s, 'POST', `/webhook/set/${req.params.instanceName}`, {
-        url: webhookUrl,
-        webhook_by_events: false,
-        webhook_base64: true,
-        events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE', 'QRCODE_UPDATED'],
+        webhook: {
+          enabled: true,
+          url: webhookUrl,
+          webhookByEvents: false,
+          webhookBase64: false,
+          events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED', 'SEND_MESSAGE'],
+        },
       });
       return data;
     } catch (e) {
