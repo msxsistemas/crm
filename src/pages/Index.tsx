@@ -296,26 +296,31 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   );
 };
 
-// ── CSV Export helper ──
+// ── CSV/XLSX Export helper ──
 const downloadCSV = (data: Record<string, any>[], filename: string) => {
   if (data.length === 0) {
     toast.error("Sem dados para exportar");
     return;
   }
   const headers = Object.keys(data[0]);
-  const csv = [
-    headers.join(";"),
-    ...data.map(row => headers.map(h => {
-      const val = row[h];
-      return typeof val === "string" && val.includes(";") ? `"${val}"` : String(val ?? "");
-    }).join(";"))
-  ].join("\n");
+  const csvContent =
+    '\uFEFF' +
+    headers.join(';') + '\n' +
+    data.map(row =>
+      headers.map(h => {
+        const val = row[h] ?? '';
+        const str = String(val);
+        return str.includes(';') || str.includes('\n') || str.includes('"')
+          ? `"${str.replace(/"/g, '""')}"`
+          : str;
+      }).join(';')
+    ).join('\n');
 
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const blob = new Blob([csvContent], { type: 'application/vnd.ms-excel;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${filename}.csv`;
+  a.download = `${filename}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
   toast.success("Relatório exportado com sucesso!");
@@ -778,7 +783,7 @@ const Index = () => {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="gap-2" onClick={handleExportDashboard}>
-            <Download className="h-4 w-4" /> Exportar CSV
+            <Download className="h-4 w-4" /> Exportar XLSX
           </Button>
           <Button variant="outline" size="sm" className="gap-2" onClick={() => setCustomizeOpen(true)}>
             <Settings2 className="h-4 w-4" /> Personalizar Dashboard

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { BarChart2, Download, TrendingUp, Send, CheckCircle, BookOpen } from "lucide-react";
+import { BarChart2, Download, TrendingUp, Send, CheckCircle, BookOpen, FileSpreadsheet } from "lucide-react";
+import { exportToExcel } from "@/lib/exportXlsx";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import api from "@/lib/api";
 import { toast } from "sonner";
@@ -82,26 +83,18 @@ export default function CampaignsDashboard() {
       "Taxa Leitura (%)": parseFloat(((c.read_count / c.total_sent) * 100).toFixed(1)),
     }));
 
-  const exportCSV = () => {
-    const header = ["Nome", "Status", "Enviadas", "Entregues", "% Entrega", "Lidas", "% Leitura", "Respondidas"];
-    const rows = filtered.map((c) => [
-      `"${c.name}"`,
-      c.status,
-      c.total_sent,
-      c.delivered,
-      pct(c.delivered, c.total_sent),
-      c.read_count,
-      pct(c.read_count, c.total_sent),
-      c.replied,
-    ]);
-    const csv = [header, ...rows].map((r) => r.join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `campanhas-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const exportXLSX = () => {
+    const data = filtered.map((c) => ({
+      Nome: c.name,
+      Status: c.status,
+      Enviadas: c.total_sent,
+      Entregues: c.delivered,
+      "% Entrega": pct(c.delivered, c.total_sent),
+      Lidas: c.read_count,
+      "% Leitura": pct(c.read_count, c.total_sent),
+      Respondidas: c.replied,
+    }));
+    exportToExcel(data, `campanhas-${new Date().toISOString().slice(0, 10)}`);
   };
 
   const cards = [
@@ -159,9 +152,9 @@ export default function CampaignsDashboard() {
               <SelectItem value="90">Últimos 90 dias</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={exportCSV} className="gap-2">
-            <Download className="h-4 w-4" />
-            Exportar CSV
+          <Button variant="outline" onClick={exportXLSX} className="gap-2">
+            <FileSpreadsheet className="h-4 w-4" />
+            Exportar XLSX
           </Button>
         </div>
       </div>

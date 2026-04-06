@@ -8,8 +8,9 @@ import {
   Phone, CheckCircle, Users, MessageSquare, BarChart3,
   Calendar as CalendarIcon, CalendarDays, CalendarRange, ChevronDown,
   User, Mail, MapPin, Info, Settings, Cake, Filter, Smartphone,
-  Layers, Calculator, Eye, RefreshCw, Tag, Clock, GitMerge, ExternalLink
+  Layers, Calculator, Eye, RefreshCw, Tag, Clock, GitMerge, ExternalLink, FileSpreadsheet
 } from "lucide-react";
+import { exportToExcel } from "@/lib/exportXlsx";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -649,6 +650,25 @@ const Contacts = () => {
     toast.success(`${contacts.length} contatos exportados`);
   };
 
+  const handleExportXLSX = () => {
+    if (contacts.length === 0) { toast.error("Nenhum contato para exportar"); return; }
+    const data = contacts.map(c => ({
+      Nome: c.name || "",
+      Telefone: c.phone,
+      Email: c.email || "",
+      "CPF/CNPJ": c.cpf_cnpj || "",
+      Gênero: c.gender || "",
+      Aniversário: c.birthday || "",
+      Estado: c.state || "",
+      Cidade: c.city || "",
+      Endereço: c.address || "",
+      Referência: c.reference || "",
+    }));
+    exportToExcel(data, `contatos_${new Date().toISOString().split("T")[0]}`);
+    logAudit("export_contacts", "contacts", "xlsx", "Exportação XLSX", { count: contacts.length });
+    toast.success(`${contacts.length} contatos exportados`);
+  };
+
   // ── Bulk select helpers ──
   const toggleSelectContact = (id: string) => {
     setSelectedContacts((prev) => {
@@ -1189,6 +1209,11 @@ const Contacts = () => {
                   {can("export_contacts") && (
                     <DropdownMenuItem className="gap-2" onClick={handleExportCSV}>
                       <Download className="h-4 w-4" /> Exportar CSV
+                    </DropdownMenuItem>
+                  )}
+                  {can("export_contacts") && (
+                    <DropdownMenuItem className="gap-2" onClick={handleExportXLSX}>
+                      <FileSpreadsheet className="h-4 w-4" /> Exportar XLSX
                     </DropdownMenuItem>
                   )}
                 </DropdownMenuContent>

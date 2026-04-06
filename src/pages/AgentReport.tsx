@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { FileText, Printer } from "lucide-react";
+import { FileText, Printer, FileSpreadsheet } from "lucide-react";
+import { exportToExcel } from "@/lib/exportXlsx";
 
 interface Profile {
   id: string;
@@ -142,14 +143,35 @@ export default function AgentReport() {
                   Período: {new Date(startDate).toLocaleDateString("pt-BR")} — {new Date(endDate).toLocaleDateString("pt-BR")}
                 </p>
               </div>
-              <Button
-                variant="outline"
-                className="flex items-center gap-2 no-print"
-                onClick={() => window.print()}
-              >
-                <Printer className="h-4 w-4" />
-                Imprimir / Salvar PDF
-              </Button>
+              <div className="flex gap-2 no-print">
+                <Button
+                  variant="outline"
+                  className="flex items-center gap-2"
+                  onClick={() => {
+                    if (!reportData) return;
+                    exportToExcel([{
+                      Agente: reportData.full_name || selectedAgentName,
+                      "Conversas Encerradas": reportData.closed_count || 0,
+                      "Mensagens Enviadas": reportData.messages_sent || 0,
+                      "CSAT Médio": reportData.avg_csat != null ? Number(reportData.avg_csat).toFixed(1) : "",
+                      "Tempo Médio Resposta (min)": reportData.avg_response_min != null ? Number(reportData.avg_response_min).toFixed(0) : "",
+                      "Período Início": startDate,
+                      "Período Fim": endDate,
+                    }], `relatorio-agente-${selectedAgentName.replace(/\s/g, "_")}-${startDate}`);
+                  }}
+                >
+                  <FileSpreadsheet className="h-4 w-4" />
+                  Exportar XLSX
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex items-center gap-2"
+                  onClick={() => window.print()}
+                >
+                  <Printer className="h-4 w-4" />
+                  Imprimir / Salvar PDF
+                </Button>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">

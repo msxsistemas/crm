@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { Radio, Download, RefreshCw, BarChart2, MessageSquare, Users, Clock, Star } from "lucide-react";
+import { Radio, Download, RefreshCw, BarChart2, MessageSquare, Users, Clock, Star, FileSpreadsheet } from "lucide-react";
+import { exportToExcel } from "@/lib/exportXlsx";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -100,37 +101,18 @@ export default function ChannelReport() {
         rows.filter((r) => r.avg_response_min !== null).length
       : null;
 
-  const exportCSV = () => {
-    const header = [
-      "Canal",
-      "Conversas",
-      "Fechadas",
-      "Abertas",
-      "Contatos Únicos",
-      "Mensagens",
-      "CSAT Médio",
-      "Tempo Resposta (min)",
-    ].join(";");
-    const lines = rows.map((r) =>
-      [
-        r.channel,
-        r.total_conversations,
-        r.closed,
-        r.open,
-        r.unique_contacts,
-        r.total_messages,
-        r.avg_csat ?? "",
-        r.avg_response_min ?? "",
-      ].join(";")
-    );
-    const csv = [header, ...lines].join("\n");
-    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `relatorio-canal-${startDate}-${endDate}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const exportXLSX = () => {
+    const data = rows.map((r) => ({
+      Canal: r.channel,
+      Conversas: r.total_conversations,
+      Fechadas: r.closed,
+      Abertas: r.open,
+      "Contatos Únicos": r.unique_contacts,
+      Mensagens: r.total_messages,
+      "CSAT Médio": r.avg_csat ?? "",
+      "Tempo Resposta (min)": r.avg_response_min ?? "",
+    }));
+    exportToExcel(data, `relatorio-canal-${startDate}-${endDate}`);
   };
 
   return (
@@ -173,9 +155,9 @@ export default function ChannelReport() {
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             Atualizar
           </Button>
-          <Button variant="outline" onClick={exportCSV} className="gap-2 ml-auto">
-            <Download className="h-4 w-4" />
-            Exportar CSV
+          <Button variant="outline" onClick={exportXLSX} className="gap-2 ml-auto">
+            <FileSpreadsheet className="h-4 w-4" />
+            Exportar XLSX
           </Button>
         </div>
       </Card>
