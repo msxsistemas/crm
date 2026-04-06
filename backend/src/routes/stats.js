@@ -482,6 +482,26 @@ export default async function statsRoutes(fastify) {
     return result;
   });
 
+  // ── Agent Report PDF (data only — frontend generates PDF) ─────────────────
+  fastify.get('/stats/agent-report-pdf', auth, async (req, reply) => {
+    const { agent_id, start, end } = req.query;
+    if (!agent_id) return reply.code(400).send({ error: 'agent_id é obrigatório' });
+    const { rows } = await query(`
+      SELECT
+        p.full_name,
+        COUNT(c.id) FILTER (WHERE c.status='closed') as closed_count,
+        ROUND(AVG(c.csat_score)::numeric, 2) as avg_csat,
+        COUNT(m.id) as messages_sent,
+        ROUND(AVG(EXTRACT(EPOCH FROM (c.first_response_at - c.created_at))/60)::numeric, 1) as avg_response_min
+      FROM profiles p
+      LEFT JOIN conversations c ON c.assigned_to = p.id AND c.created_at BETWEEN $2 AND $3
+      LEFT JOIN messages m ON m.conversation_id = c.id AND m.sender_type='agent'
+      WHERE p.id = $1
+      GROUP BY p.full_name
+    `, [agent_id, start || 'NOW() - interval \'30 days\'', end || 'NOW()']);
+    return rows[0] || {};
+  });
+
   // ── Tags Analytics ────────────────────────────────────────────────────────
   fastify.get('/stats/tags', auth, async (req) => {
     const { start, end } = req.query;

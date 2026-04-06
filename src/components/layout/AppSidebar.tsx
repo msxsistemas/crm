@@ -76,6 +76,7 @@ import {
   PieChart,
   Bell,
   X,
+  FormInput,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -147,6 +148,7 @@ const userNavSections: NavSection[] = [
       { to: "/central-ajuda", icon: HelpCircle, label: "Central de Ajuda" },
       { to: "/deduplicacao", icon: GitMerge, label: "Deduplicação" },
       { to: "/formularios-captacao", icon: QrCode, label: "Formulários de Captação" },
+      { to: "/capture-forms", icon: FormInput, label: "Formulários" },
     ],
   },
   {
@@ -181,6 +183,7 @@ const userNavSections: NavSection[] = [
     items: [
       { to: "/relatorios-customizados", icon: PieChart, label: "Builder de Relatórios" },
       { to: "/tags-analytics", icon: Tag, label: "Analytics de Tags" },
+      { to: "/agent-report", icon: FileText, label: "Relatório Agente" },
     ],
   },
   {

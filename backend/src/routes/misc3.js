@@ -830,4 +830,75 @@ export default async function misc3Routes(fastify) {
     await query('DELETE FROM conversation_checklist WHERE id=$1 AND conversation_id=$2', [req.params.itemId, req.params.id]);
     return { ok: true };
   });
+
+  // ── FAQ Rules (Bot FAQ por Palavras-chave) ───────────────────────────────────
+  fastify.get('/faq-rules', auth, async (req) => {
+    const orgId = req.user.organization_id || req.user.org_id || null;
+    const { rows } = await query(
+      'SELECT * FROM faq_rules WHERE (organization_id=$1 OR $1 IS NULL) ORDER BY created_at ASC',
+      [orgId]
+    );
+    return rows;
+  });
+
+  fastify.post('/faq-rules', auth, async (req, reply) => {
+    const { keyword, response, is_active } = req.body;
+    if (!keyword || !response) return reply.status(400).send({ error: 'keyword e response obrigatórios' });
+    const orgId = req.user.organization_id || req.user.org_id || null;
+    const { rows } = await query(
+      'INSERT INTO faq_rules (organization_id, keyword, response, is_active) VALUES ($1,$2,$3,$4) RETURNING *',
+      [orgId, keyword.trim(), response.trim(), is_active !== false]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.patch('/faq-rules/:id', auth, async (req) => {
+    const { keyword, response, is_active } = req.body;
+    const sets = []; const vals = []; let p = 1;
+    if (keyword !== undefined) { sets.push(`keyword=$${p}`); vals.push(keyword); p++; }
+    if (response !== undefined) { sets.push(`response=$${p}`); vals.push(response); p++; }
+    if (is_active !== undefined) { sets.push(`is_active=$${p}`); vals.push(is_active); p++; }
+    if (!sets.length) return {};
+    vals.push(req.params.id);
+    const { rows } = await query(`UPDATE faq_rules SET ${sets.join(',')} WHERE id=$${p} RETURNING *`, vals);
+    return rows[0] || {};
+  });
+
+  fastify.delete('/faq-rules/:id', auth, async (req) => {
+    await query('DELETE FROM faq_rules WHERE id=$1', [req.params.id]);
+    return { ok: true };
+  });
+
+  // ── Conversation Collaborators (Co-atendimento) ──────────────────────────────
+  fastify.get('/conversations/:id/collaborators', auth, async (req) => {
+    const { rows } = await query(
+      `SELECT cc.*, p.name, p.full_name, p.avatar_url, p.email
+       FROM conversation_collaborators cc
+       JOIN profiles p ON p.id = cc.agent_id
+       WHERE cc.conversation_id=$1`,
+      [req.params.id]
+    );
+    return rows;
+  });
+
+  fastify.post('/conversations/:id/collaborators', auth, async (req, reply) => {
+    const { agent_id } = req.body;
+    if (!agent_id) return reply.status(400).send({ error: 'agent_id obrigatório' });
+    const { rows } = await query(
+      'INSERT INTO conversation_collaborators (conversation_id, agent_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING *',
+      [req.params.id, agent_id]
+    );
+    const { rows: agentRows } = await query('SELECT id, name, full_name, avatar_url FROM profiles WHERE id=$1', [agent_id]);
+    const agentRow = agentRows[0] || { id: agent_id };
+    fastify.io?.emit('conversation:collaborator_added', { conversation_id: req.params.id, agent: agentRow });
+    return reply.status(201).send(rows[0] || { conversation_id: req.params.id, agent_id });
+  });
+
+  fastify.delete('/conversations/:id/collaborators/:agentId', auth, async (req) => {
+    await query(
+      'DELETE FROM conversation_collaborators WHERE conversation_id=$1 AND agent_id=$2',
+      [req.params.id, req.params.agentId]
+    );
+    return { ok: true };
+  });
 }

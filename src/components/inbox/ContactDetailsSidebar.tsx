@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clock, TrendingUp, Send, ChevronDown, ChevronUp, Cake, Star } from "lucide-react";
+import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clock, TrendingUp, Send, ChevronDown, ChevronUp, Cake, Star, CheckSquare, Trash2 } from "lucide-react";
 import TagSelector from "@/components/shared/TagSelector";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -132,6 +132,16 @@ const ContactDetailsSidebar = ({
   const [historyOpen, setHistoryOpen] = useState(false);
   const navigate = useNavigate();
 
+  // Checklist state
+  const [checklistItems, setChecklistItems] = useState<{ id: string; text: string; done: boolean }[]>([]);
+  const [newChecklistText, setNewChecklistText] = useState("");
+  const [addingChecklist, setAddingChecklist] = useState(false);
+
+  // Co-atendentes (collaborators)
+  const [collaborators, setCollaborators] = useState<{ agent_id: string; name: string | null; full_name: string | null; avatar_url: string | null }[]>([]);
+  const [showAddCollab, setShowAddCollab] = useState(false);
+  const [allAgents, setAllAgents] = useState<AgentProfile[]>([]);
+
   // @mention states
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -147,14 +157,22 @@ const ContactDetailsSidebar = ({
       .select("id, full_name")
       .then(({ data }) => {
         if (data) {
-          setAgents(
-            data
-              .filter((p: any) => p.full_name)
-              .map((p: any) => ({ id: p.id, name: p.full_name as string }))
-          );
+          const mapped = data
+            .filter((p: any) => p.full_name)
+            .map((p: any) => ({ id: p.id, name: p.full_name as string }));
+          setAgents(mapped);
+          setAllAgents(mapped);
         }
       });
   }, []);
+
+  // Load collaborators when conversationId changes
+  useEffect(() => {
+    if (!conversationId) return;
+    api.get<any[]>(`/conversations/${conversationId}/collaborators`)
+      .then(data => setCollaborators(data || []))
+      .catch(() => {});
+  }, [conversationId]);
 
   // Load contact history when contactId changes
   useEffect(() => {
@@ -437,6 +455,14 @@ const ContactDetailsSidebar = ({
         .order("created_at", { ascending: false })
         .limit(30);
       setAuditEvents((evtData as any[]) || []);
+
+      // Load checklist
+      try {
+        const items = await api.get<{ id: string; text: string; done: boolean }[]>(`/conversations/${conversationId}/checklist`);
+        setChecklistItems(items || []);
+      } catch {
+        setChecklistItems([]);
+      }
     };
     load();
   }, [contactId, conversationId]);
@@ -707,6 +733,111 @@ const ContactDetailsSidebar = ({
           >
             {savingNote ? "Salvando..." : "Adicionar nota"}
           </Button>
+        </div>
+      </div>
+
+      {/* Checklist */}
+      <div className="px-4 py-3 border-b border-border">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <CheckSquare className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-semibold text-foreground">Checklist</span>
+          </div>
+          {checklistItems.length > 0 && (
+            <span className="text-xs text-muted-foreground">
+              {checklistItems.filter(i => i.done).length}/{checklistItems.length} concluídos
+            </span>
+          )}
+        </div>
+
+        {checklistItems.length > 0 && (
+          <div className="space-y-1.5 mb-3 max-h-[200px] overflow-y-auto">
+            {checklistItems.map((item) => (
+              <div key={item.id} className="flex items-center gap-2 group">
+                <input
+                  type="checkbox"
+                  checked={item.done}
+                  className="h-4 w-4 rounded cursor-pointer accent-primary"
+                  onChange={async () => {
+                    const newDone = !item.done;
+                    setChecklistItems(prev => prev.map(i => i.id === item.id ? { ...i, done: newDone } : i));
+                    try {
+                      await api.patch(`/conversations/${conversationId}/checklist/${item.id}`, { done: newDone });
+                    } catch {
+                      setChecklistItems(prev => prev.map(i => i.id === item.id ? { ...i, done: item.done } : i));
+                    }
+                  }}
+                />
+                <span className={`flex-1 text-xs ${item.done ? "line-through text-muted-foreground" : "text-foreground"}`}>
+                  {item.text}
+                </span>
+                <button
+                  type="button"
+                  className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
+                  onClick={async () => {
+                    setChecklistItems(prev => prev.filter(i => i.id !== item.id));
+                    try {
+                      await api.delete(`/conversations/${conversationId}/checklist/${item.id}`);
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          <input
+            className="flex-1 text-xs border border-border rounded px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            placeholder="Adicionar item..."
+            value={newChecklistText}
+            onChange={(e) => setNewChecklistText(e.target.value)}
+            onKeyDown={async (e) => {
+              if (e.key === "Enter" && newChecklistText.trim()) {
+                e.preventDefault();
+                const text = newChecklistText.trim();
+                setNewChecklistText("");
+                setAddingChecklist(true);
+                try {
+                  const item = await api.post<{ id: string; text: string; done: boolean }>(
+                    `/conversations/${conversationId}/checklist`, { text }
+                  );
+                  if (item) setChecklistItems(prev => [...prev, item]);
+                } catch {
+                  // ignore
+                } finally {
+                  setAddingChecklist(false);
+                }
+              }
+            }}
+          />
+          <button
+            type="button"
+            disabled={addingChecklist || !newChecklistText.trim()}
+            className="text-xs bg-primary text-primary-foreground px-2.5 py-1.5 rounded font-medium disabled:opacity-50 hover:bg-primary/90 transition-colors"
+            onClick={async () => {
+              const text = newChecklistText.trim();
+              if (!text) return;
+              setNewChecklistText("");
+              setAddingChecklist(true);
+              try {
+                const item = await api.post<{ id: string; text: string; done: boolean }>(
+                  `/conversations/${conversationId}/checklist`, { text }
+                );
+                if (item) setChecklistItems(prev => [...prev, item]);
+              } catch {
+                // ignore
+              } finally {
+                setAddingChecklist(false);
+              }
+            }}
+          >
+            +
+          </button>
         </div>
       </div>
 
@@ -1001,6 +1132,71 @@ const ContactDetailsSidebar = ({
           </div>
         </div>
       )}
+
+      {/* Co-atendentes */}
+      <div className="px-4 py-3 border-t border-border">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <User className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-semibold text-foreground">Co-atendentes</span>
+          </div>
+          <button
+            className="text-xs text-primary hover:underline"
+            onClick={() => setShowAddCollab(v => !v)}
+          >
+            + Adicionar
+          </button>
+        </div>
+
+        {showAddCollab && (
+          <div className="mb-2 rounded-lg border border-border bg-muted/30 p-2 space-y-1 max-h-36 overflow-y-auto">
+            {allAgents.filter(a => !collaborators.some(c => c.agent_id === a.id)).map(a => (
+              <button
+                key={a.id}
+                className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted transition-colors text-foreground"
+                onClick={async () => {
+                  try {
+                    await api.post(`/conversations/${conversationId}/collaborators`, { agent_id: a.id });
+                    setCollaborators(prev => [...prev, { agent_id: a.id, name: a.name, full_name: a.name, avatar_url: null }]);
+                    setShowAddCollab(false);
+                  } catch { /* silent */ }
+                }}
+              >
+                {a.name}
+              </button>
+            ))}
+            {allAgents.filter(a => !collaborators.some(c => c.agent_id === a.id)).length === 0 && (
+              <p className="text-xs text-muted-foreground px-2">Todos os agentes já são co-atendentes</p>
+            )}
+          </div>
+        )}
+
+        {collaborators.length === 0 ? (
+          <p className="text-xs text-muted-foreground ml-6">Nenhum co-atendente</p>
+        ) : (
+          <div className="space-y-1.5 ml-6">
+            {collaborators.map(c => (
+              <div key={c.agent_id} className="flex items-center gap-2">
+                <div className="h-6 w-6 rounded-full bg-primary/20 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
+                  {(c.full_name || c.name || '?').charAt(0).toUpperCase()}
+                </div>
+                <span className="text-xs text-foreground flex-1">{c.full_name || c.name}</span>
+                <button
+                  className="text-muted-foreground hover:text-destructive transition-colors"
+                  onClick={async () => {
+                    try {
+                      await api.delete(`/conversations/${conversationId}/collaborators/${c.agent_id}`);
+                      setCollaborators(prev => prev.filter(x => x.agent_id !== c.agent_id));
+                    } catch { /* silent */ }
+                  }}
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

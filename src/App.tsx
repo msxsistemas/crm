@@ -98,6 +98,9 @@ const WhatsAppStatusPage = lazy(() => import("./pages/WhatsAppStatus"));
 const Deduplication = lazy(() => import("./pages/Deduplication"));
 const ContactForms = lazy(() => import("./pages/ContactForms"));
 const PublicContactForm = lazy(() => import("./pages/PublicContactForm"));
+const CaptureFormBuilder = lazy(() => import("./pages/CaptureFormBuilder"));
+const PublicCaptureForm = lazy(() => import("./pages/PublicCaptureForm"));
+const AgentReport = lazy(() => import("./pages/AgentReport"));
 const AutoDistribution = lazy(() => import("./pages/AutoDistribution"));
 const CustomReports = lazy(() => import("./pages/CustomReports"));
 const KanbanConversas = lazy(() => import("./pages/Kanban"));
@@ -203,6 +206,8 @@ const App = () => (
                     <Route path="/bots" element={<Bots />} />
                     <Route path="/contatos/:id/profile" element={<ContactProfile />} />
                     <Route path="/tags-analytics" element={<TagsAnalytics />} />
+                    <Route path="/capture-forms" element={<CaptureFormBuilder />} />
+                    <Route path="/agent-report" element={<AgentReport />} />
                   </Route>
                   <Route
                     element={
@@ -234,6 +239,7 @@ const App = () => (
                     <Route path="/revenda/marca" element={<ResellerBranding />} />
                   </Route>
                   <Route path="/form/:slug" element={<PublicContactForm />} />
+                  <Route path="/f/:slug" element={<PublicCaptureForm />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
