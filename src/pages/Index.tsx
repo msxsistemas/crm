@@ -759,6 +759,9 @@ const Index = () => {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="gap-2" onClick={handleExportDashboard}>
+            <Download className="h-4 w-4" /> Exportar CSV
+          </Button>
           <Button variant="outline" size="sm" className="gap-2" onClick={() => setCustomizeOpen(true)}>
             <Settings2 className="h-4 w-4" /> Personalizar Dashboard
           </Button>

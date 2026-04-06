@@ -1,10 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { useUserRole } from "@/hooks/useUserRole";
 import { usePlatformName } from "@/hooks/usePlatformName";
 import { db } from "@/lib/db";
+import { api } from "@/lib/api";
+import { useSocketEvent } from "@/hooks/useSocketEvent";
 
 // Map from route path patterns to permission keys
 const ROUTE_PERMISSION_MAP: Record<string, string> = {
@@ -72,6 +74,8 @@ import {
   QrCode,
   Shuffle,
   PieChart,
+  Bell,
+  X,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -255,6 +259,23 @@ const AppSidebar = ({ onStartTour }: AppSidebarProps) => {
   const { platformName } = usePlatformName();
   const [userPermissions, setUserPermissions] = useState<Record<string, boolean> | null>(null);
 
+  // Notifications state
+  interface Notification {
+    id: string;
+    type: string;
+    title: string;
+    message: string;
+    read: boolean;
+    created_at: string;
+    metadata?: Record<string, unknown>;
+  }
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifPanelRef = useRef<HTMLDivElement>(null);
+
+  // Pending conversations badge
+  const [pendingCount, setPendingCount] = useState(0);
+
   useEffect(() => {
     if (!user || isAdmin || isReseller) return;
     db
@@ -268,6 +289,89 @@ const AppSidebar = ({ onStartTour }: AppSidebarProps) => {
         }
       });
   }, [user?.id, isAdmin, isReseller]);
+
+  // Fetch notifications every 30s
+  useEffect(() => {
+    if (!user) return;
+    const fetchNotifications = async () => {
+      try {
+        const data = await api.get('/notifications') as Notification[];
+        setNotifications(Array.isArray(data) ? data : []);
+      } catch {
+        // silently ignore
+      }
+    };
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30000);
+    return () => clearInterval(interval);
+  }, [user?.id]);
+
+  // Fetch pending conversations count every 60s (non-admin users only)
+  useEffect(() => {
+    if (!user || isAdmin || isReseller) return;
+    const fetchPending = async () => {
+      try {
+        const data = await api.get('/conversations/pending-response/count') as { count: number };
+        setPendingCount(data?.count ?? 0);
+      } catch {
+        // silently ignore
+      }
+    };
+    fetchPending();
+    const interval = setInterval(fetchPending, 60000);
+    return () => clearInterval(interval);
+  }, [user?.id, isAdmin, isReseller]);
+
+  // Refresh pending count when any conversation is updated
+  useSocketEvent('conversation:updated', () => {
+    if (!user || isAdmin || isReseller) return;
+    api.get('/conversations/pending-response/count')
+      .then((data: unknown) => setPendingCount((data as { count: number })?.count ?? 0))
+      .catch(() => { /* ignore */ });
+  }, [user?.id, isAdmin, isReseller]);
+
+  // Close notifications panel on outside click
+  useEffect(() => {
+    if (!notifOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (notifPanelRef.current && !notifPanelRef.current.contains(e.target as Node)) {
+        setNotifOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [notifOpen]);
+
+  const unreadCount = notifications.filter(n => !n.read).length;
+
+  const markAllRead = async () => {
+    try {
+      await api.post('/notifications/read-all', {});
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    } catch {
+      // silently ignore
+    }
+  };
+
+  const markOneRead = async (id: string) => {
+    try {
+      await api.patch(`/notifications/${id}/read`, {});
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    } catch {
+      // silently ignore
+    }
+  };
+
+  const formatRelativeTime = (dateStr: string) => {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'agora';
+    if (mins < 60) return `há ${mins} min`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `há ${hours}h`;
+    const days = Math.floor(hours / 24);
+    return `há ${days}d`;
+  };
 
   const isNavItemAllowed = (item: NavItemDef): boolean => {
     // Admin-only items are only visible to admins
@@ -391,6 +495,8 @@ const AppSidebar = ({ onStartTour }: AppSidebarProps) => {
   const renderLeafItem = (item: NavItemDef) => {
     const isActive = location.pathname === item.to;
     const tourAttr = TOUR_ATTR_MAP[item.to];
+    const isInbox = item.to === '/inbox';
+    const showPendingBadge = isInbox && !isAdmin && !isReseller && pendingCount > 0;
     const link = (
       <NavLink
         key={item.to}
@@ -404,8 +510,20 @@ const AppSidebar = ({ onStartTour }: AppSidebarProps) => {
             : "border-l-transparent text-sidebar-foreground hover:bg-sidebar-accent/50"
         )}
       >
-        <item.icon className="h-5 w-5 shrink-0 text-blue-600" />
-        {!collapsed && <span className="truncate">{item.label}</span>}
+        <span className="relative shrink-0">
+          <item.icon className="h-5 w-5 text-blue-600" />
+          {showPendingBadge && (
+            <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[9px] rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-0.5 leading-none">
+              {pendingCount > 99 ? '99+' : pendingCount}
+            </span>
+          )}
+        </span>
+        {!collapsed && <span className="truncate flex-1">{item.label}</span>}
+        {!collapsed && showPendingBadge && (
+          <span className="bg-orange-500 text-white text-[9px] rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-0.5 leading-none shrink-0">
+            {pendingCount > 99 ? '99+' : pendingCount}
+          </span>
+        )}
       </NavLink>
     );
 

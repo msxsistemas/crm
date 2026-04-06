@@ -386,4 +386,57 @@ ${'─'.repeat(60)}
     );
     return { updated: rowCount };
   });
+
+  // ── Conversas aguardando resposta ──────────────────────────────────────────
+  // Count of conversations where the last message is inbound (client waiting for agent reply)
+  fastify.get('/conversations/pending-response/count', auth, async () => {
+    const { rows } = await query(`
+      SELECT COUNT(*)::int AS count
+      FROM conversations c
+      WHERE c.status != 'closed' AND c.is_merged = false
+        AND EXISTS (
+          SELECT 1 FROM messages m
+          WHERE m.conversation_id = c.id
+            AND m.direction = 'inbound'
+            AND m.created_at = (SELECT MAX(m2.created_at) FROM messages m2 WHERE m2.conversation_id = c.id)
+        )
+    `);
+    return { count: rows[0]?.count ?? 0 };
+  });
+
+  fastify.get('/conversations/pending-response', auth, async (req) => {
+    const { list } = req.query;
+    if (list !== 'true') {
+      const { rows } = await query(`
+        SELECT COUNT(*)::int AS count
+        FROM conversations c
+        WHERE c.status != 'closed' AND c.is_merged = false
+          AND EXISTS (
+            SELECT 1 FROM messages m
+            WHERE m.conversation_id = c.id
+              AND m.direction = 'inbound'
+              AND m.created_at = (SELECT MAX(m2.created_at) FROM messages m2 WHERE m2.conversation_id = c.id)
+          )
+      `);
+      return { count: rows[0]?.count ?? 0 };
+    }
+    const { rows } = await query(`
+      SELECT c.id, c.contact_id, c.last_message_at,
+        ct.name AS contact_name, ct.phone AS contact_phone,
+        ct.avatar_url AS contact_avatar_url,
+        jsonb_build_object('id',ct.id,'name',ct.name,'phone',ct.phone,'avatar_url',ct.avatar_url) AS contacts
+      FROM conversations c
+      JOIN contacts ct ON ct.id = c.contact_id
+      WHERE c.status != 'closed' AND c.is_merged = false
+        AND EXISTS (
+          SELECT 1 FROM messages m
+          WHERE m.conversation_id = c.id
+            AND m.direction = 'inbound'
+            AND m.created_at = (SELECT MAX(m2.created_at) FROM messages m2 WHERE m2.conversation_id = c.id)
+        )
+      ORDER BY c.last_message_at ASC
+      LIMIT 100
+    `);
+    return rows;
+  });
 }
