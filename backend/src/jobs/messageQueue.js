@@ -36,15 +36,36 @@ export function startMessageWorker(io) {
           await query('UPDATE messages SET status=$1, external_id=$2 WHERE id=$3', ['sent', result.messages[0].id, messageId]);
         }
       } else {
-        // Evolution API
-        const res = await fetch(`${evolutionUrl}/message/sendText/${instance}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
-          body: JSON.stringify({ number: phone, text: content }),
-        });
-        const data = await res.json();
-        if (data.status === 'error') throw new Error(data.message);
-        await query('UPDATE messages SET status=$1 WHERE id=$2', ['sent', messageId]);
+        // Evolution API — text vs media
+        let evoRes;
+        if (mediaUrl && type && type !== 'text') {
+          // Map type to Evolution mediatype
+          const mediaTypeMap = { image: 'image', video: 'video', audio: 'audio', document: 'document' };
+          const mediatype = mediaTypeMap[type] || 'document';
+          if (type === 'audio') {
+            evoRes = await fetch(`${evolutionUrl}/message/sendWhatsAppAudio/${instance}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
+              body: JSON.stringify({ number: phone, audio: mediaUrl }),
+            });
+          } else {
+            evoRes = await fetch(`${evolutionUrl}/message/sendMedia/${instance}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
+              body: JSON.stringify({ number: phone, mediatype, media: mediaUrl, caption: content || '' }),
+            });
+          }
+        } else {
+          evoRes = await fetch(`${evolutionUrl}/message/sendText/${instance}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
+            body: JSON.stringify({ number: phone, text: content }),
+          });
+        }
+        const data = await evoRes.json();
+        if (data.status === 'error' || data.error) throw new Error(data.message || data.error);
+        const extId = data.key?.id || data.id || null;
+        await query('UPDATE messages SET status=$1, external_id=COALESCE($2,external_id) WHERE id=$3', ['sent', extId, messageId]);
       }
 
       io?.to(`conversation:${job.data.conversationId}`).emit('message:status', { id: messageId, status: 'sent' });

@@ -196,13 +196,37 @@ export default async function conversationRoutes(fastify) {
     invalidate('conv:list:*').catch(() => {});
     deliverWebhook.dispatchEvent('conversation.updated', rows[0]).catch(err => console.error('webhook dispatch failed:', err.message));
 
-    // Email notification when assigned_to changes
-    if (req.body.assigned_to && rows[0].contact_name) {
+    // Socket + DB notification when assigned_to changes
+    if (req.body.assigned_to) {
+      const contactName = rows[0].contact_name || rows[0].contact_phone || 'Contato';
+      query(
+        "INSERT INTO notifications (user_id, type, title, message, metadata) VALUES ($1,'assignment','Nova conversa atribuída',$2,$3) RETURNING *",
+        [req.body.assigned_to, `Conversa com ${contactName} foi atribuída a você`, JSON.stringify({ conversation_id: req.params.id })]
+      ).then(({ rows: n }) => {
+        if (n[0]) fastify.io?.to(`user:${req.body.assigned_to}`).emit('notification:new', n[0]);
+      }).catch(() => {});
       notifyConversationAssigned({
         agentId: req.body.assigned_to,
-        contactName: rows[0].contact_name,
+        contactName,
         conversationId: req.params.id,
       }).catch(err => console.error('notifyConversationAssigned failed:', err.message));
+    }
+
+    // CSAT: send rating request when conversation closes with awaiting_csat=true
+    if (req.body.status === 'closed' && rows[0].awaiting_csat) {
+      query(`
+        SELECT ct.phone, s.evolution_url, s.evolution_key, c.connection_name
+        FROM conversations c JOIN contacts ct ON ct.id=c.contact_id, settings s
+        WHERE c.id=$1 AND s.id=1
+      `, [req.params.id]).then(async ({ rows: r }) => {
+        const row = r[0];
+        if (!row?.evolution_url || !row?.phone) return;
+        await fetch(`${row.evolution_url}/message/sendText/${row.connection_name}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': row.evolution_key },
+          body: JSON.stringify({ number: row.phone, text: '⭐ Como você avaliaria nosso atendimento?\nResponda com um número de *1* a *5*:\n\n1 - Muito ruim\n2 - Ruim\n3 - Regular\n4 - Bom\n5 - Excelente' }),
+        }).catch(() => {});
+      }).catch(() => {});
     }
 
     return rows[0];

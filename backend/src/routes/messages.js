@@ -189,7 +189,6 @@ async function handleEvolutionWebhook(payload, fastify) {
   // ── Connection status update ──────────────────────────────────────────────
   if (event === 'connection.update') {
     const state = data?.state;
-    console.log('[webhook:evolution] connection.update', instance, state);
     fastify.io?.emit('connection:status', { instance, state });
 
     // Update evolution_connections table
@@ -252,8 +251,11 @@ async function handleEvolutionWebhook(payload, fastify) {
       let contact = contacts[0];
       if (!contact) {
         const name = data.pushName || phone;
-        const { rows } = await client.query('INSERT INTO contacts (name, phone) VALUES ($1,$2) RETURNING *', [name, phone]);
+        const { rows } = await client.query('INSERT INTO contacts (name, phone, avatar_url) VALUES ($1,$2,$3) RETURNING *', [name, phone, data.profilePicUrl || null]);
         contact = rows[0];
+      } else if (data.profilePicUrl && !contact.avatar_url) {
+        // Save profile pic if we didn't have it yet
+        await client.query('UPDATE contacts SET avatar_url=$1 WHERE id=$2', [data.profilePicUrl, contact.id]);
       }
 
       let { rows: convs } = await client.query(
@@ -290,5 +292,72 @@ async function handleEvolutionWebhook(payload, fastify) {
 
     fastify.io?.emit('message:new', { ...msgRow, conversation_id: conv.id });
     fastify.io?.emit('conversation:updated', { id: conv.id });
+
+    // ── CSAT response check ────────────────────────────────────────────────
+    if (conv.awaiting_csat && textContent) {
+      const rating = parseInt(textContent.trim());
+      if (rating >= 1 && rating <= 5) {
+        await query(
+          'INSERT INTO reviews (contact_id, conversation_id, rating, type) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING',
+          [conv.contact_id, conv.id, rating, 'csat']
+        ).catch(() => {});
+        await query("UPDATE conversations SET awaiting_csat=false WHERE id=$1", [conv.id]).catch(() => {});
+        return; // don't process chatbot for CSAT replies
+      }
+    }
+
+    // ── Chatbot engine ─────────────────────────────────────────────────────
+    // Skip if contact has chatbot disabled or conversation is assigned to an agent
+    if (conv.assigned_to) return;
+    const { rows: contactRow } = await query('SELECT disable_chatbot FROM contacts WHERE id=$1', [conv.contact_id]);
+    if (contactRow[0]?.disable_chatbot) return;
+
+    const { rows: rules } = await query(
+      'SELECT * FROM chatbot_rules WHERE is_active=true AND (connection_name=$1 OR connection_name IS NULL OR connection_name=\'\') ORDER BY priority ASC NULLS LAST, created_at ASC',
+      [instance]
+    );
+    if (!rules.length) return;
+
+    const msgText = (textContent || '').trim().toLowerCase();
+    for (const rule of rules) {
+      const trigger = (rule.trigger || '').trim().toLowerCase();
+      const triggerType = rule.trigger_type || 'contains';
+      let matched = false;
+      if (triggerType === 'exact')       matched = msgText === trigger;
+      else if (triggerType === 'starts') matched = msgText.startsWith(trigger);
+      else if (triggerType === 'regex')  { try { matched = new RegExp(trigger, 'i').test(msgText); } catch {} }
+      else                               matched = msgText.includes(trigger); // 'contains' (default)
+
+      if (!matched) continue;
+
+      const response = rule.response_text || rule.message;
+      if (!response) continue;
+
+      // Get Evolution settings
+      const { rows: settings } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
+      const s = settings[0];
+      if (!s?.evolution_url) break;
+
+      // Send auto-reply after 1s delay
+      setTimeout(async () => {
+        try {
+          await fetch(`${s.evolution_url}/message/sendText/${instance}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': s.evolution_key },
+            body: JSON.stringify({ number: phone, text: response }),
+          });
+          // Save bot message in DB
+          const { rows: botMsg } = await query(
+            'INSERT INTO messages (conversation_id, content, direction, type, status) VALUES ($1,$2,\'outbound\',\'text\',\'sent\') RETURNING *',
+            [conv.id, response]
+          );
+          await query('UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1', [conv.id]);
+          fastify.io?.emit('message:new', { ...botMsg[0], conversation_id: conv.id });
+          // Increment trigger count
+          query('UPDATE chatbot_rules SET trigger_count=COALESCE(trigger_count,0)+1 WHERE id=$1', [rule.id]).catch(() => {});
+        } catch {}
+      }, 1000);
+      break; // only first matching rule
+    }
   }
 }

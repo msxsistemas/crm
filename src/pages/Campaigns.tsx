@@ -29,6 +29,8 @@ interface Campaign {
   read: number;
   failed: number;
   createdAt: string;
+  segmentId?: string | null;
+  connectionName?: string | null;
 }
 
 interface Contact {
@@ -103,6 +105,10 @@ const Campaigns = () => {
   const [formDesc, setFormDesc] = useState("");
   const [formMessage, setFormMessage] = useState("");
   const [formSpeed, setFormSpeed] = useState("20");
+  const [formSegmentId, setFormSegmentId] = useState("");
+  const [formConnectionName, setFormConnectionName] = useState("");
+  const [segments, setSegments] = useState<{ id: string; name: string }[]>([]);
+  const [connections, setConnectionsList] = useState<{ instance_name: string }[]>([]);
 
   // Template picker inside new campaign dialog
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
@@ -148,6 +154,8 @@ const Campaigns = () => {
         read: c.read || 0,
         failed: c.failed || 0,
         createdAt: c.created_at,
+        segmentId: c.segment_id || null,
+        connectionName: c.connection_name || null,
       }))
     );
     setLoading(false);
@@ -219,7 +227,11 @@ const Campaigns = () => {
     toast.success("CSV exportado com sucesso!");
   };
 
-  useEffect(() => { fetchCampaigns(); }, []);
+  useEffect(() => {
+    fetchCampaigns();
+    db.from("segments").select("id, name").order("name").then(({ data }) => setSegments((data as any[]) || []));
+    db.from("evolution_connections").select("instance_name").then(({ data }) => setConnectionsList((data as any[]) || []));
+  }, []);
   useEffect(() => { if (activeTab === "biblioteca") fetchTemplates(); }, [activeTab]);
 
   const filteredCampaigns = useMemo(() => {
@@ -284,6 +296,8 @@ const Campaigns = () => {
       description: formDesc.trim() || null,
       message_template: formMessage.trim(),
       send_speed: parseInt(formSpeed) || 20,
+      segment_id: formSegmentId || null,
+      connection_name: formConnectionName || null,
     });
     if (error) {
       toast.error("Erro ao criar campanha");
@@ -291,10 +305,8 @@ const Campaigns = () => {
     }
     toast.success("Campanha criada com sucesso!");
     setNewCampaignOpen(false);
-    setFormName("");
-    setFormDesc("");
-    setFormMessage("");
-    setFormSpeed("20");
+    setFormName(""); setFormDesc(""); setFormMessage(""); setFormSpeed("20");
+    setFormSegmentId(""); setFormConnectionName("");
     fetchCampaigns();
   };
 
@@ -316,12 +328,25 @@ const Campaigns = () => {
     setContactsLoading(false);
   };
 
-  const openSelectContacts = (campaignId: string) => {
+  const openSelectContacts = async (campaignId: string) => {
     setPendingCampaignId(campaignId);
     setSelectedContacts(new Set());
     setTagFilter("");
+    await loadContacts();
+
+    // Auto-select segment contacts if campaign has segment_id
+    const campaign = campaigns.find(c => c.id === campaignId);
+    if (campaign?.segmentId) {
+      const { data: segContacts } = await db
+        .from("contact_segments")
+        .select("contact_id")
+        .eq("segment_id", campaign.segmentId);
+      if (segContacts && segContacts.length > 0) {
+        setSelectedContacts(new Set((segContacts as any[]).map(r => r.contact_id)));
+        toast.info(`${segContacts.length} contatos do segmento pré-selecionados`);
+      }
+    }
     setSelectContactsOpen(true);
-    loadContacts();
   };
 
   const filteredContacts = useMemo(() => {
@@ -1032,15 +1057,25 @@ const Campaigns = () => {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-sm font-medium text-foreground">Agendar para</label>
-                <Input type="datetime-local" />
-                <p className="text-xs text-muted-foreground mt-1">Deixe vazio para iniciar manualmente</p>
+                <label className="text-sm font-medium text-foreground">Conexão WhatsApp</label>
+                <select value={formConnectionName} onChange={e => setFormConnectionName(e.target.value)} className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm">
+                  <option value="">Primeira disponível</option>
+                  {connections.map(c => <option key={c.instance_name} value={c.instance_name}>{c.instance_name}</option>)}
+                </select>
               </div>
               <div>
                 <label className="text-sm font-medium text-foreground">Velocidade (msg/min)</label>
                 <Input type="number" value={formSpeed} onChange={(e) => setFormSpeed(e.target.value)} />
                 <p className="text-xs text-muted-foreground mt-1">Máximo recomendado: 20-30</p>
               </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">Segmento de contatos</label>
+              <select value={formSegmentId} onChange={e => setFormSegmentId(e.target.value)} className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm mt-1">
+                <option value="">Nenhum — selecionar manualmente ao executar</option>
+                {segments.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              <p className="text-xs text-muted-foreground mt-1">Se definido, os contatos do segmento são pré-selecionados automaticamente</p>
             </div>
           </div>
           <DialogFooter className="gap-2">
