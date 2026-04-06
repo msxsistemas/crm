@@ -107,7 +107,7 @@ export default async function contactRoutes(fastify) {
       }
     }
 
-    const fields = ['name','phone','email','tags','notes','birthday','custom_fields','lead_score','disable_chatbot','avatar_url'];
+    const fields = ['name','phone','email','tags','notes','birthday','custom_fields','lead_score','disable_chatbot','avatar_url','cep','street','address_number','complement','neighborhood','city','state'];
     const updates = [];
     const params = [];
     let p = 1;
@@ -148,6 +148,29 @@ export default async function contactRoutes(fastify) {
     const { rowCount } = await query('DELETE FROM contacts WHERE id = $1', [req.params.id]);
     if (!rowCount) return reply.status(404).send({ error: 'Contato não encontrado' });
     return { message: 'Contato excluído' };
+  });
+
+  // Contact stats (for recurrent badge)
+  fastify.get('/contacts/:id/stats', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query(`
+      SELECT
+        COUNT(c.id) as total_conversations,
+        COUNT(c.id) FILTER (WHERE c.status='closed') as closed_conversations,
+        MIN(c.created_at) as first_contact,
+        MAX(c.created_at) as last_contact,
+        ROUND(AVG(c.csat_score)::numeric, 2) as avg_csat,
+        COUNT(c.id) FILTER (WHERE c.created_at > NOW() - interval '30 days') as conversations_last_30d
+      FROM conversations c WHERE c.contact_id=$1
+    `, [req.params.id]);
+    return rows[0] || {};
+  });
+
+  // Block / unblock contact
+  fastify.patch('/contacts/:id/block', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { blocked, block_reason } = req.body;
+    await query('UPDATE contacts SET is_blocked=$1, block_reason=$2, blocked_at=$3 WHERE id=$4',
+      [blocked, blocked ? (block_reason || null) : null, blocked ? new Date() : null, req.params.id]);
+    return { success: true };
   });
 
   // Import WhatsApp chat history (.txt export)

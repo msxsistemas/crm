@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
-import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clock, TrendingUp, Send, ChevronDown, ChevronUp, Cake, Star, CheckSquare, Trash2, CreditCard } from "lucide-react";
+import { useNavigate, Link } from "react-router-dom";
+import { X, Phone, Hash, Calendar, User, StickyNote, History, MessageCircle, Clock, TrendingUp, Send, ChevronDown, ChevronUp, Cake, Star, CheckSquare, Trash2, CreditCard, MapPin, ShieldOff, Shield, RefreshCw, Sliders } from "lucide-react";
 import TagSelector from "@/components/shared/TagSelector";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -142,10 +142,39 @@ const ContactDetailsSidebar = ({
   const [newChecklistText, setNewChecklistText] = useState("");
   const [addingChecklist, setAddingChecklist] = useState(false);
 
+  // Contact stats (recurrent)
+  const [contactStats, setContactStats] = useState<{ total_conversations: number; first_contact: string | null; avg_csat: number | null } | null>(null);
+
+  // Block state
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [blockReason, setBlockReason] = useState<string | null>(null);
+  const [showBlockDialog, setShowBlockDialog] = useState(false);
+  const [blockReasonInput, setBlockReasonInput] = useState("");
+  const [blockLoading, setBlockLoading] = useState(false);
+
+  // Address state
+  const [addressOpen, setAddressOpen] = useState(false);
+  const [addrCep, setAddrCep] = useState("");
+  const [addrStreet, setAddrStreet] = useState("");
+  const [addrNumber, setAddrNumber] = useState("");
+  const [addrComplement, setAddrComplement] = useState("");
+  const [addrNeighborhood, setAddrNeighborhood] = useState("");
+  const [addrCity, setAddrCity] = useState("");
+  const [addrState, setAddrState] = useState("");
+  const [cepLoading, setCepLoading] = useState(false);
+  const [addrSaving, setAddrSaving] = useState(false);
+
   // Payment links
   const [paymentLinks, setPaymentLinks] = useState<{ id: string; amount: string; description: string; provider: string; status: string; created_at: string; external_url: string | null }[]>([]);
   const [paymentLinksOpen, setPaymentLinksOpen] = useState(false);
   const [paymentLinksLoaded, setPaymentLinksLoaded] = useState(false);
+
+  // Custom fields
+  type CustomFieldDef = { id: string; label: string; field_type: string; options: string[]; required: boolean; position: number; value: string | null };
+  const [customFields, setCustomFields] = useState<CustomFieldDef[]>([]);
+  const [customFieldsOpen, setCustomFieldsOpen] = useState(false);
+  const [customFieldValues, setCustomFieldValues] = useState<Record<string, string>>({});
+  const [savingCustomField, setSavingCustomField] = useState<Record<string, boolean>>({});
 
   // Co-atendentes (collaborators)
   const [collaborators, setCollaborators] = useState<{ agent_id: string; name: string | null; full_name: string | null; avatar_url: string | null }[]>([]);
@@ -199,6 +228,21 @@ const ContactDetailsSidebar = ({
       .then(data => { setPaymentLinks(data || []); setPaymentLinksLoaded(true); })
       .catch(() => setPaymentLinksLoaded(true));
   }, [paymentLinksOpen, paymentLinksLoaded, conversationId]);
+
+  // Load custom fields when contactId changes
+  useEffect(() => {
+    if (!contactId) return;
+    api.get<any[]>(`/contacts/${contactId}/custom-fields`)
+      .then(data => {
+        if (Array.isArray(data)) {
+          setCustomFields(data);
+          const vals: Record<string, string> = {};
+          data.forEach((f: any) => { if (f.value != null) vals[f.id] = f.value; });
+          setCustomFieldValues(vals);
+        }
+      })
+      .catch(() => {});
+  }, [contactId]);
 
   // Load contact versions on demand
   const loadContactVersions = useCallback(() => {
@@ -427,16 +471,31 @@ const ContactDetailsSidebar = ({
 
   useEffect(() => {
     const load = async () => {
-      // Load lead score and birthday
+      // Load lead score, birthday, block status, and address
       const { data: contactData } = await db
         .from("contacts")
-        .select("lead_score, birthday")
+        .select("lead_score, birthday, is_blocked, block_reason, cep, street, address_number, complement, neighborhood, city, state")
         .eq("id", contactId)
         .maybeSingle();
       if (contactData) {
         setLeadScore((contactData as any).lead_score ?? null);
         setBirthday((contactData as any).birthday ?? null);
+        setIsBlocked((contactData as any).is_blocked ?? false);
+        setBlockReason((contactData as any).block_reason ?? null);
+        // Load address fields
+        setAddrCep((contactData as any).cep ?? "");
+        setAddrStreet((contactData as any).street ?? "");
+        setAddrNumber((contactData as any).address_number ?? "");
+        setAddrComplement((contactData as any).complement ?? "");
+        setAddrNeighborhood((contactData as any).neighborhood ?? "");
+        setAddrCity((contactData as any).city ?? "");
+        setAddrState((contactData as any).state ?? "");
       }
+
+      // Load contact stats
+      api.get<any>(`/contacts/${contactId}/stats`)
+        .then(stats => setContactStats(stats || null))
+        .catch(() => {});
 
       // Try to find kanban card for this contact
       const { data: cards } = await db
@@ -528,6 +587,64 @@ const ContactDetailsSidebar = ({
     ? contactName.split(" ").map((n) => n[0]).join("").substring(0, 2).toUpperCase()
     : contactPhone.substring(contactPhone.length - 2);
 
+  const handleBlockContact = async (blocked: boolean, reason?: string) => {
+    setBlockLoading(true);
+    try {
+      await api.patch(`/contacts/${contactId}/block`, { blocked, block_reason: reason || null });
+      setIsBlocked(blocked);
+      setBlockReason(blocked ? (reason || null) : null);
+      setShowBlockDialog(false);
+      setBlockReasonInput("");
+    } catch {
+      // ignore
+    } finally {
+      setBlockLoading(false);
+    }
+  };
+
+  const handleCepSearch = async () => {
+    const cep = addrCep.replace(/\D/g, '');
+    if (cep.length !== 8) return;
+    setCepLoading(true);
+    try {
+      const data = await api.get<any>(`/viacep/${cep}`);
+      if (data) {
+        setAddrStreet(data.logradouro || "");
+        setAddrNeighborhood(data.bairro || "");
+        setAddrCity(data.localidade || "");
+        setAddrState(data.uf || "");
+        setAddrComplement(data.complemento || "");
+      }
+    } catch {
+      // CEP not found
+    } finally {
+      setCepLoading(false);
+    }
+  };
+
+  const handleSaveAddress = async () => {
+    setAddrSaving(true);
+    try {
+      await api.patch(`/contacts/${contactId}`, {
+        cep: addrCep || null,
+        street: addrStreet || null,
+        address_number: addrNumber || null,
+        complement: addrComplement || null,
+        neighborhood: addrNeighborhood || null,
+        city: addrCity || null,
+        state: addrState || null,
+      });
+    } catch {
+      // ignore
+    } finally {
+      setAddrSaving(false);
+    }
+  };
+
+  const formattedAddress = addrStreet && addrCity
+    ? `${addrStreet}${addrNumber ? ', ' + addrNumber : ''}${addrNeighborhood ? ' - ' + addrNeighborhood : ''}, ${addrCity}${addrState ? '/' + addrState : ''}`
+    : null;
+
   return (
     <div className="w-[320px] border-l border-border bg-card flex flex-col overflow-y-auto">
       {/* Header */}
@@ -559,6 +676,24 @@ const ContactDetailsSidebar = ({
         </div>
         <p className="text-sm font-semibold text-foreground">{contactName || contactPhone}</p>
         <p className="text-xs text-muted-foreground">{contactPhone}</p>
+        {isBlocked && (
+          <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 border border-red-200 dark:border-red-800">
+            <Shield className="h-3 w-3" /> BLOQUEADO
+          </span>
+        )}
+        {contactStats && Number(contactStats.total_conversations) > 3 && (
+          <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300 border border-yellow-200 dark:border-yellow-800">
+            ⭐ Cliente recorrente
+          </span>
+        )}
+        {contactStats && Number(contactStats.total_conversations) > 0 && (
+          <span className="mt-1 inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+            🔁 {contactStats.total_conversations} conversa(s)
+            {contactStats.first_contact && (
+              <> · cliente há {Math.floor((Date.now() - new Date(contactStats.first_contact).getTime()) / (1000 * 60 * 60 * 24))}d</>
+            )}
+          </span>
+        )}
         {leadScore != null && (() => {
           const badge = getLeadScoreBadge(leadScore);
           if (!badge) return null;
@@ -571,7 +706,65 @@ const ContactDetailsSidebar = ({
             </span>
           );
         })()}
+        {/* Block / Unblock button */}
+        <div className="mt-2 flex gap-2">
+          {isBlocked ? (
+            <button
+              type="button"
+              className="text-[10px] px-2 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50 dark:text-green-400 dark:border-green-700 dark:hover:bg-green-900/30 transition-colors"
+              onClick={() => handleBlockContact(false)}
+              disabled={blockLoading}
+            >
+              {blockLoading ? "..." : "Desbloquear"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="text-[10px] px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50 dark:text-red-400 dark:border-red-700 dark:hover:bg-red-900/30 transition-colors flex items-center gap-1"
+              onClick={() => setShowBlockDialog(true)}
+            >
+              <ShieldOff className="h-3 w-3" /> Bloquear
+            </button>
+          )}
+        </div>
+        {isBlocked && blockReason && (
+          <p className="text-[10px] text-muted-foreground mt-1 text-center px-2">Motivo: {blockReason}</p>
+        )}
       </div>
+
+      {/* Block confirmation dialog */}
+      {showBlockDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-card border border-border rounded-lg shadow-xl p-4 w-72 space-y-3">
+            <p className="text-sm font-semibold text-foreground">Bloquear contato?</p>
+            <p className="text-xs text-muted-foreground">Novas mensagens deste contato serão ignoradas silenciosamente.</p>
+            <textarea
+              className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="Motivo (opcional)"
+              rows={2}
+              value={blockReasonInput}
+              onChange={e => setBlockReasonInput(e.target.value)}
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                className="text-xs px-3 py-1.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors"
+                onClick={() => { setShowBlockDialog(false); setBlockReasonInput(""); }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={blockLoading}
+                className="text-xs px-3 py-1.5 rounded bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+                onClick={() => handleBlockContact(true, blockReasonInput)}
+              >
+                {blockLoading ? "Bloqueando..." : "Bloquear"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Details */}
       <div className="px-4 py-3 space-y-3 border-b border-border">
@@ -659,6 +852,97 @@ const ContactDetailsSidebar = ({
       {/* Tags */}
       <div className="px-4 py-3 border-b border-border">
         <TagSelector contactId={contactId} />
+      </div>
+
+      {/* Endereço */}
+      <div className="px-4 py-3 border-b border-border">
+        <button
+          className="flex items-center justify-between w-full"
+          onClick={() => setAddressOpen(v => !v)}
+        >
+          <div className="flex items-center gap-2">
+            <MapPin className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-semibold text-foreground">Endereço</span>
+            {formattedAddress && !addressOpen && (
+              <span className="text-[10px] text-muted-foreground truncate max-w-[140px]">{formattedAddress}</span>
+            )}
+          </div>
+          {addressOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </button>
+        {addressOpen && (
+          <div className="mt-3 space-y-2">
+            {/* CEP row */}
+            <div className="flex gap-2">
+              <input
+                className="flex-1 text-xs border border-border rounded px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                placeholder="CEP"
+                value={addrCep}
+                onChange={e => setAddrCep(e.target.value)}
+                maxLength={9}
+              />
+              <button
+                type="button"
+                disabled={cepLoading || addrCep.replace(/\D/g, '').length !== 8}
+                className="text-xs px-2.5 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors flex items-center gap-1"
+                onClick={handleCepSearch}
+              >
+                {cepLoading ? <RefreshCw className="h-3 w-3 animate-spin" /> : "Buscar"}
+              </button>
+            </div>
+            <input
+              className="w-full text-xs border border-border rounded px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="Rua / Logradouro"
+              value={addrStreet}
+              onChange={e => setAddrStreet(e.target.value)}
+            />
+            <div className="flex gap-2">
+              <input
+                className="w-24 text-xs border border-border rounded px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                placeholder="Número"
+                value={addrNumber}
+                onChange={e => setAddrNumber(e.target.value)}
+              />
+              <input
+                className="flex-1 text-xs border border-border rounded px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                placeholder="Complemento"
+                value={addrComplement}
+                onChange={e => setAddrComplement(e.target.value)}
+              />
+            </div>
+            <input
+              className="w-full text-xs border border-border rounded px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="Bairro"
+              value={addrNeighborhood}
+              onChange={e => setAddrNeighborhood(e.target.value)}
+            />
+            <div className="flex gap-2">
+              <input
+                className="flex-1 text-xs border border-border rounded px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                placeholder="Cidade"
+                value={addrCity}
+                onChange={e => setAddrCity(e.target.value)}
+              />
+              <input
+                className="w-14 text-xs border border-border rounded px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary uppercase"
+                placeholder="UF"
+                value={addrState}
+                onChange={e => setAddrState(e.target.value.toUpperCase())}
+                maxLength={2}
+              />
+            </div>
+            <button
+              type="button"
+              disabled={addrSaving}
+              className="w-full text-xs py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors font-medium"
+              onClick={handleSaveAddress}
+            >
+              {addrSaving ? "Salvando..." : "Salvar endereço"}
+            </button>
+            {formattedAddress && (
+              <p className="text-[10px] text-muted-foreground">{formattedAddress}</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Notes */}
@@ -1313,6 +1597,107 @@ const ContactDetailsSidebar = ({
                 )}
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Campos Personalizados */}
+      <div className="px-4 py-3 border-b border-border">
+        <button
+          className="flex items-center justify-between w-full"
+          onClick={() => setCustomFieldsOpen(v => !v)}
+        >
+          <div className="flex items-center gap-2">
+            <Sliders className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-semibold text-foreground">Campos Personalizados</span>
+          </div>
+          {customFieldsOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </button>
+        {customFieldsOpen && (
+          <div className="mt-3 space-y-3 ml-6">
+            {customFields.length === 0 ? (
+              <div className="text-center py-2">
+                <p className="text-xs text-muted-foreground">Nenhum campo configurado.</p>
+                <Link to="/configuracoes" className="text-xs text-primary hover:underline">
+                  Ir para Configurações
+                </Link>
+              </div>
+            ) : (
+              customFields.map(field => (
+                <div key={field.id} className="space-y-1">
+                  <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                    {field.label}
+                    {field.required && <span className="text-destructive">*</span>}
+                  </label>
+                  {field.field_type === 'boolean' ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={customFieldValues[field.id] === 'true'}
+                        onChange={e => setCustomFieldValues(prev => ({ ...prev, [field.id]: e.target.checked ? 'true' : 'false' }))}
+                        className="rounded border-border"
+                      />
+                      <span className="text-xs text-foreground">{customFieldValues[field.id] === 'true' ? 'Sim' : 'Não'}</span>
+                      <button
+                        type="button"
+                        disabled={savingCustomField[field.id]}
+                        onClick={async () => {
+                          setSavingCustomField(prev => ({ ...prev, [field.id]: true }));
+                          await api.post(`/contacts/${contactId}/custom-fields`, { field_id: field.id, value: customFieldValues[field.id] || 'false' }).catch(() => {});
+                          setSavingCustomField(prev => ({ ...prev, [field.id]: false }));
+                        }}
+                        className="text-[10px] px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 ml-auto"
+                      >
+                        {savingCustomField[field.id] ? "..." : "Salvar"}
+                      </button>
+                    </div>
+                  ) : field.field_type === 'select' ? (
+                    <div className="flex gap-2">
+                      <select
+                        value={customFieldValues[field.id] || ''}
+                        onChange={e => setCustomFieldValues(prev => ({ ...prev, [field.id]: e.target.value }))}
+                        className="flex-1 text-xs border border-border rounded px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      >
+                        <option value="">Selecione...</option>
+                        {(field.options || []).map((opt: string) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={savingCustomField[field.id]}
+                        onClick={async () => {
+                          setSavingCustomField(prev => ({ ...prev, [field.id]: true }));
+                          await api.post(`/contacts/${contactId}/custom-fields`, { field_id: field.id, value: customFieldValues[field.id] || '' }).catch(() => {});
+                          setSavingCustomField(prev => ({ ...prev, [field.id]: false }));
+                        }}
+                        className="text-[10px] px-2 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                      >
+                        {savingCustomField[field.id] ? "..." : "Salvar"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input
+                        type={field.field_type === 'number' ? 'number' : field.field_type === 'date' ? 'date' : 'text'}
+                        value={customFieldValues[field.id] || ''}
+                        onChange={e => setCustomFieldValues(prev => ({ ...prev, [field.id]: e.target.value }))}
+                        onBlur={async () => {
+                          setSavingCustomField(prev => ({ ...prev, [field.id]: true }));
+                          await api.post(`/contacts/${contactId}/custom-fields`, { field_id: field.id, value: customFieldValues[field.id] || '' }).catch(() => {});
+                          setSavingCustomField(prev => ({ ...prev, [field.id]: false }));
+                        }}
+                        className="flex-1 text-xs border border-border rounded px-2 py-1.5 bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                        placeholder={`${field.label}...`}
+                      />
+                      {savingCustomField[field.id] && (
+                        <span className="text-[10px] text-muted-foreground self-center">Salvando...</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         )}
       </div>

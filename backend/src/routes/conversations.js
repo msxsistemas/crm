@@ -84,9 +84,11 @@ export default async function conversationRoutes(fastify) {
         c.connection_name as instance_name,
         ct.name as contact_name, ct.phone as contact_phone, ct.tags as contact_tags,
         ct.avatar_url as contact_avatar_url,
-        jsonb_build_object('id', ct.id, 'name', ct.name, 'phone', ct.phone, 'tags', ct.tags, 'avatar_url', ct.avatar_url) as contacts,
+        ct.is_blocked as contact_is_blocked,
+        jsonb_build_object('id', ct.id, 'name', ct.name, 'phone', ct.phone, 'tags', ct.tags, 'avatar_url', ct.avatar_url, 'is_blocked', ct.is_blocked) as contacts,
         p.name as assigned_to_name, p.avatar_url as assigned_to_avatar,
-        (SELECT content FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) as last_message_body
+        (SELECT content FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) as last_message_body,
+        (SELECT COUNT(*) FROM conversations c2 WHERE c2.contact_id = c.contact_id) as contact_conv_count
       FROM conversations c
       LEFT JOIN contacts ct ON ct.id = c.contact_id
       LEFT JOIN profiles p ON p.id = c.assigned_to

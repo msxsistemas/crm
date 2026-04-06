@@ -337,6 +337,13 @@ async function handleEvolutionWebhook(payload, fastify) {
         await client.query('UPDATE contacts SET avatar_url=$1 WHERE id=$2', [data.profilePicUrl, contact.id]);
       }
 
+      // Check if contact is blocked
+      if (contact.is_blocked) {
+        await client.query('ROLLBACK');
+        client.release();
+        return reply.status(200).send({ blocked: true });
+      }
+
       let { rows: convs } = await client.query(
         "SELECT * FROM conversations WHERE contact_id = $1 AND connection_name = $2 AND status != 'closed' ORDER BY created_at DESC LIMIT 1",
         [contact.id, instance]
