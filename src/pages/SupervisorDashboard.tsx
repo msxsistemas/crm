@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Users,
   MessageSquare,
@@ -8,6 +8,8 @@ import {
   UserCheck,
   Eye,
   ChevronDown,
+  ChevronUp,
+  Filter,
 } from "lucide-react";
 import { isAgentInShift, type AgentSchedule } from "@/pages/AgentSchedules";
 import { Button } from "@/components/ui/button";
@@ -24,6 +26,7 @@ import { db } from "@/lib/db";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import api from "@/lib/api";
 
 // ---- Types ----
 interface Profile {
@@ -55,6 +58,34 @@ interface AgentCardData {
   avgMinutes: number;
   resolvedToday: number;
 }
+
+interface LiveAgent {
+  id: string;
+  full_name: string | null;
+  status: string;
+  avatar_url: string | null;
+  open_count: number;
+  assigned_count: number;
+  last_message_at: string | null;
+  waiting_reply: number;
+}
+
+interface LiveAlert {
+  id: string;
+  contact_name: string | null;
+  assigned_to: string | null;
+  agent_name: string | null;
+  minutes_waiting: number;
+  priority: string | null;
+}
+
+interface LiveData {
+  agents: LiveAgent[];
+  alerts: LiveAlert[];
+  queue: { unassigned: number };
+}
+
+const MAX_CONVERSATIONS = 10; // max capacity per agent
 
 // ---- Helpers ----
 const getInitials = (name: string | null) => {
@@ -94,21 +125,51 @@ const SLABadge = ({ minutes }: { minutes: number }) => {
   );
 };
 
+// ---- Capacity Bar ----
+const CapacityBar = ({ current, max }: { current: number; max: number }) => {
+  const pct = max > 0 ? Math.min((current / max) * 100, 100) : 0;
+  const color =
+    pct < 50 ? "bg-green-500" : pct < 80 ? "bg-yellow-400" : "bg-red-500";
+  return (
+    <div className="mt-1">
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-0.5">
+        <span>Capacidade</span>
+        <span className="font-semibold">
+          {current}/{max}
+        </span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+        <div
+          className={cn("h-full rounded-full transition-all", color)}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+};
+
 // ---- Stat Card ----
 const StatCard = ({
   icon: Icon,
   label,
   value,
   color,
+  badge,
 }: {
   icon: React.ElementType;
   label: string;
   value: number | string;
   color: string;
+  badge?: number;
 }) => (
   <Card className="flex items-center gap-4 p-4">
-    <div className={cn("rounded-lg p-2.5", color)}>
+    <div className={cn("rounded-lg p-2.5 relative", color)}>
       <Icon className="h-5 w-5 text-white" />
+      {badge !== undefined && badge > 0 && (
+        <span className="absolute -top-1.5 -right-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-bold text-white">
+          {badge}
+        </span>
+      )}
     </div>
     <div>
       <p className="text-2xl font-bold leading-none">{value}</p>
@@ -162,11 +223,13 @@ const AgentCard = ({
   schedule,
   onIntervene,
   onSpy,
+  typingAgentIds,
 }: {
   data: AgentCardData;
   schedule?: AgentSchedule;
   onIntervene: (convId: string) => void;
   onSpy: (conv: Conversation) => void;
+  typingAgentIds: Set<string>;
 }) => {
   const { profile, conversations, avgMinutes, resolvedToday } = data;
   const name = profile.full_name || "Agente";
@@ -175,6 +238,7 @@ const AgentCard = ({
   const inShift = schedule ? isAgentInShift(schedule) : null;
   const shown = conversations.slice(0, 3);
   const extra = conversations.length - 3;
+  const isTyping = typingAgentIds.has(profile.id);
 
   return (
     <Card className="p-4 flex flex-col gap-3">
@@ -192,7 +256,17 @@ const AgentCard = ({
           />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-sm truncate">{name}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="font-semibold text-sm truncate">{name}</p>
+            {isTyping && (
+              <span className="inline-flex items-center gap-0.5 text-[9px] text-blue-500 font-medium animate-pulse">
+                <span className="h-1 w-1 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="h-1 w-1 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="h-1 w-1 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                digitando
+              </span>
+            )}
+          </div>
           <p className="text-xs text-muted-foreground capitalize">
             {isOnline ? "Online" : "Ausente"}
           </p>
@@ -211,6 +285,9 @@ const AgentCard = ({
           )}
         </div>
       </div>
+
+      {/* Capacity Bar */}
+      <CapacityBar current={conversations.length} max={MAX_CONVERSATIONS} />
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-1 text-center">
@@ -286,6 +363,81 @@ const AgentCard = ({
           </button>
         )}
       </div>
+    </Card>
+  );
+};
+
+// ---- Alerts Panel ----
+const AlertsPanel = ({
+  alerts,
+  onAssume,
+  expanded,
+  onToggle,
+}: {
+  alerts: LiveAlert[];
+  onAssume: (convId: string) => void;
+  expanded: boolean;
+  onToggle: () => void;
+}) => {
+  if (alerts.length === 0) return null;
+
+  const getPriorityBadge = (priority: string | null) => {
+    if (priority === 'urgent') return <span className="rounded-full bg-red-600 px-1.5 py-0.5 text-[9px] font-bold text-white uppercase">urgente</span>;
+    if (priority === 'high') return <span className="rounded-full bg-orange-500 px-1.5 py-0.5 text-[9px] font-bold text-white uppercase">alta</span>;
+    return null;
+  };
+
+  return (
+    <Card className="border-red-200 bg-red-50/50 dark:border-red-900 dark:bg-red-950/20">
+      <button
+        className="w-full flex items-center justify-between p-3 text-left"
+        onClick={onToggle}
+      >
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />
+          <span className="text-sm font-semibold text-red-700 dark:text-red-400">
+            Sem resposta há +15 min
+          </span>
+          <span className="inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-red-600 px-1.5 text-[10px] font-bold text-white">
+            {alerts.length}
+          </span>
+        </div>
+        {expanded ? <ChevronUp className="h-4 w-4 text-red-500" /> : <ChevronDown className="h-4 w-4 text-red-500" />}
+      </button>
+
+      {expanded && (
+        <div className="px-3 pb-3 space-y-2 max-h-64 overflow-y-auto">
+          {alerts.map((alert) => (
+            <div
+              key={alert.id}
+              className="rounded border border-red-200 bg-white dark:bg-red-950/30 dark:border-red-900 p-2 text-xs"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-semibold truncate">{alert.contact_name || "Sem nome"}</span>
+                    {getPriorityBadge(alert.priority)}
+                  </div>
+                  <p className="text-muted-foreground mt-0.5">
+                    {alert.agent_name ? `Agente: ${alert.agent_name}` : "Sem agente"}
+                  </p>
+                  <p className="text-red-600 dark:text-red-400 font-medium mt-0.5">
+                    Aguardando {Math.floor(alert.minutes_waiting)}min
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="h-6 px-2 text-[10px] shrink-0"
+                  onClick={() => onAssume(alert.id)}
+                >
+                  Assumir
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </Card>
   );
 };
@@ -386,6 +538,21 @@ const SupervisorDashboard = () => {
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [spyConv, setSpyConv] = useState<Conversation | null>(null);
   const [agentSchedules, setAgentSchedules] = useState<Record<string, AgentSchedule>>({});
+  const [liveData, setLiveData] = useState<LiveData | null>(null);
+  const [alertsExpanded, setAlertsExpanded] = useState(true);
+  const [typingAgentIds, setTypingAgentIds] = useState<Set<string>>(new Set());
+  const [filterTeam, setFilterTeam] = useState("all");
+  const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+  const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const fetchLiveData = useCallback(async () => {
+    try {
+      const data = await api.get<LiveData>('/stats/supervisor-live');
+      if (data) setLiveData(data);
+    } catch (e) {
+      // silently fall back to legacy data
+    }
+  }, []);
 
   const fetchData = useCallback(async () => {
     try {
@@ -393,7 +560,7 @@ const SupervisorDashboard = () => {
         db
           .from("profiles")
           .select("id, full_name, avatar_url, role, status")
-          .in("role", ["agent", "admin"]),
+          .in("role", ["agent", "admin", "supervisor"]),
         db
           .from("conversations")
           .select(
@@ -438,9 +605,20 @@ const SupervisorDashboard = () => {
     }
   }, []);
 
+  // Load teams for filter
+  useEffect(() => {
+    db.from("teams" as any).select("id, name").order("name").then(({ data }) => {
+      if (data) setTeams(data as { id: string; name: string }[]);
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30000);
+    fetchLiveData();
+    const interval = setInterval(() => {
+      fetchData();
+      fetchLiveData();
+    }, 15000);
 
     const channel = db
       .channel("supervisor-conversations")
@@ -449,6 +627,7 @@ const SupervisorDashboard = () => {
         { event: "*", schema: "public", table: "conversations" },
         () => {
           fetchData();
+          fetchLiveData();
         }
       )
       .subscribe();
@@ -457,7 +636,33 @@ const SupervisorDashboard = () => {
       clearInterval(interval);
       db.removeChannel(channel);
     };
-  }, [fetchData]);
+  }, [fetchData, fetchLiveData]);
+
+  // Listen for agent typing events via socket
+  useEffect(() => {
+    // Try to get socket from window if available
+    const socket = (window as any).__socket;
+    if (!socket) return;
+
+    const handler = (data: { agent_id: string }) => {
+      const { agent_id } = data;
+      setTypingAgentIds(prev => new Set([...prev, agent_id]));
+      // Clear after 3s
+      if (typingTimers.current[agent_id]) clearTimeout(typingTimers.current[agent_id]);
+      typingTimers.current[agent_id] = setTimeout(() => {
+        setTypingAgentIds(prev => {
+          const next = new Set(prev);
+          next.delete(agent_id);
+          return next;
+        });
+      }, 3000);
+    };
+
+    socket.on('agent:typing', handler);
+    return () => {
+      socket.off('agent:typing', handler);
+    };
+  }, []);
 
   const handleIntervene = async (conversationId: string) => {
     if (!user) return;
@@ -471,7 +676,6 @@ const SupervisorDashboard = () => {
       return;
     }
 
-    // Insert activity log
     await db.from("activity_logs").insert({
       action: "supervisor_intervene",
       entity_type: "conversation",
@@ -482,6 +686,7 @@ const SupervisorDashboard = () => {
 
     toast.success("Conversa atribuída para você");
     fetchData();
+    fetchLiveData();
   };
 
   const handleAssignMe = async (conversationId: string) => {
@@ -500,6 +705,23 @@ const SupervisorDashboard = () => {
     }
     toast.success("Conversa atribuída ao agente");
     fetchData();
+    fetchLiveData();
+  };
+
+  const handleAssumeAlert = async (conversationId: string) => {
+    if (!user) return;
+    const { error } = await db
+      .from("conversations")
+      .update({ assigned_to: user.id })
+      .eq("id", conversationId);
+
+    if (error) {
+      toast.error("Erro ao assumir conversa");
+      return;
+    }
+    toast.success("Conversa assumida!");
+    fetchData();
+    fetchLiveData();
   };
 
   // Build agent card data
@@ -516,7 +738,7 @@ const SupervisorDashboard = () => {
       profile,
       conversations: convos,
       avgMinutes,
-      resolvedToday: 0, // Would need a separate query for resolved today
+      resolvedToday: 0,
     };
   });
 
@@ -526,6 +748,7 @@ const SupervisorDashboard = () => {
   const slaAtRisk = activeConvos.filter(
     (c) => minutesSince(c.created_at) >= 45
   ).length;
+  const alertCount = liveData?.alerts?.length || 0;
 
   const formatTime = (d: Date) =>
     d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -542,19 +765,35 @@ const SupervisorDashboard = () => {
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500" />
             </span>
             <span className="text-xs text-muted-foreground">
-              Atualizado às {formatTime(lastUpdated)}
+              Ao vivo · Atualizado às {formatTime(lastUpdated)}
             </span>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={fetchData}
-          disabled={loading}
-        >
-          <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
-          Atualizar
-        </Button>
+        <div className="flex items-center gap-2">
+          {teams.length > 0 && (
+            <Select value={filterTeam} onValueChange={setFilterTeam}>
+              <SelectTrigger className="h-8 text-xs w-40">
+                <Filter className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
+                <SelectValue placeholder="Filtrar por equipe" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas as equipes</SelectItem>
+                {teams.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { fetchData(); fetchLiveData(); }}
+            disabled={loading}
+          >
+            <RefreshCw className={cn("h-4 w-4 mr-2", loading && "animate-spin")} />
+            Atualizar
+          </Button>
+        </div>
       </div>
 
       {/* Stats bar */}
@@ -582,8 +821,19 @@ const SupervisorDashboard = () => {
           label="SLA em Risco"
           value={slaAtRisk}
           color="bg-red-500"
+          badge={alertCount}
         />
       </div>
+
+      {/* Alerts panel */}
+      {liveData && liveData.alerts.length > 0 && (
+        <AlertsPanel
+          alerts={liveData.alerts}
+          onAssume={handleAssumeAlert}
+          expanded={alertsExpanded}
+          onToggle={() => setAlertsExpanded(!alertsExpanded)}
+        />
+      )}
 
       {/* Main content */}
       <div className="flex gap-4 flex-1 min-h-0">
@@ -606,6 +856,7 @@ const SupervisorDashboard = () => {
                   schedule={agentSchedules[data.profile.id]}
                   onIntervene={handleIntervene}
                   onSpy={setSpyConv}
+                  typingAgentIds={typingAgentIds}
                 />
               ))}
             </div>

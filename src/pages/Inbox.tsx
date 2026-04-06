@@ -347,6 +347,13 @@ const Inbox = () => {
   const [filterLabel, setFilterLabel] = useState("");
   const [labelPopoverOpen, setLabelPopoverOpen] = useState(false);
   const [historyPopoverOpen, setHistoryPopoverOpen] = useState(false);
+
+  // Free conversation tags state
+  const [convFreeTags, setConvFreeTags] = useState<string[]>([]);
+  const [freeTagsPopoverOpen, setFreeTagsPopoverOpen] = useState(false);
+  const [freeTagInput, setFreeTagInput] = useState("");
+  const [allFreeTags, setAllFreeTags] = useState<{ tag: string; count: number }[]>([]);
+  const freeTagInputRef = useRef<HTMLInputElement>(null);
   const [transferHistory, setTransferHistory] = useState<ConversationTransfer[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -931,6 +938,13 @@ const Inbox = () => {
     });
   }, []);
 
+  // Load all free tags for autocomplete (cached)
+  useEffect(() => {
+    api.get<{ tag: string; count: number }[]>('/conversations/tags/all')
+      .then(data => { if (data) setAllFreeTags(data); })
+      .catch(() => {});
+  }, []);
+
   // Load filter options (departments, connections, tags, agents, contact_tags)
   useEffect(() => {
     if (!user) return;
@@ -1278,6 +1292,10 @@ const Inbox = () => {
         if (data) setPinnedMessages(prev => ({ ...prev, [convo.pinned_message_id!]: data as unknown as DBMessage }));
       }).catch(() => {});
     }
+    // Load free tags for this conversation
+    api.get<string[]>(`/conversations/${id}/tags`).then(data => {
+      setConvFreeTags(data || []);
+    }).catch(() => { setConvFreeTags([]); });
   };
 
 
@@ -2198,6 +2216,33 @@ const Inbox = () => {
       : [...current, labelId];
     await (db.from("conversations") as any).update({ label_ids: next }).eq("id", selectedConvo.id);
     setConversations(prev => prev.map(c => c.id === selectedConvo.id ? { ...c, label_ids: next } : c));
+  };
+
+  // Handle free tag add
+  const handleAddFreeTag = async (tag: string) => {
+    if (!selectedConvo || !tag.trim()) return;
+    const normalized = tag.trim().toLowerCase();
+    if (convFreeTags.includes(normalized)) return;
+    try {
+      await api.post(`/conversations/${selectedConvo.id}/tags`, { tag: normalized });
+      setConvFreeTags(prev => [...prev, normalized]);
+      // Update allFreeTags cache
+      setAllFreeTags(prev => {
+        const existing = prev.find(t => t.tag === normalized);
+        if (existing) return prev.map(t => t.tag === normalized ? { ...t, count: t.count + 1 } : t);
+        return [{ tag: normalized, count: 1 }, ...prev];
+      });
+      setFreeTagInput("");
+    } catch { toast.error("Erro ao adicionar tag"); }
+  };
+
+  // Handle free tag remove
+  const handleRemoveFreeTag = async (tag: string) => {
+    if (!selectedConvo) return;
+    try {
+      await api.delete(`/conversations/${selectedConvo.id}/tags/${encodeURIComponent(tag)}`);
+      setConvFreeTags(prev => prev.filter(t => t !== tag));
+    } catch { toast.error("Erro ao remover tag"); }
   };
 
   const handleBlockNumber = async () => {
@@ -3344,6 +3389,22 @@ const Inbox = () => {
                         </div>
                       );
                     })()}
+                    {/* Free tags chips */}
+                    {convo.id === selected && convFreeTags.length > 0 && (
+                      <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                        {convFreeTags.slice(0, 3).map(tag => (
+                          <span
+                            key={tag}
+                            className="inline-flex items-center rounded-full bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 px-1.5 py-0.5 text-[9px] font-semibold"
+                          >
+                            #{tag}
+                          </span>
+                        ))}
+                        {convFreeTags.length > 3 && (
+                          <span className="text-[9px] text-muted-foreground font-semibold">+{convFreeTags.length - 3}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-col gap-1 shrink-0 ml-2 items-end self-start">
                     <span className="text-[11px] text-muted-foreground">
@@ -3694,6 +3755,70 @@ const Inbox = () => {
                             );
                           })}
                         </div>
+                      </PopoverContent>
+                    </Popover>
+                    {/* Free tags popover */}
+                    <Popover open={freeTagsPopoverOpen} onOpenChange={(open) => {
+                      setFreeTagsPopoverOpen(open);
+                      if (open) setTimeout(() => freeTagInputRef.current?.focus(), 50);
+                    }}>
+                      <PopoverTrigger asChild>
+                        <Button variant="ghost" size="sm" className="gap-1.5 h-8 rounded-full px-3 text-xs text-muted-foreground hover:text-foreground">
+                          <Tag className="h-3.5 w-3.5" />
+                          Tags{convFreeTags.length > 0 ? ` (${convFreeTags.length})` : ''}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-72 p-3" align="start">
+                        <p className="text-xs font-semibold text-foreground mb-2">Tags livres da conversa</p>
+                        {/* Existing tags */}
+                        {convFreeTags.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mb-2">
+                            {convFreeTags.map(tag => (
+                              <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-2 py-0.5 text-[10px] font-semibold">
+                                #{tag}
+                                <button
+                                  onClick={() => handleRemoveFreeTag(tag)}
+                                  className="ml-0.5 hover:text-red-500 transition-colors"
+                                >
+                                  <X className="h-2.5 w-2.5" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {/* Input */}
+                        <input
+                          ref={freeTagInputRef}
+                          value={freeTagInput}
+                          onChange={e => setFreeTagInput(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && freeTagInput.trim()) {
+                              e.preventDefault();
+                              handleAddFreeTag(freeTagInput);
+                            }
+                          }}
+                          placeholder="Nova tag (Enter para adicionar)"
+                          className="w-full rounded border border-border bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                        {/* Autocomplete suggestions */}
+                        {freeTagInput.trim().length > 0 && (
+                          <div className="mt-1 space-y-0.5 max-h-32 overflow-y-auto">
+                            {allFreeTags
+                              .filter(t => t.tag.includes(freeTagInput.trim().toLowerCase()) && !convFreeTags.includes(t.tag))
+                              .slice(0, 8)
+                              .map(t => (
+                                <button
+                                  key={t.tag}
+                                  onClick={() => handleAddFreeTag(t.tag)}
+                                  className="w-full text-left rounded px-2 py-1 text-[11px] hover:bg-muted transition-colors flex items-center justify-between"
+                                >
+                                  <span className="text-purple-600 dark:text-purple-400 font-medium">#{t.tag}</span>
+                                  <span className="text-muted-foreground text-[10px]">{t.count}×</span>
+                                </button>
+                              ))}
+                          </div>
+                        )}
+                        <p className="text-[10px] text-muted-foreground mt-2">Pressione Enter ou clique na sugestão</p>
                       </PopoverContent>
                     </Popover>
                     <Button variant="ghost" size="sm" className="gap-1.5 h-8 rounded-full px-3 text-xs text-orange-500 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950/20" onClick={() => setShowFollowupDialog(true)}>

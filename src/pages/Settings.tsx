@@ -4971,6 +4971,299 @@ const SlaCategoryTab = () => {
   );
 };
 
+// ─── Integrações Tab (n8n / Zapier / Make) ─────────────────────────────────
+const INTEGRATION_EVENTS = [
+  { value: 'conversation.created', label: 'Nova conversa criada' },
+  { value: 'conversation.closed', label: 'Conversa encerrada' },
+  { value: 'conversation.status_changed', label: 'Status da conversa alterado' },
+  { value: 'message.received', label: 'Mensagem recebida' },
+  { value: 'contact.created', label: 'Novo contato criado' },
+];
+
+interface Integration {
+  id: string;
+  name: string;
+  webhook_url: string;
+  events: string[];
+  secret_token?: string | null;
+  platform: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+const PLATFORM_LABELS: Record<string, string> = {
+  n8n: 'n8n',
+  zapier: 'Zapier',
+  make: 'Make (Integromat)',
+  generic: 'Genérico',
+};
+
+const IntegrationPlatformIcon = ({ platform }: { platform: string }) => {
+  const icons: Record<string, string> = {
+    n8n: '🔄',
+    zapier: '⚡',
+    make: '🔧',
+    generic: '🌐',
+  };
+  return <span>{icons[platform] || '🌐'}</span>;
+};
+
+const IntegracaoTab = () => {
+  const { user } = useAuth();
+  const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testingId, setTestingId] = useState<string | null>(null);
+
+  const [formName, setFormName] = useState('');
+  const [formPlatform, setFormPlatform] = useState('generic');
+  const [formUrl, setFormUrl] = useState('');
+  const [formEvents, setFormEvents] = useState<string[]>([]);
+  const [formSecret, setFormSecret] = useState('');
+
+  const fetchIntegrations = useCallback(async () => {
+    try {
+      const data = await api.get<Integration[]>('/integrations');
+      setIntegrations(data || []);
+    } catch {}
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchIntegrations(); }, [fetchIntegrations]);
+
+  const openCreate = () => {
+    setFormName(''); setFormPlatform('generic'); setFormUrl(''); setFormEvents([]); setFormSecret('');
+    setDialogOpen(true);
+  };
+
+  const handleSave = async () => {
+    if (!formName.trim() || !formUrl.trim()) { toast.error('Nome e URL são obrigatórios'); return; }
+    setSaving(true);
+    try {
+      await api.post('/integrations', {
+        name: formName, webhook_url: formUrl, events: formEvents,
+        secret_token: formSecret || null, platform: formPlatform,
+      });
+      toast.success('Integração criada!');
+      setDialogOpen(false);
+      fetchIntegrations();
+    } catch { toast.error('Erro ao criar integração'); }
+    setSaving(false);
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await api.delete(`/integrations/${id}`);
+      toast.success('Integração excluída!');
+      fetchIntegrations();
+    } catch { toast.error('Erro ao excluir'); }
+  };
+
+  const handleToggleActive = async (id: string, current: boolean) => {
+    try {
+      await api.patch(`/integrations/${id}`, { is_active: !current });
+      setIntegrations(prev => prev.map(i => i.id === id ? { ...i, is_active: !current } : i));
+    } catch { toast.error('Erro ao atualizar'); }
+  };
+
+  const handleTest = async (integration: Integration) => {
+    setTestingId(integration.id);
+    try {
+      const res = await api.post<{ ok: boolean; status: number }>('/integrations/test-webhook', {
+        url: integration.webhook_url,
+        event_type: 'conversation.updated',
+      });
+      if (res?.ok) {
+        toast.success(`Teste OK (HTTP ${res.status})`);
+      } else {
+        toast.error(`Teste retornou HTTP ${res?.status}`);
+      }
+    } catch { toast.error('Erro ao testar integração'); }
+    setTestingId(null);
+  };
+
+  const toggleEvent = (ev: string) => {
+    setFormEvents(prev => prev.includes(ev) ? prev.filter(e => e !== ev) : [...prev, ev]);
+  };
+
+  const platformGuide: Record<string, string> = {
+    n8n: 'Configure um "Webhook" node no n8n e cole a URL acima. O trigger será o campo "event" no body JSON.',
+    zapier: 'Use um "Webhooks by Zapier" trigger (Catch Hook) e cole a URL acima.',
+    make: 'Use o módulo "Webhooks > Custom webhook" no Make e cole a URL acima.',
+    generic: 'Qualquer ferramenta que receba requisições HTTP POST JSON.',
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Intro */}
+      <Card className="p-4">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="h-10 w-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-xl">🔗</div>
+          <div>
+            <div className="font-semibold">Integrações via Webhook</div>
+            <div className="text-sm text-muted-foreground">Conecte o CRM ao n8n, Zapier, Make ou qualquer ferramenta que aceite webhooks</div>
+          </div>
+        </div>
+        <div className="flex gap-4 text-2xl">
+          <span title="n8n">🔄</span>
+          <span title="Zapier">⚡</span>
+          <span title="Make">🔧</span>
+          <span title="Genérico">🌐</span>
+        </div>
+      </Card>
+
+      {/* Integration list */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold">Integrações Configuradas</h3>
+          {['admin', 'supervisor'].includes(user?.role || '') && (
+            <Button size="sm" onClick={openCreate} className="gap-1.5">
+              <Plus className="h-4 w-4" /> Nova Integração
+            </Button>
+          )}
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Carregando...
+          </div>
+        ) : integrations.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground text-sm">Nenhuma integração configurada</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-xs text-muted-foreground">
+                  <th className="text-left py-2 pr-3">Nome</th>
+                  <th className="text-left py-2 pr-3">Plataforma</th>
+                  <th className="text-left py-2 pr-3">URL</th>
+                  <th className="text-left py-2 pr-3">Eventos</th>
+                  <th className="text-center py-2 pr-3">Ativo</th>
+                  <th className="text-right py-2">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {integrations.map(int => (
+                  <tr key={int.id} className="border-b last:border-0 hover:bg-muted/30">
+                    <td className="py-2 pr-3 font-medium">{int.name}</td>
+                    <td className="py-2 pr-3">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs">
+                        <IntegrationPlatformIcon platform={int.platform} />
+                        {PLATFORM_LABELS[int.platform] || int.platform}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3 max-w-[180px]">
+                      <span className="text-xs text-muted-foreground truncate block" title={int.webhook_url}>{int.webhook_url}</span>
+                    </td>
+                    <td className="py-2 pr-3">
+                      <span className="text-xs text-muted-foreground">
+                        {int.events?.length ? int.events.length + ' evento(s)' : 'Todos'}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3 text-center">
+                      <Switch
+                        checked={int.is_active}
+                        onCheckedChange={() => handleToggleActive(int.id, int.is_active)}
+                      />
+                    </td>
+                    <td className="py-2 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => handleTest(int)}
+                          disabled={testingId === int.id}
+                        >
+                          {testingId === int.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Testar'}
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          onClick={() => handleDelete(int.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {/* Create dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Nova Integração</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="text-sm font-medium block mb-1">Nome *</label>
+              <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ex: n8n Produção" />
+            </div>
+            <div>
+              <label className="text-sm font-medium block mb-1">Plataforma</label>
+              <Select value={formPlatform} onValueChange={setFormPlatform}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(PLATFORM_LABELS).map(([val, label]) => (
+                    <SelectItem key={val} value={val}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium block mb-1">Webhook URL *</label>
+              <Input value={formUrl} onChange={e => setFormUrl(e.target.value)} placeholder="https://..." />
+              {formPlatform && platformGuide[formPlatform] && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  💡 {platformGuide[formPlatform]}
+                </p>
+              )}
+            </div>
+            <div>
+              <label className="text-sm font-medium block mb-2">Eventos (deixe vazio para todos)</label>
+              <div className="space-y-2">
+                {INTEGRATION_EVENTS.map(ev => (
+                  <label key={ev.value} className="flex items-center gap-2 cursor-pointer">
+                    <Checkbox
+                      checked={formEvents.includes(ev.value)}
+                      onCheckedChange={() => toggleEvent(ev.value)}
+                    />
+                    <span className="text-sm">{ev.label}</span>
+                    <span className="text-xs text-muted-foreground">({ev.value})</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-medium block mb-1">Token secreto (opcional)</label>
+              <Input
+                value={formSecret}
+                onChange={e => setFormSecret(e.target.value)}
+                placeholder="Enviado no header X-Webhook-Secret"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Criar Integração
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("geral");
 
@@ -5012,6 +5305,7 @@ const Settings = () => {
             <TabsTrigger value="turnos" className="gap-1.5"><Clock className="h-3.5 w-3.5" /> Turnos</TabsTrigger>
             <TabsTrigger value="fila_espera" className="gap-1.5"><Clock className="h-3.5 w-3.5" /> Fila de Espera</TabsTrigger>
             <TabsTrigger value="sla_categoria" className="gap-1.5"><Clock className="h-3.5 w-3.5" /> SLA por Categoria</TabsTrigger>
+            <TabsTrigger value="integracoes" className="gap-1.5"><Globe className="h-3.5 w-3.5" /> Integrações</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -5043,6 +5337,7 @@ const Settings = () => {
           <TabsContent value="turnos"><TurnosTab /></TabsContent>
           <TabsContent value="fila_espera"><QueueMessageTab /></TabsContent>
           <TabsContent value="sla_categoria"><SlaCategoryTab /></TabsContent>
+          <TabsContent value="integracoes"><IntegracaoTab /></TabsContent>
         </Tabs>
       </div>
     </div>
