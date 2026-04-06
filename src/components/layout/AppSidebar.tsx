@@ -79,6 +79,7 @@ import {
   FormInput,
   MessageSquarePlus,
   Timer,
+  Shield,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -209,6 +210,7 @@ const userNavSections: NavSection[] = [
       { to: "/relatorios-agendados", icon: Mail, label: "Relatórios Agendados" },
       { to: "/configuracoes", icon: Settings, label: "Configurações" },
       { to: "/assinatura", icon: CreditCard, label: "Minha Assinatura" },
+      { to: "/painel-admin", icon: Shield, label: "Painel Admin", adminOnly: true },
     ],
   },
 ];

@@ -3972,6 +3972,249 @@ const RotamentoTab = () => {
   );
 };
 
+// ─── Custom Fields Tab ───
+interface CustomFieldDef {
+  id: string;
+  label: string;
+  field_type: string;
+  options: string[];
+  required: boolean;
+  position: number;
+}
+
+const FIELD_TYPES = [
+  { value: 'text', label: 'Texto' },
+  { value: 'number', label: 'Número' },
+  { value: 'date', label: 'Data' },
+  { value: 'select', label: 'Seleção' },
+  { value: 'boolean', label: 'Checkbox' },
+];
+
+const CustomFieldsTab = () => {
+  const [fields, setFields] = useState<CustomFieldDef[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingField, setEditingField] = useState<CustomFieldDef | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  // Form state
+  const [formLabel, setFormLabel] = useState("");
+  const [formType, setFormType] = useState("text");
+  const [formRequired, setFormRequired] = useState(false);
+  const [formOptions, setFormOptions] = useState<string[]>([]);
+  const [newOption, setNewOption] = useState("");
+
+  const fetchFields = useCallback(async () => {
+    try {
+      const data = await api.get<CustomFieldDef[]>('/custom-fields');
+      setFields(data || []);
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetchFields(); }, [fetchFields]);
+
+  const openCreate = () => {
+    setEditingField(null);
+    setFormLabel(""); setFormType("text"); setFormRequired(false); setFormOptions([]); setNewOption("");
+    setDialogOpen(true);
+  };
+
+  const openEdit = (f: CustomFieldDef) => {
+    setEditingField(f);
+    setFormLabel(f.label); setFormType(f.field_type); setFormRequired(f.required);
+    setFormOptions(Array.isArray(f.options) ? f.options : []); setNewOption("");
+    setDialogOpen(true);
+  };
+
+  const handleSave = async () => {
+    if (!formLabel.trim()) { toast.error("Informe o nome do campo"); return; }
+    setSaving(true);
+    try {
+      const payload = { label: formLabel.trim(), field_type: formType, required: formRequired, options: formOptions };
+      if (editingField) {
+        await api.patch(`/custom-fields/${editingField.id}`, payload);
+        toast.success("Campo atualizado!");
+      } else {
+        await api.post('/custom-fields', payload);
+        toast.success("Campo criado!");
+      }
+      setDialogOpen(false);
+      fetchFields();
+    } catch { toast.error("Erro ao salvar campo"); }
+    setSaving(false);
+  };
+
+  const handleDelete = async (id: string) => {
+    setDeleting(id);
+    try {
+      await api.delete(`/custom-fields/${id}`);
+      toast.success("Campo excluído!");
+      fetchFields();
+    } catch { toast.error("Erro ao excluir campo"); }
+    setDeleting(null);
+  };
+
+  const moveField = async (field: CustomFieldDef, direction: 'up' | 'down') => {
+    const idx = fields.findIndex(f => f.id === field.id);
+    const newIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (newIdx < 0 || newIdx >= fields.length) return;
+    const newFields = [...fields];
+    [newFields[idx], newFields[newIdx]] = [newFields[newIdx], newFields[idx]];
+    setFields(newFields);
+    // Save new positions
+    await api.patch(`/custom-fields/${field.id}`, { position: newIdx }).catch(() => {});
+    await api.patch(`/custom-fields/${newFields[idx].id}`, { position: idx }).catch(() => {});
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-foreground">Campos Personalizados</h3>
+          <p className="text-sm text-muted-foreground">Adicione campos extras ao perfil dos contatos</p>
+        </div>
+        <Button variant="action" className="gap-2" onClick={openCreate}>
+          <Plus className="h-4 w-4" /> Novo Campo
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+      ) : fields.length === 0 ? (
+        <div className="flex flex-col items-center py-12 text-center">
+          <p className="font-medium text-foreground">Nenhum campo criado</p>
+          <p className="text-sm text-muted-foreground">Crie campos personalizados para capturar informações extras dos contatos</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {fields.map((f, idx) => (
+            <Card key={f.id} className="p-3 flex items-center gap-3">
+              <div className="flex flex-col gap-0.5">
+                <button
+                  onClick={() => moveField(f, 'up')}
+                  disabled={idx === 0}
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+                >
+                  <ChevronUp className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => moveField(f, 'down')}
+                  disabled={idx === fields.length - 1}
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+                >
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-foreground">{f.label}</span>
+                  {f.required && <Badge variant="destructive" className="text-[10px] px-1.5 py-0">Obrigatório</Badge>}
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                    {FIELD_TYPES.find(t => t.value === f.field_type)?.label || f.field_type}
+                  </Badge>
+                </div>
+                {f.field_type === 'select' && Array.isArray(f.options) && f.options.length > 0 && (
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Opções: {f.options.join(', ')}
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => openEdit(f)}>
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-destructive hover:text-destructive"
+                  disabled={deleting === f.id}
+                  onClick={() => handleDelete(f.id)}
+                >
+                  {deleting === f.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingField ? "Editar Campo" : "Novo Campo Personalizado"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium text-foreground">Nome do campo</label>
+              <Input value={formLabel} onChange={e => setFormLabel(e.target.value)} placeholder="Ex: CPF, Empresa, Segmento..." />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">Tipo</label>
+              <Select value={formType} onValueChange={setFormType}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {FIELD_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={formRequired} onCheckedChange={setFormRequired} />
+              <label className="text-sm text-foreground">Campo obrigatório</label>
+            </div>
+            {formType === 'select' && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-foreground">Opções</label>
+                <div className="flex gap-2">
+                  <Input
+                    value={newOption}
+                    onChange={e => setNewOption(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && newOption.trim()) {
+                        setFormOptions(prev => [...prev, newOption.trim()]);
+                        setNewOption("");
+                        e.preventDefault();
+                      }
+                    }}
+                    placeholder="Adicionar opção..."
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (newOption.trim()) { setFormOptions(prev => [...prev, newOption.trim()]); setNewOption(""); }
+                    }}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {formOptions.map((opt, i) => (
+                    <Badge key={i} variant="secondary" className="gap-1">
+                      {opt}
+                      <button onClick={() => setFormOptions(prev => prev.filter((_, j) => j !== i))} className="hover:text-destructive">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={saving || !formLabel.trim()}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              {editingField ? "Atualizar" : "Salvar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("geral");
 
@@ -4009,6 +4252,7 @@ const Settings = () => {
             <TabsTrigger value="ai_labels" className="gap-1.5"><Zap className="h-3.5 w-3.5" /> Etiquetas IA</TabsTrigger>
             <TabsTrigger value="out_of_hours" className="gap-1.5"><Clock className="h-3.5 w-3.5" /> Bot Fora do Horário</TabsTrigger>
             <TabsTrigger value="roteamento" className="gap-1.5"><Shuffle className="h-3.5 w-3.5" /> Roteamento</TabsTrigger>
+            <TabsTrigger value="campos_customizados" className="gap-1.5"><SettingsIcon className="h-3.5 w-3.5" /> Campos Personalizados</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -4036,6 +4280,7 @@ const Settings = () => {
           <TabsContent value="ai_labels"><div className="space-y-4"><AILabelsTab /><AIRoutingSection /></div></TabsContent>
           <TabsContent value="out_of_hours"><OutOfHoursBotTab /></TabsContent>
           <TabsContent value="roteamento"><RotamentoTab /></TabsContent>
+          <TabsContent value="campos_customizados"><CustomFieldsTab /></TabsContent>
         </Tabs>
       </div>
     </div>

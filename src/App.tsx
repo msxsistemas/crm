@@ -115,6 +115,7 @@ const Automations = lazy(() => import("./pages/Automations"));
 const SLADashboard = lazy(() => import("./pages/SLADashboard"));
 const MessageSearch = lazy(() => import("./pages/MessageSearch"));
 const SentimentDashboard = lazy(() => import("./pages/SentimentDashboard"));
+const AdminPanel = lazy(() => import("./pages/AdminPanel"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -226,6 +227,7 @@ const App = () => (
                     <Route path="/sla-dashboard" element={<SLADashboard />} />
                     <Route path="/message-search" element={<MessageSearch />} />
                     <Route path="/sentiment-dashboard" element={<SentimentDashboard />} />
+                    <Route path="/painel-admin" element={<AdminPanel />} />
                   </Route>
                   <Route
                     element={

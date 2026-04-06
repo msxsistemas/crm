@@ -637,6 +637,50 @@ export default async function statsRoutes(fastify) {
     return { overall: overall[0], byAgent, trend, alerts };
   });
 
+  // ── Admin Panel Stats ─────────────────────────────────────────────────────
+  fastify.get('/stats/admin-panel', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    if (!['admin'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
+
+    const [users, conversations, messages, connections, migrations] = await Promise.all([
+      query(`
+        SELECT
+          COUNT(*) as total,
+          COUNT(*) FILTER (WHERE status='online') as online,
+          COUNT(*) FILTER (WHERE role='agent') as agents,
+          COUNT(*) FILTER (WHERE role='admin') as admins,
+          COUNT(*) FILTER (WHERE created_at > NOW() - interval '7 days') as new_this_week
+        FROM profiles WHERE role != 'deleted'
+      `),
+      query(`
+        SELECT
+          COUNT(*) as total,
+          COUNT(*) FILTER (WHERE status='open') as open,
+          COUNT(*) FILTER (WHERE status='closed') as closed,
+          COUNT(*) FILTER (WHERE created_at > NOW() - interval '24 hours') as today,
+          COUNT(*) FILTER (WHERE created_at > NOW() - interval '7 days') as this_week
+        FROM conversations
+      `),
+      query(`
+        SELECT COUNT(*) as total,
+          COUNT(*) FILTER (WHERE created_at > NOW() - interval '24 hours') as today
+        FROM messages
+      `),
+      query(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status='open') as connected FROM connections`),
+      query(`SELECT COUNT(*) as count FROM _migrations`).catch(() => ({ rows: [{ count: 0 }] })),
+    ]);
+
+    return {
+      users: users.rows[0],
+      conversations: conversations.rows[0],
+      messages: messages.rows[0],
+      connections: connections.rows[0],
+      migrations: migrations.rows[0],
+      uptime: process.uptime(),
+      node_version: process.version,
+      timestamp: new Date().toISOString(),
+    };
+  });
+
   // ── SLA by Team ────────────────────────────────────────────────────────────
   fastify.get('/stats/sla-by-team', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const { rows } = await query(`

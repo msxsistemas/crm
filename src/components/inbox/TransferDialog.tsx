@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { db } from "@/lib/db";
+import api from "@/lib/api";
+import { toast } from "sonner";
 
 interface Profile {
   id: string;
@@ -26,15 +28,22 @@ interface TransferDialogProps {
   recentMessages?: { body: string; from_me: boolean; created_at: string }[];
 }
 
+interface Team {
+  id: string;
+  name: string;
+}
+
 const MAX_NOTE_CHARS = 300;
 
-const TransferDialog = ({ open, onOpenChange, onTransfer, recentMessages = [] }: TransferDialogProps) => {
-  const [activeTab, setActiveTab] = useState<"atendente" | "categoria">("atendente");
+const TransferDialog = ({ open, onOpenChange, onTransfer, conversationId, recentMessages = [] }: TransferDialogProps) => {
+  const [activeTab, setActiveTab] = useState<"atendente" | "time" | "categoria">("atendente");
   const [search, setSearch] = useState("");
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [transferNote, setTransferNote] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -45,6 +54,13 @@ const TransferDialog = ({ open, onOpenChange, onTransfer, recentMessages = [] }:
       ]);
       setProfiles((p as Profile[]) || []);
       setDepartments((d as Department[]) || []);
+      // Load teams
+      try {
+        const teamsData = await api.get<Team[]>('/teams');
+        setTeams(Array.isArray(teamsData) ? teamsData : []);
+      } catch {
+        setTeams([]);
+      }
     };
     load();
   }, [open]);
@@ -55,26 +71,62 @@ const TransferDialog = ({ open, onOpenChange, onTransfer, recentMessages = [] }:
       setSelectedId(null);
       setSearch("");
       setTransferNote("");
-      setActiveTab("atendente");
+      setActiveTab("atendente" as const);
     }
   }, [open]);
 
   const filteredProfiles = profiles.filter((p) =>
     (p.full_name || "").toLowerCase().includes(search.toLowerCase())
   );
+  const filteredTeams = teams.filter((t) =>
+    t.name.toLowerCase().includes(search.toLowerCase())
+  );
   const filteredDepts = departments.filter((d) =>
     d.name.toLowerCase().includes(search.toLowerCase())
   );
 
   const selectedProfile = profiles.find((x) => x.id === selectedId);
+  const selectedTeam = teams.find((x) => x.id === selectedId);
   const selectedDept = departments.find((x) => x.id === selectedId);
   const selectedName =
     activeTab === "atendente"
       ? selectedProfile?.full_name || "Atendente"
+      : activeTab === "time"
+      ? selectedTeam?.name || "Time"
       : selectedDept?.name || "Categoria";
 
-  const handleTransfer = () => {
+  const noteValid = transferNote.trim().length >= 5;
+
+  const handleTransfer = async () => {
     if (!selectedId) return;
+    if (!noteValid) { toast.error("Nota de transferência obrigatória (mínimo 5 caracteres)"); return; }
+
+    // If we have conversationId, use the new backend endpoint
+    if (conversationId) {
+      setSaving(true);
+      try {
+        await api.post(`/conversations/${conversationId}/transfer`, {
+          agent_id: activeTab === "atendente" ? selectedId : undefined,
+          team_id: activeTab === "time" ? selectedId : undefined,
+          note: transferNote,
+        });
+        toast.success(`Conversa transferida para ${selectedName}`);
+        onTransfer(
+          activeTab === "atendente" ? "user" : "department",
+          selectedId,
+          selectedName,
+          transferNote
+        );
+        onOpenChange(false);
+      } catch (e: any) {
+        toast.error(e?.message || "Erro ao transferir conversa");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
+    // Fallback to legacy onTransfer callback
     if (activeTab === "atendente") {
       onTransfer("user", selectedId, selectedProfile?.full_name || "Atendente", transferNote);
     } else {
@@ -103,7 +155,19 @@ const TransferDialog = ({ open, onOpenChange, onTransfer, recentMessages = [] }:
             )}
           >
             <Users className="h-4 w-4" />
-            Atendente
+            Agente
+          </button>
+          <button
+            onClick={() => { setActiveTab("time"); setSelectedId(null); }}
+            className={cn(
+              "flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium border-b-2 transition-colors",
+              activeTab === "time"
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Users className="h-4 w-4" />
+            Time
           </button>
           <button
             onClick={() => { setActiveTab("categoria"); setSelectedId(null); }}
@@ -152,6 +216,26 @@ const TransferDialog = ({ open, onOpenChange, onTransfer, recentMessages = [] }:
                 </button>
               ))
             )
+          ) : activeTab === "time" ? (
+            filteredTeams.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">Nenhum time disponível</p>
+            ) : (
+              filteredTeams.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setSelectedId(t.id)}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors",
+                    selectedId === t.id ? "bg-primary/10 text-primary" : "hover:bg-muted"
+                  )}
+                >
+                  <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary shrink-0">
+                    <Users className="h-4 w-4" />
+                  </div>
+                  <span className="text-foreground">{t.name}</span>
+                </button>
+              ))
+            )
           ) : (
             filteredDepts.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">Nenhuma categoria disponível</p>
@@ -194,36 +278,48 @@ const TransferDialog = ({ open, onOpenChange, onTransfer, recentMessages = [] }:
           </div>
         )}
 
-        {/* Context note — shown once an agent is selected */}
-        {selectedId && activeTab === "atendente" && (
-          <div className="space-y-1.5 pt-1">
-            <div className="flex items-center gap-1.5">
-              <ClipboardList className="h-3.5 w-3.5 text-muted-foreground" />
-              <label className="text-xs font-medium text-foreground">
-                Observação para {selectedName} (opcional)
-              </label>
-            </div>
-            <textarea
-              value={transferNote}
-              onChange={(e) => setTransferNote(e.target.value.slice(0, MAX_NOTE_CHARS))}
-              placeholder={`Deixe uma observação para ${selectedName}...`}
-              rows={3}
-              className="w-full text-xs rounded-md border border-border bg-background px-2.5 py-2 text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-            <p className="text-[10px] text-muted-foreground text-right">
+        {/* Transfer note — always visible, required */}
+        <div className="space-y-1.5 pt-1">
+          <div className="flex items-center gap-1.5">
+            <ClipboardList className="h-3.5 w-3.5 text-muted-foreground" />
+            <label className="text-xs font-medium text-foreground">
+              Motivo da transferência <span className="text-destructive">*</span>
+            </label>
+          </div>
+          <textarea
+            value={transferNote}
+            onChange={(e) => setTransferNote(e.target.value.slice(0, MAX_NOTE_CHARS))}
+            placeholder="Descreva o motivo da transferência (mínimo 5 caracteres)..."
+            rows={3}
+            className={cn(
+              "w-full text-xs rounded-md border bg-background px-2.5 py-2 text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary",
+              transferNote.trim().length > 0 && transferNote.trim().length < 5
+                ? "border-destructive"
+                : "border-border"
+            )}
+          />
+          <div className="flex items-center justify-between">
+            {transferNote.trim().length > 0 && transferNote.trim().length < 5 && (
+              <p className="text-[10px] text-destructive">Mínimo 5 caracteres</p>
+            )}
+            <p className="text-[10px] text-muted-foreground ml-auto">
               {transferNote.length}/{MAX_NOTE_CHARS}
             </p>
           </div>
-        )}
+        </div>
 
         {/* Actions */}
         <div className="flex gap-3 pt-2">
           <Button variant="outline" className="flex-1" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button className="flex-1 gap-2" onClick={handleTransfer} disabled={!selectedId}>
+          <Button
+            className="flex-1 gap-2"
+            onClick={handleTransfer}
+            disabled={!selectedId || !noteValid || saving}
+          >
             <ArrowRight className="h-4 w-4" />
-            Transferir
+            {saving ? "Transferindo..." : "Transferir"}
           </Button>
         </div>
       </DialogContent>
