@@ -999,6 +999,14 @@ const Inbox = () => {
     }
   }, [instanceName]);
 
+  // Collaborator added event
+  useSocketEvent('conversation:collaborator_added', (data: any) => {
+    if (data?.conversation_id === selected) {
+      const agentName = data?.agent?.full_name || data?.agent?.name || 'Agente';
+      toast.info(`${agentName} foi adicionado como co-atendente nesta conversa.`, { duration: 4000 });
+    }
+  }, [selected]);
+
   // Realtime subscriptions
   useEffect(() => {
     const messagesChannel = db

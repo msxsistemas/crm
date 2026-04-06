@@ -3124,6 +3124,212 @@ const WebhooksOutTab = () => {
   );
 };
 
+// ─── Bot FAQ Tab ───
+const BotFaqTab = () => {
+  const [rules, setRules] = useState<{ id: string; keyword: string; response: string; is_active: boolean }[]>([]);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [form, setForm] = useState({ keyword: '', response: '', is_active: true });
+  const [saving, setSaving] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+
+  useEffect(() => { api.get<any[]>('/faq-rules').then(setRules).catch(() => {}); }, []);
+
+  const openNew = () => { setForm({ keyword: '', response: '', is_active: true }); setEditId(null); setModalOpen(true); };
+  const openEdit = (r: typeof rules[0]) => { setForm({ keyword: r.keyword, response: r.response, is_active: r.is_active }); setEditId(r.id); setModalOpen(true); };
+
+  const handleSave = async () => {
+    if (!form.keyword.trim() || !form.response.trim()) { toast.error("Preencha palavra-chave e resposta"); return; }
+    setSaving(true);
+    try {
+      if (editId) {
+        const updated = await api.patch<any>(`/faq-rules/${editId}`, form);
+        setRules(prev => prev.map(r => r.id === editId ? { ...r, ...updated } : r));
+        toast.success("Regra atualizada!");
+      } else {
+        const created = await api.post<any>('/faq-rules', form);
+        setRules(prev => [...prev, created]);
+        toast.success("Regra criada!");
+      }
+      setModalOpen(false);
+    } catch { toast.error("Erro ao salvar regra"); } finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id: string) => {
+    await api.delete(`/faq-rules/${id}`).catch(() => {});
+    setRules(prev => prev.filter(r => r.id !== id));
+  };
+
+  const toggleActive = async (r: typeof rules[0]) => {
+    await api.patch(`/faq-rules/${r.id}`, { is_active: !r.is_active }).catch(() => {});
+    setRules(prev => prev.map(x => x.id === r.id ? { ...x, is_active: !r.is_active } : x));
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="font-semibold text-foreground">Bot FAQ por Palavras-chave</p>
+            <p className="text-sm text-muted-foreground">Respostas automáticas quando a mensagem contiver a palavra-chave.</p>
+          </div>
+          <Button onClick={openNew} className="gap-1"><Plus className="h-4 w-4" /> Nova Regra</Button>
+        </div>
+      </Card>
+
+      {rules.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nenhuma regra configurada</p>
+      ) : (
+        <div className="space-y-2">
+          {rules.map(r => (
+            <div key={r.id} className="flex items-start gap-3 p-3 border border-border rounded-lg bg-card">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground">"{r.keyword}"</p>
+                <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{r.response}</p>
+              </div>
+              <Switch checked={r.is_active} onCheckedChange={() => toggleActive(r)} />
+              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(r)}><Pencil className="h-3.5 w-3.5" /></Button>
+              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => handleDelete(r.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>{editId ? "Editar Regra FAQ" : "Nova Regra FAQ"}</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <label className="text-sm font-medium text-foreground mb-1 block">Palavra-chave</label>
+              <Input placeholder="Ex: preço, horário, endereço" value={form.keyword} onChange={e => setForm(p => ({ ...p, keyword: e.target.value }))} />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground mb-1 block">Resposta automática</label>
+              <Textarea placeholder="Digite a resposta que será enviada..." value={form.response} onChange={e => setForm(p => ({ ...p, response: e.target.value }))} rows={4} />
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch checked={form.is_active} onCheckedChange={v => setForm(p => ({ ...p, is_active: v }))} />
+              <span className="text-sm text-foreground">Ativa</span>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setModalOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}Salvar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+// ─── Inbound Webhooks Tab ───
+const InboundWebhooksTab = () => {
+  const [webhooks, setWebhooks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [form, setForm] = useState({ name: '', trigger_action: 'create_contact' });
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try { const data = await api.get<any[]>('/inbound-webhooks'); setWebhooks(data || []); }
+    catch { /* silent */ } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleCreate = async () => {
+    if (!form.name.trim()) { toast.error("Nome é obrigatório"); return; }
+    setSaving(true);
+    try {
+      await api.post('/inbound-webhooks', form);
+      toast.success("Webhook criado!");
+      setForm({ name: '', trigger_action: 'create_contact' });
+      setModalOpen(false);
+      await load();
+    } catch { toast.error("Erro ao criar webhook"); } finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id: string) => {
+    await api.delete(`/inbound-webhooks/${id}`).catch(() => {});
+    setWebhooks(prev => prev.filter(w => w.id !== id));
+  };
+
+  const copyUrl = (url: string) => { navigator.clipboard.writeText(url); toast.success("URL copiada!"); };
+
+  const triggerLabels: Record<string, string> = {
+    create_contact: 'Criar Contato',
+    create_conversation: 'Criar Conversa',
+    send_message: 'Enviar Mensagem',
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="font-semibold text-foreground">Webhooks de Entrada</p>
+            <p className="text-sm text-muted-foreground">Receba dados externos e execute ações automaticamente.</p>
+          </div>
+          <Button onClick={() => setModalOpen(true)} className="gap-1"><Plus className="h-4 w-4" /> Novo Webhook</Button>
+        </div>
+      </Card>
+
+      {loading ? (
+        <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+      ) : webhooks.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nenhum webhook configurado</p>
+      ) : (
+        <div className="space-y-2">
+          {webhooks.map(w => (
+            <Card key={w.id} className="p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground">{w.name}</p>
+                  <Badge variant="outline" className="text-xs mt-0.5">{triggerLabels[w.trigger_action] || w.trigger_action}</Badge>
+                </div>
+                <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10" onClick={() => handleDelete(w.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+              </div>
+              {w.url && (
+                <div className="flex items-center gap-2 bg-muted/50 rounded px-2 py-1.5">
+                  <code className="text-xs text-foreground flex-1 break-all">{w.url}</code>
+                  <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0" onClick={() => copyUrl(w.url)}><Copy className="h-3 w-3" /></Button>
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Novo Webhook de Entrada</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <label className="text-sm font-medium text-foreground mb-1 block">Nome</label>
+              <Input placeholder="Ex: Lead do site" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground mb-1 block">Ação</label>
+              <Select value={form.trigger_action} onValueChange={v => setForm(p => ({ ...p, trigger_action: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="create_contact">Criar Contato</SelectItem>
+                  <SelectItem value="create_conversation">Criar Conversa</SelectItem>
+                  <SelectItem value="send_message">Enviar Mensagem</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setModalOpen(false)}>Cancelar</Button>
+            <Button onClick={handleCreate} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}Criar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("geral");
 
@@ -3156,6 +3362,8 @@ const Settings = () => {
             <TabsTrigger value="relatorios_agendados" className="gap-1.5"><Star className="h-3.5 w-3.5" /> Relatórios Agendados</TabsTrigger>
             <TabsTrigger value="webhooks_out" className="gap-1.5"><Globe className="h-3.5 w-3.5" /> Webhooks de Saída</TabsTrigger>
             <TabsTrigger value="api_publica" className="gap-1.5"><Key className="h-3.5 w-3.5" /> API & Integrações</TabsTrigger>
+            <TabsTrigger value="bot_faq" className="gap-1.5"><Zap className="h-3.5 w-3.5" /> Bot FAQ</TabsTrigger>
+            <TabsTrigger value="inbound_webhooks" className="gap-1.5"><Globe className="h-3.5 w-3.5" /> WH Entrada</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -3178,6 +3386,8 @@ const Settings = () => {
           <TabsContent value="relatorios_agendados"><RelatoriosAgendadosTab /></TabsContent>
           <TabsContent value="webhooks_out"><WebhooksOutTab /></TabsContent>
           <TabsContent value="api_publica"><Suspense fallback={<TabFallback />}><ApiKeysTabLazy /></Suspense></TabsContent>
+          <TabsContent value="bot_faq"><BotFaqTab /></TabsContent>
+          <TabsContent value="inbound_webhooks"><InboundWebhooksTab /></TabsContent>
         </Tabs>
       </div>
     </div>

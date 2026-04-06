@@ -550,6 +550,33 @@ async function handleEvolutionWebhook(payload, fastify) {
       }
     }
 
+    // ── FAQ Bot check — auto-reply if keyword matches ─────────────────────
+    try {
+      const msgLower = (content || '').toLowerCase().trim();
+      const { rows: faqRules } = await pool.query(
+        "SELECT * FROM faq_rules WHERE is_active=true"
+      );
+      const matched = faqRules.find(r => msgLower.includes(r.keyword.toLowerCase()));
+      if (matched) {
+        const { rows: evo } = await pool.query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
+        const e = evo[0];
+        if (e?.evolution_url) {
+          await fetch(`${e.evolution_url}/message/sendText/${instance}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': e.evolution_key },
+            body: JSON.stringify({ number: phone, text: matched.response })
+          });
+          await pool.query(
+            "INSERT INTO messages (conversation_id, content, direction, type, status) VALUES ($1,$2,'outbound','text','sent')",
+            [conv.id, matched.response]
+          );
+          await pool.query('UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1', [conv.id]);
+          fastify.io?.emit('message:new', { conversation_id: conv.id, content: matched.response, direction: 'outbound', type: 'text' });
+        }
+        return; // FAQ handled — skip chatbot
+      }
+    } catch(e) { /* FAQ bot error — silent */ }
+
     // ── Office hours check ────────────────────────────────────────────────
     try {
       const { rows: s } = await query('SELECT office_hours_enabled, office_hours_schedule, office_hours_off_message FROM settings WHERE id=1');

@@ -57,6 +57,7 @@ import proposalRoutes from './routes/proposals.js';
 import internalChatRoutes from './routes/internal-chat.js';
 import statsRoutes from './routes/stats.js';
 import metaWhatsAppRoutes from './routes/meta-whatsapp.js';
+import inboundWebhookRoutes from './routes/inbound-webhooks.js';
 import { startMessageWorker } from './jobs/messageQueue.js';
 import { startSchedulesWorker } from './jobs/schedulesWorker.js';
 import { deliverWebhook } from './jobs/webhookDelivery.js';
@@ -171,6 +172,7 @@ await fastify.register(metaWhatsAppRoutes);
 await fastify.register(statsRoutes);
 await fastify.register(import('./routes/pipeline.js'));
 await fastify.register(import('./routes/webhooks-out.js'));
+await fastify.register(inboundWebhookRoutes);
 
 // 404 handler
 fastify.setNotFoundHandler((req, reply) => {
