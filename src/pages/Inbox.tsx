@@ -11,7 +11,7 @@ import {
   Shuffle, CheckCircle, X, Image, FileText, Mic, Folder, ChevronDown, Smartphone, Star,
   Trash2, Copy, Forward, Reply, Pencil, Check, AlertCircle, Bot, Clock, Target, Sparkles,
   LayoutTemplate, Tag, History, Ban, LayoutList, List, GitMerge, ShoppingBag, Download,
-  CheckSquare, Users, Languages, UserCheck, Archive, LayoutGrid, AlignJustify,
+  CheckSquare, Users, Languages, UserCheck, Archive, LayoutGrid, AlignJustify, CreditCard,
 } from "lucide-react";
 import { useFollowupReminders } from "@/hooks/useFollowupReminders";
 import FollowupDialog from "@/components/followup/FollowupDialog";
@@ -449,6 +449,14 @@ const Inbox = () => {
   const [pixMerchantName, setPixMerchantName] = useState("");
   const [pixMerchantCity, setPixMerchantCity] = useState("");
 
+  // Payment link state
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [paymentDescription, setPaymentDescription] = useState("");
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentProvider, setPaymentProvider] = useState("manual");
+  const [paymentUrl, setPaymentUrl] = useState("");
+  const [paymentSending, setPaymentSending] = useState(false);
+
   // Product catalog state
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
@@ -808,12 +816,13 @@ const Inbox = () => {
   // Fetch profile name, signing preference and signature
   useEffect(() => {
     if (!user) return;
-    db.from("profiles").select("full_name, signing_enabled, signature").eq("id", user.id).single().then(({ data }) => {
+    db.from("profiles").select("full_name, signing_enabled, signature, signature_html, signature_enabled").eq("id", user.id).single().then(({ data }) => {
       setProfileName(data?.full_name || user.user_metadata?.full_name || null);
       if (data?.signing_enabled !== undefined && data?.signing_enabled !== null) {
         setSigning(data.signing_enabled);
       }
       if (data?.signature) setProfileSignature(data.signature);
+      // signature_html/signature_enabled available for future rich signature use
     });
   }, [user]);
 
@@ -940,14 +949,17 @@ const Inbox = () => {
 
   useEffect(() => { loadBlacklist(); }, [loadBlacklist]);
 
-  // Auto-select conversation from URL phone param
+  // Auto-select conversation from URL phone param or conv id
   useEffect(() => {
     const phoneParam = searchParams.get("phone");
-    if (phoneParam && conversations.length > 0 && !selected) {
+    const convParam = searchParams.get("conv");
+    if (conversations.length === 0 || selected) return;
+    if (convParam) {
+      const match = conversations.find((c) => c.id === convParam);
+      if (match) setSelected(match.id);
+    } else if (phoneParam) {
       const match = conversations.find((c) => c.contacts?.phone === phoneParam);
-      if (match) {
-        setSelected(match.id);
-      }
+      if (match) setSelected(match.id);
     }
   }, [searchParams, conversations, selected]);
 
@@ -1199,6 +1211,32 @@ const Inbox = () => {
     setPixDescription("");
     setPixPayload(null);
     setPixDialogOpen(true);
+  };
+
+  const handleSendPaymentLink = async () => {
+    if (!paymentDescription.trim() || !paymentAmount.trim()) {
+      toast.error("Preencha descrição e valor"); return;
+    }
+    if (!selected) { toast.error("Nenhuma conversa selecionada"); return; }
+    setPaymentSending(true);
+    try {
+      await api.post('/payment-links', {
+        conversation_id: selected,
+        amount: parseFloat(paymentAmount.replace(",", ".")),
+        description: paymentDescription,
+        provider: paymentProvider,
+        external_url: paymentUrl || null,
+      });
+      toast.success("Link de pagamento enviado!");
+      setPaymentDialogOpen(false);
+      setPaymentDescription("");
+      setPaymentAmount("");
+      setPaymentUrl("");
+      setPaymentProvider("manual");
+    } catch {
+      toast.error("Erro ao enviar link de pagamento");
+    }
+    setPaymentSending(false);
   };
 
   const handleGeneratePixPayload = () => {
@@ -3612,9 +3650,25 @@ const Inbox = () => {
                 <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-purple-500" onClick={handleSummarizeConversation} title="Resumir conversa">
                   <FileText className="h-4 w-4" />
                 </Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={handleExportConversation} title="Exportar conversa (CSV)">
-                  <Download className="h-4 w-4" />
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground" title="Exportar conversa">
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={handleExportConversation}>
+                      Exportar como CSV/TXT
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {
+                      if (!selectedConvo) return;
+                      const base = import.meta.env.VITE_API_URL || 'https://api.msxzap.pro';
+                      window.open(`${base}/conversations/${selectedConvo.id}/export-pdf`, '_blank');
+                    }}>
+                      Exportar como HTML/PDF
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => { setShowMsgSearch(v => !v); if (showMsgSearch) setMsgSearch(""); }} title="Buscar mensagem">
                   <Search className="h-4 w-4" />
                 </Button>

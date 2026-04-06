@@ -138,7 +138,7 @@ export default async function authRoutes(fastify) {
   // Update profile
   // -- ALTER TABLE profiles ADD COLUMN IF NOT EXISTS theme_preference TEXT DEFAULT 'dark';
   fastify.patch('/auth/me', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { name, avatar_url, permissions, two_factor_enabled, signing_enabled, signature, status, max_conversations, absence_enabled, absence_start, absence_end, absence_message, theme_preference } = req.body;
+    const { name, avatar_url, permissions, two_factor_enabled, signing_enabled, signature, signature_html, signature_enabled, status, max_conversations, absence_enabled, absence_start, absence_end, absence_message, theme_preference } = req.body;
     const updates = [];
     const params = [];
     let p = 1;
@@ -148,6 +148,8 @@ export default async function authRoutes(fastify) {
     if (two_factor_enabled !== undefined) { updates.push(`two_factor_enabled = $${p}`); params.push(two_factor_enabled); p++; }
     if (signing_enabled !== undefined) { updates.push(`signing_enabled = $${p}`); params.push(signing_enabled); p++; }
     if (signature !== undefined) { updates.push(`signature = $${p}`); params.push(signature); p++; }
+    if (signature_html !== undefined) { updates.push(`signature_html = $${p}`); params.push(signature_html); p++; }
+    if (signature_enabled !== undefined) { updates.push(`signature_enabled = $${p}`); params.push(signature_enabled); p++; }
     if (status !== undefined && ['online','offline','away'].includes(status)) { updates.push(`status = $${p}`); params.push(status); p++; }
     if (max_conversations !== undefined) { updates.push(`max_conversations = $${p}`); params.push(max_conversations === 0 || max_conversations === null ? null : parseInt(max_conversations) || null); p++; }
     if (absence_enabled !== undefined) { updates.push(`absence_enabled = $${p}`); params.push(absence_enabled); p++; }

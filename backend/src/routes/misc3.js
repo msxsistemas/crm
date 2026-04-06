@@ -1253,4 +1253,208 @@ export default async function misc3Routes(fastify) {
   fastify.get('/push/vapid-public-key', async (req, reply) => {
     return { key: process.env.VAPID_PUBLIC_KEY || '' };
   });
+
+  // ── Advanced Message Search ──────────────────────────────────────────────────
+  fastify.get('/messages/search', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { q, agent_id, label, channel, sentiment, start, end, csat_min, limit = 50, offset = 0 } = req.query;
+
+    const where = ['1=1'];
+    const params = [];
+    let i = 1;
+
+    if (q) { params.push(`%${q}%`); where.push(`m.content ILIKE $${i++}`); }
+    if (agent_id) { params.push(agent_id); where.push(`c.assigned_to=$${i++}`); }
+    if (label) { params.push(label); where.push(`$${i++}=ANY(c.labels)`); }
+    if (channel) { params.push(channel); where.push(`c.connection_name=$${i++}`); }
+    if (sentiment) { params.push(sentiment); where.push(`c.sentiment=$${i++}`); }
+    if (start) { params.push(start); where.push(`m.created_at>=$${i++}`); }
+    if (end) { params.push(end); where.push(`m.created_at<=$${i++}`); }
+    if (csat_min) { params.push(parseFloat(csat_min)); where.push(`c.csat_score>=$${i++}`); }
+
+    params.push(parseInt(limit)); params.push(parseInt(offset));
+
+    const { rows } = await query(`
+      SELECT m.id, m.content, m.sender_type, m.created_at,
+             c.id as conversation_id, c.labels, c.sentiment, c.csat_score, c.connection_name,
+             ct.name as contact_name, ct.phone,
+             p.full_name as agent_name
+      FROM messages m
+      JOIN conversations c ON c.id=m.conversation_id
+      JOIN contacts ct ON ct.id=c.contact_id
+      LEFT JOIN profiles p ON p.id=c.assigned_to
+      WHERE ${where.join(' AND ')}
+      ORDER BY m.created_at DESC
+      LIMIT $${i++} OFFSET $${i++}
+    `, params);
+    return rows;
+  });
+
+  // ── Export Conversation as HTML/PDF ─────────────────────────────────────────
+  fastify.get('/conversations/:id/export-pdf', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows: msgs } = await query(
+      `SELECT m.content, m.sender_type, m.created_at, m.metadata,
+              p.full_name as agent_name
+       FROM messages m
+       LEFT JOIN profiles p ON p.id=m.sender_id
+       WHERE m.conversation_id=$1 ORDER BY m.created_at ASC`,
+      [req.params.id]
+    );
+    const { rows: conv } = await query(
+      `SELECT c.*, ct.name as contact_name, ct.phone, ct.email,
+              p.full_name as agent_name, t.name as team_name
+       FROM conversations c
+       JOIN contacts ct ON ct.id=c.contact_id
+       LEFT JOIN profiles p ON p.id=c.assigned_to
+       LEFT JOIN teams t ON t.id=c.assigned_team_id
+       WHERE c.id=$1`,
+      [req.params.id]
+    );
+    if (!conv[0]) return reply.status(404).send({ error: 'Conversa não encontrada' });
+    const c = conv[0];
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Conversa ${c.id.split('-')[0].toUpperCase()}</title>
+    <style>
+      body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; color: #333; }
+      .header { border-bottom: 2px solid #25D366; padding-bottom: 16px; margin-bottom: 24px; }
+      .header h1 { margin: 0; color: #128C7E; font-size: 20px; }
+      .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; font-size: 13px; }
+      .msg { margin-bottom: 12px; }
+      .msg .bubble { display: inline-block; max-width: 75%; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+      .msg.contact { text-align: left; }
+      .msg.contact .bubble { background: #f0f0f0; }
+      .msg.agent { text-align: right; }
+      .msg.agent .bubble { background: #d9fdd3; }
+      .msg.bot { text-align: center; }
+      .msg.bot .bubble { background: #fff3cd; font-style: italic; font-size: 12px; }
+      .time { font-size: 10px; color: #999; margin-top: 2px; }
+      .footer { margin-top: 24px; border-top: 1px solid #eee; padding-top: 12px; font-size: 11px; color: #999; }
+    </style></head><body>
+    <div class="header">
+      <h1>Protocolo: ${c.id.split('-')[0].toUpperCase()}</h1>
+      <div class="meta">
+        <span><b>Contato:</b> ${c.contact_name} (${c.phone || ''})</span>
+        <span><b>Agente:</b> ${c.agent_name || 'Não atribuído'}</span>
+        <span><b>Time:</b> ${c.team_name || '-'}</span>
+        <span><b>Status:</b> ${c.status}</span>
+        <span><b>Aberta em:</b> ${new Date(c.created_at).toLocaleString('pt-BR')}</span>
+        <span><b>Canal:</b> ${c.connection_name || 'web'}</span>
+      </div>
+    </div>
+    ${msgs.map(m => `
+      <div class="msg ${m.sender_type || 'contact'}">
+        <div class="bubble">${(m.content || '').replace(/</g,'&lt;').replace(/\n/g,'<br>')}</div>
+        <div class="time">${m.agent_name || m.sender_type || ''} · ${new Date(m.created_at).toLocaleString('pt-BR')}</div>
+      </div>
+    `).join('')}
+    <div class="footer">Exportado em ${new Date().toLocaleString('pt-BR')} · MSX CRM</div>
+    </body></html>`;
+
+    reply.header('Content-Type', 'text/html; charset=utf-8');
+    reply.header('Content-Disposition', `attachment; filename="conversa-${c.id.split('-')[0]}.html"`);
+    return html;
+  });
+
+  // ── Team Routing Rules ────────────────────────────────────────────────────────
+  fastify.get('/team-routing', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query(`
+      SELECT tr.*, t.name as team_name, c.name as connection_display
+      FROM team_routing tr
+      LEFT JOIN teams t ON t.id=tr.team_id
+      LEFT JOIN connections c ON c.name=tr.connection_name
+      ORDER BY tr.priority ASC
+    `);
+    return rows;
+  });
+
+  fastify.post('/team-routing', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { team_id, connection_name, priority, active_days, start_time, end_time } = req.body;
+    const { rows } = await query(
+      'INSERT INTO team_routing (team_id, connection_name, priority, active_days, start_time, end_time) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [team_id, connection_name, priority || 1, active_days || [0,1,2,3,4,5,6], start_time || '00:00', end_time || '23:59']
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.patch('/team-routing/:id', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { team_id, connection_name, priority, active_days, start_time, end_time, is_active } = req.body;
+    const { rows } = await query(
+      'UPDATE team_routing SET team_id=COALESCE($1,team_id), connection_name=COALESCE($2,connection_name), priority=COALESCE($3,priority), active_days=COALESCE($4,active_days), start_time=COALESCE($5,start_time), end_time=COALESCE($6,end_time), is_active=COALESCE($7,is_active) WHERE id=$8 RETURNING *',
+      [team_id, connection_name, priority, active_days, start_time, end_time, is_active, req.params.id]
+    );
+    return rows[0];
+  });
+
+  fastify.delete('/team-routing/:id', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    await query('DELETE FROM team_routing WHERE id=$1', [req.params.id]);
+    return { success: true };
+  });
+
+  // ── Session Timeout Settings ──────────────────────────────────────────────────
+  fastify.get('/settings/session', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    const { rows } = await query("SELECT session_timeout_minutes FROM settings WHERE id=1");
+    return { timeout_minutes: rows[0]?.session_timeout_minutes || 30 };
+  });
+
+  fastify.patch('/settings/session', { onRequest: [fastify.authenticate] }, async (req, reply) => {
+    if (req.user.role !== 'admin') return reply.status(403).send({ error: 'Forbidden' });
+    const { timeout_minutes } = req.body;
+    await query("UPDATE settings SET session_timeout_minutes=$1 WHERE id=1", [timeout_minutes]);
+    return { success: true };
+  });
+
+  // ── Payment Links ─────────────────────────────────────────────────────────
+  fastify.get('/payment-links', auth, async (req, reply) => {
+    const { conversation_id } = req.query;
+    let q = 'SELECT * FROM payment_links';
+    const vals = [];
+    if (conversation_id) { q += ' WHERE conversation_id=$1'; vals.push(conversation_id); }
+    q += ' ORDER BY created_at DESC LIMIT 50';
+    const { rows } = await query(q, vals);
+    return rows;
+  });
+
+  fastify.post('/payment-links', auth, async (req, reply) => {
+    const { conversation_id, amount, description, provider, external_url } = req.body;
+    const { rows } = await query(
+      "INSERT INTO payment_links (conversation_id, amount, description, provider, external_url, created_by, status) VALUES ($1,$2,$3,$4,$5,$6,'pending') RETURNING *",
+      [conversation_id, amount, description, provider || 'manual', external_url || null, req.user.id]
+    );
+
+    // Send payment link via WhatsApp in the conversation
+    if (conversation_id) {
+      const { rows: conv } = await query(
+        'SELECT cv.connection_name, ct.phone FROM conversations cv JOIN contacts ct ON ct.id=cv.contact_id WHERE cv.id=$1',
+        [conversation_id]
+      );
+      if (conv[0] && external_url) {
+        const msg = `💳 *Link de Pagamento*\n📋 ${description}\n💰 R$ ${parseFloat(amount).toFixed(2)}\n\n🔗 ${external_url}`;
+        await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${conv[0].connection_name}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+          body: JSON.stringify({ number: conv[0].phone, text: msg })
+        }).catch(() => {});
+        await query("INSERT INTO messages (conversation_id, content, sender_type) VALUES ($1,$2,'agent')", [conversation_id, msg]).catch(() => {});
+      }
+    }
+
+    return rows[0];
+  });
+
+  fastify.patch('/payment-links/:id', auth, async (req, reply) => {
+    const { status } = req.body;
+    const { rows } = await query('UPDATE payment_links SET status=$1 WHERE id=$2 RETURNING *', [status, req.params.id]);
+    return rows[0];
+  });
+
+  // ── AI Routing Settings ────────────────────────────────────────────────────
+  fastify.get('/settings/ai-routing', auth, async (req, reply) => {
+    const { rows } = await query("SELECT ai_routing_enabled FROM settings WHERE id=1");
+    return { enabled: rows[0]?.ai_routing_enabled || false };
+  });
+
+  fastify.patch('/settings/ai-routing', auth, async (req, reply) => {
+    const { enabled } = req.body;
+    await query("UPDATE settings SET ai_routing_enabled=$1 WHERE id=1", [enabled]);
+    return { success: true };
+  });
 }

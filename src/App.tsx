@@ -113,6 +113,8 @@ const ChatWidgetConfig = lazy(() => import("./pages/ChatWidgetConfig"));
 const ChannelReport = lazy(() => import("./pages/ChannelReport"));
 const Automations = lazy(() => import("./pages/Automations"));
 const SLADashboard = lazy(() => import("./pages/SLADashboard"));
+const MessageSearch = lazy(() => import("./pages/MessageSearch"));
+const SentimentDashboard = lazy(() => import("./pages/SentimentDashboard"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -222,6 +224,8 @@ const App = () => (
                     <Route path="/channel-report" element={<ChannelReport />} />
                     <Route path="/automations" element={<Automations />} />
                     <Route path="/sla-dashboard" element={<SLADashboard />} />
+                    <Route path="/message-search" element={<MessageSearch />} />
+                    <Route path="/sentiment-dashboard" element={<SentimentDashboard />} />
                   </Route>
                   <Route
                     element={

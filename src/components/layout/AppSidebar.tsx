@@ -108,6 +108,7 @@ const userNavSections: NavSection[] = [
     items: [
       { to: "/inbox", icon: MessageSquare, label: "Chats" },
       { to: "/pesquisar", icon: Search, label: "Pesquisar" },
+      { to: "/message-search", icon: Search, label: "Busca Avançada" },
       { to: "/contatos", icon: Contact, label: "Contatos" },
       { to: "/grupos-contatos", icon: UsersRound, label: "Grupos de Contatos" },
       { to: "/tarefas", icon: ListTodo, label: "Tarefas" },
@@ -193,6 +194,7 @@ const userNavSections: NavSection[] = [
       { to: "/campaigns-dashboard", icon: BarChart3, label: "Métricas de Campanha" },
       { to: "/channel-report", icon: Radio, label: "Relatório por Canal" },
       { to: "/sla-dashboard", icon: Timer, label: "Painel SLA" },
+      { to: "/sentiment-dashboard", icon: TrendingUp, label: "Análise de Sentimento" },
     ],
   },
   {

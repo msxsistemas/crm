@@ -233,7 +233,12 @@ const GeralTab = () => {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [sessionTimeout, setSessionTimeout] = useState("30");
+  const [savingSession, setSavingSession] = useState(false);
   const [signature, setSignature] = useState("");
+  const [signatureHtml, setSignatureHtml] = useState("");
+  const [signatureEnabled, setSignatureEnabled] = useState(false);
+  const signatureEditorRef = useRef<HTMLDivElement>(null);
   const [currentPwd, setCurrentPwd] = useState("");
   const [newPwd, setNewPwd] = useState("");
   const [confirmPwd, setConfirmPwd] = useState("");
@@ -247,8 +252,18 @@ const GeralTab = () => {
         if (data?.name || data?.full_name) setFullName(data.name || data.full_name);
         if (data?.avatar_url) setAvatarUrl(data.avatar_url);
         if (data?.signature) setSignature(data.signature);
+        if (data?.signature_html) {
+          setSignatureHtml(data.signature_html);
+          if (signatureEditorRef.current) {
+            signatureEditorRef.current.innerHTML = data.signature_html;
+          }
+        }
+        if (data?.signature_enabled !== undefined && data?.signature_enabled !== null) setSignatureEnabled(!!data.signature_enabled);
       }).catch(() => {});
     }
+    api.get<any>('/settings/session').then(d => {
+      if (d?.timeout_minutes) setSessionTimeout(String(d.timeout_minutes));
+    }).catch(() => {});
   }, [user]);
 
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -275,7 +290,8 @@ const GeralTab = () => {
     if (!user) return;
     setSaving(true);
     try {
-      await api.patch('/auth/me', { name: fullName, signature });
+      const currentHtml = signatureEditorRef.current?.innerHTML || signatureHtml;
+      await api.patch('/auth/me', { name: fullName, signature, signature_html: currentHtml, signature_enabled: signatureEnabled });
       toast.success("Perfil atualizado!");
     } catch {
       toast.error("Erro ao salvar perfil");
@@ -358,7 +374,7 @@ const GeralTab = () => {
               <p className="text-xs text-muted-foreground mt-1">O e-mail não pode ser alterado</p>
             </div>
             <div>
-              <label className="text-sm font-medium text-foreground">Assinatura personalizada</label>
+              <label className="text-sm font-medium text-foreground">Assinatura de texto simples</label>
               <Textarea
                 value={signature}
                 onChange={e => setSignature(e.target.value)}
@@ -367,6 +383,76 @@ const GeralTab = () => {
                 className="mt-1 text-sm"
               />
               <p className="text-xs text-muted-foreground mt-1">Adicionada automaticamente ao final das mensagens quando a assinatura está ativa</p>
+            </div>
+            <div className="border border-border rounded-lg p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-sm font-medium text-foreground">Assinatura Rica (HTML)</label>
+                  <p className="text-xs text-muted-foreground">Formatação com negrito, itálico e variáveis dinâmicas</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Ativa</span>
+                  <Switch checked={signatureEnabled} onCheckedChange={setSignatureEnabled} />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {[
+                  { label: "N", cmd: "bold", tag: "b" },
+                  { label: "I", cmd: "italic", tag: "i" },
+                ].map(({ label, cmd }) => (
+                  <button
+                    key={cmd}
+                    type="button"
+                    className={cn("px-2 py-0.5 rounded border border-border text-xs font-medium hover:bg-muted", cmd === "bold" ? "font-bold" : "italic")}
+                    onMouseDown={e => { e.preventDefault(); document.execCommand(cmd); signatureEditorRef.current?.focus(); }}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <span className="text-xs text-muted-foreground ml-1 self-center">Inserir:</span>
+                {["{{nome}}", "{{cargo}}", "{{empresa}}"].map(v => (
+                  <button
+                    key={v}
+                    type="button"
+                    className="px-2 py-0.5 rounded border border-border text-xs text-primary hover:bg-muted"
+                    onMouseDown={e => {
+                      e.preventDefault();
+                      const editor = signatureEditorRef.current;
+                      if (!editor) return;
+                      editor.focus();
+                      const sel = window.getSelection();
+                      if (sel && sel.rangeCount > 0) {
+                        const range = sel.getRangeAt(0);
+                        range.deleteContents();
+                        range.insertNode(document.createTextNode(v));
+                        range.collapse(false);
+                        sel.removeAllRanges();
+                        sel.addRange(range);
+                      } else {
+                        editor.innerHTML += v;
+                      }
+                      setSignatureHtml(editor.innerHTML);
+                    }}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+              <div
+                ref={signatureEditorRef}
+                contentEditable
+                suppressContentEditableWarning
+                className="min-h-[80px] p-3 border border-border rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-primary bg-background"
+                onInput={e => setSignatureHtml((e.target as HTMLDivElement).innerHTML)}
+                data-placeholder="Digite sua assinatura rica aqui..."
+                style={{ whiteSpace: "pre-wrap" }}
+              />
+              {signatureHtml && (
+                <div className="border border-border rounded-md p-3 bg-muted/30">
+                  <p className="text-xs text-muted-foreground mb-1 font-medium">Pré-visualização:</p>
+                  <div className="text-sm" dangerouslySetInnerHTML={{ __html: signatureHtml }} />
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -432,6 +518,52 @@ const GeralTab = () => {
 
       {/* Absence / Vacation Mode */}
       <AusenciaSection userId={user?.id ?? null} />
+
+      {/* Session Timeout */}
+      {user?.role === 'admin' && (
+        <Card className="p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
+              <Clock className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-foreground">Timeout de Sessão por Inatividade</h3>
+              <p className="text-sm text-muted-foreground">Encerra a sessão automaticamente após período de inatividade</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <Select value={sessionTimeout} onValueChange={setSessionTimeout}>
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="15">15 minutos</SelectItem>
+                <SelectItem value="30">30 minutos</SelectItem>
+                <SelectItem value="60">60 minutos</SelectItem>
+                <SelectItem value="120">120 minutos</SelectItem>
+                <SelectItem value="240">240 minutos</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              disabled={savingSession}
+              onClick={async () => {
+                setSavingSession(true);
+                try {
+                  await api.patch('/settings/session', { timeout_minutes: parseInt(sessionTimeout) });
+                  toast.success('Timeout de sessão salvo!');
+                } catch {
+                  toast.error('Erro ao salvar timeout');
+                }
+                setSavingSession(false);
+              }}
+              className="gap-2"
+            >
+              {savingSession ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Salvar
+            </Button>
+          </div>
+        </Card>
+      )}
     </div>
   );
 };
@@ -3518,6 +3650,261 @@ const OutOfHoursBotTab = () => {
   );
 };
 
+// ─── Roteamento Tab ───
+const RotamentoTab = () => {
+  const [rules, setRules] = useState<any[]>([]);
+  const [teams, setTeams] = useState<any[]>([]);
+  const [connections, setConnections] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editRule, setEditRule] = useState<any | null>(null);
+
+  // Form state
+  const [formTeam, setFormTeam] = useState('');
+  const [formConn, setFormConn] = useState('');
+  const [formPriority, setFormPriority] = useState('1');
+  const [formDays, setFormDays] = useState<number[]>([0,1,2,3,4,5,6]);
+  const [formStart, setFormStart] = useState('00:00');
+  const [formEnd, setFormEnd] = useState('23:59');
+  const [saving, setSaving] = useState(false);
+
+  const dayLabels = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+  useEffect(() => {
+    Promise.all([
+      api.get<any[]>('/team-routing'),
+      api.get<any[]>('/teams'),
+      api.get<any[]>('/connections'),
+    ]).then(([r, t, c]) => {
+      setRules(r || []);
+      setTeams(t || []);
+      setConnections(c || []);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  const openNew = () => {
+    setEditRule(null);
+    setFormTeam('');
+    setFormConn('');
+    setFormPriority('1');
+    setFormDays([0,1,2,3,4,5,6]);
+    setFormStart('00:00');
+    setFormEnd('23:59');
+    setModalOpen(true);
+  };
+
+  const openEdit = (r: any) => {
+    setEditRule(r);
+    setFormTeam(r.team_id || '');
+    setFormConn(r.connection_name || '');
+    setFormPriority(String(r.priority || 1));
+    setFormDays(r.active_days || [0,1,2,3,4,5,6]);
+    setFormStart(r.start_time || '00:00');
+    setFormEnd(r.end_time || '23:59');
+    setModalOpen(true);
+  };
+
+  const handleSave = async () => {
+    if (!formTeam || !formConn) { toast.error('Selecione equipe e conexão'); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        team_id: formTeam,
+        connection_name: formConn,
+        priority: parseInt(formPriority) || 1,
+        active_days: formDays,
+        start_time: formStart,
+        end_time: formEnd,
+      };
+      if (editRule) {
+        const updated = await api.patch<any>(`/team-routing/${editRule.id}`, payload);
+        setRules(prev => prev.map(r => r.id === editRule.id ? updated : r));
+        toast.success('Regra atualizada!');
+      } else {
+        const created = await api.post<any>('/team-routing', payload);
+        setRules(prev => [...prev, created]);
+        toast.success('Regra criada!');
+      }
+      setModalOpen(false);
+    } catch {
+      toast.error('Erro ao salvar regra');
+    }
+    setSaving(false);
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await api.delete(`/team-routing/${id}`);
+      setRules(prev => prev.filter(r => r.id !== id));
+      toast.success('Regra removida');
+    } catch {
+      toast.error('Erro ao remover regra');
+    }
+  };
+
+  const handleToggle = async (rule: any) => {
+    try {
+      const updated = await api.patch<any>(`/team-routing/${rule.id}`, { is_active: !rule.is_active });
+      setRules(prev => prev.map(r => r.id === rule.id ? updated : r));
+    } catch {
+      toast.error('Erro ao atualizar');
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg bg-primary/20 flex items-center justify-center">
+              <Shuffle className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-foreground">Roteamento por Equipe</h3>
+              <p className="text-sm text-muted-foreground">Define qual número WhatsApp atende cada equipe, com base no horário e dia da semana</p>
+            </div>
+          </div>
+          <Button size="sm" className="gap-1.5" onClick={openNew}>
+            <Plus className="h-4 w-4" /> Nova Regra
+          </Button>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center gap-2 text-muted-foreground text-sm">
+            <Loader2 className="h-4 w-4 animate-spin" /> Carregando...
+          </div>
+        ) : rules.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nenhuma regra configurada. Clique em "Nova Regra" para começar.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase tracking-wide">
+                  <th className="pb-2 pr-4">Equipe</th>
+                  <th className="pb-2 pr-4">Número / Conexão</th>
+                  <th className="pb-2 pr-4">Prioridade</th>
+                  <th className="pb-2 pr-4">Dias</th>
+                  <th className="pb-2 pr-4">Horário</th>
+                  <th className="pb-2 pr-4">Ativo</th>
+                  <th className="pb-2"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {rules.map(rule => (
+                  <tr key={rule.id} className="py-2">
+                    <td className="py-2 pr-4 font-medium text-foreground">{rule.team_name || rule.team_id || '—'}</td>
+                    <td className="py-2 pr-4 text-muted-foreground">{rule.connection_name || '—'}</td>
+                    <td className="py-2 pr-4">{rule.priority}</td>
+                    <td className="py-2 pr-4 text-xs">
+                      {(rule.active_days || []).map((d: number) => dayLabels[d]).join(', ')}
+                    </td>
+                    <td className="py-2 pr-4 text-xs">{rule.start_time} – {rule.end_time}</td>
+                    <td className="py-2 pr-4">
+                      <Switch checked={rule.is_active} onCheckedChange={() => handleToggle(rule)} />
+                    </td>
+                    <td className="py-2">
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => openEdit(rule)} className="text-muted-foreground hover:text-foreground">
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button onClick={() => handleDelete(rule.id)} className="text-muted-foreground hover:text-destructive">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editRule ? 'Editar Regra' : 'Nova Regra de Roteamento'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="text-sm font-medium text-foreground">Equipe</label>
+              <Select value={formTeam} onValueChange={setFormTeam}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Selecione a equipe..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {teams.map((t: any) => (
+                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">Conexão / Número</label>
+              <Select value={formConn} onValueChange={setFormConn}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Selecione a conexão..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {connections.map((c: any) => (
+                    <SelectItem key={c.id || c.name} value={c.name}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground">Prioridade</label>
+              <Input
+                type="number"
+                min={1}
+                value={formPriority}
+                onChange={e => setFormPriority(e.target.value)}
+                className="mt-1 w-24"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-foreground block mb-2">Dias da semana</label>
+              <div className="flex flex-wrap gap-2">
+                {dayLabels.map((label, idx) => (
+                  <label key={idx} className="flex items-center gap-1 cursor-pointer">
+                    <Checkbox
+                      checked={formDays.includes(idx)}
+                      onCheckedChange={checked => {
+                        setFormDays(prev =>
+                          checked ? [...prev, idx].sort() : prev.filter(d => d !== idx)
+                        );
+                      }}
+                    />
+                    <span className="text-sm">{label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium text-foreground">Início</label>
+                <Input type="time" value={formStart} onChange={e => setFormStart(e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-foreground">Fim</label>
+                <Input type="time" value={formEnd} onChange={e => setFormEnd(e.target.value)} className="mt-1" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setModalOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSave} disabled={saving} className="gap-2">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("geral");
 
@@ -3554,6 +3941,7 @@ const Settings = () => {
             <TabsTrigger value="inbound_webhooks" className="gap-1.5"><Globe className="h-3.5 w-3.5" /> WH Entrada</TabsTrigger>
             <TabsTrigger value="ai_labels" className="gap-1.5"><Zap className="h-3.5 w-3.5" /> Etiquetas IA</TabsTrigger>
             <TabsTrigger value="out_of_hours" className="gap-1.5"><Clock className="h-3.5 w-3.5" /> Bot Fora do Horário</TabsTrigger>
+            <TabsTrigger value="roteamento" className="gap-1.5"><Shuffle className="h-3.5 w-3.5" /> Roteamento</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -3580,6 +3968,7 @@ const Settings = () => {
           <TabsContent value="inbound_webhooks"><InboundWebhooksTab /></TabsContent>
           <TabsContent value="ai_labels"><AILabelsTab /></TabsContent>
           <TabsContent value="out_of_hours"><OutOfHoursBotTab /></TabsContent>
+          <TabsContent value="roteamento"><RotamentoTab /></TabsContent>
         </Tabs>
       </div>
     </div>
