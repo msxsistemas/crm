@@ -2377,6 +2377,95 @@ const BlacklistKeywordsTab = () => {
   );
 };
 
+const WebhookLogTab = () => {
+  const [logs, setLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<"all" | "success" | "error">("all");
+
+  const load = async (s: "all" | "success" | "error" = statusFilter) => {
+    setLoading(true);
+    try {
+      const params = s !== "all" ? `?status=${s}` : "";
+      const data = await api.get<any[]>(`/webhook-delivery-log${params}`);
+      setLogs(data);
+    } catch { toast.error("Erro ao carregar log de webhooks"); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleFilter = (s: "all" | "success" | "error") => {
+    setStatusFilter(s);
+    load(s);
+  };
+
+  const fmt = (d: string) => {
+    try { return new Date(d).toLocaleString("pt-BR"); } catch { return d; }
+  };
+
+  const statusBadge = (code: number | null, error: string | null) => {
+    if (error && !code) return <Badge className="bg-red-100 text-red-700 border-red-300">Erro</Badge>;
+    if (!code) return <Badge variant="secondary">—</Badge>;
+    if (code >= 200 && code < 300) return <Badge className="bg-green-100 text-green-700 border-green-300">{code}</Badge>;
+    return <Badge className="bg-red-100 text-red-700 border-red-300">{code}</Badge>;
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="flex gap-1">
+          {(["all", "success", "error"] as const).map(s => (
+            <Button
+              key={s}
+              size="sm"
+              variant={statusFilter === s ? "default" : "outline"}
+              onClick={() => handleFilter(s)}
+              className="text-xs h-8"
+            >
+              {s === "all" ? "Todos" : s === "success" ? "Sucesso" : "Erro"}
+            </Button>
+          ))}
+        </div>
+        <Button size="sm" variant="outline" onClick={() => load()} disabled={loading} className="gap-1.5 h-8 text-xs ml-auto">
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} /> Atualizar
+        </Button>
+      </div>
+      {loading ? (
+        <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+      ) : logs.length === 0 ? (
+        <div className="text-center py-10 text-sm text-muted-foreground">Nenhum registro encontrado</div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Data/Hora</th>
+                <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Evento</th>
+                <th className="text-left px-3 py-2 font-semibold text-muted-foreground">URL</th>
+                <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Status</th>
+                <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Resposta</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((log) => (
+                <tr key={log.id} className="border-t border-border hover:bg-muted/30">
+                  <td className="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">{fmt(log.created_at)}</td>
+                  <td className="px-3 py-2 whitespace-nowrap"><span className="font-mono text-xs">{log.event_type || "—"}</span></td>
+                  <td className="px-3 py-2 max-w-[200px] truncate text-xs" title={log.url}>{log.url || "—"}</td>
+                  <td className="px-3 py-2">{statusBadge(log.status_code, log.error)}</td>
+                  <td className="px-3 py-2 max-w-[200px] truncate text-xs text-muted-foreground" title={log.error || log.response_body || ""}>
+                    {log.error || log.response_body || "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("geral");
 
@@ -2404,6 +2493,7 @@ const Settings = () => {
             <TabsTrigger value="pix" className="gap-1.5"><span className="text-sm">💸</span> Pix / Cobrança</TabsTrigger>
             <TabsTrigger value="auto_tags" className="gap-1.5"><Tag className="h-3.5 w-3.5" /> Tags Auto</TabsTrigger>
             <TabsTrigger value="blacklist_kw" className="gap-1.5"><Ban className="h-3.5 w-3.5" /> Palavras Bloqueadas</TabsTrigger>
+            <TabsTrigger value="webhook_log" className="gap-1.5"><Globe className="h-3.5 w-3.5" /> Log Webhooks</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -2421,6 +2511,7 @@ const Settings = () => {
           <TabsContent value="pix"><PixConfigTab /></TabsContent>
           <TabsContent value="auto_tags"><AutoTagRulesTab /></TabsContent>
           <TabsContent value="blacklist_kw"><BlacklistKeywordsTab /></TabsContent>
+          <TabsContent value="webhook_log"><WebhookLogTab /></TabsContent>
         </Tabs>
       </div>
     </div>

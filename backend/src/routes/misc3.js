@@ -1,7 +1,31 @@
+// Migration (run manually on VPS if table doesn't exist):
+// CREATE TABLE IF NOT EXISTS webhook_delivery_log (
+//   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+//   webhook_id UUID, event_type TEXT, url TEXT, status_code INTEGER,
+//   request_body JSONB, response_body TEXT, error TEXT,
+//   created_at TIMESTAMPTZ DEFAULT NOW()
+// );
+
 import { query } from '../database.js';
 
 export default async function misc3Routes(fastify) {
   const auth = { preHandler: fastify.authenticate };
+
+  // ── Webhook Delivery Log ──────────────────────────────────────────────────
+  fastify.get('/webhook-delivery-log', auth, async (req) => {
+    const { status } = req.query;
+    let q = `SELECT * FROM webhook_delivery_log`;
+    const vals = [];
+    let p = 1;
+    if (status === 'success') {
+      q += ` WHERE status_code >= 200 AND status_code < 300`;
+    } else if (status === 'error') {
+      q += ` WHERE (status_code IS NULL OR status_code < 200 OR status_code >= 300 OR error IS NOT NULL)`;
+    }
+    q += ` ORDER BY created_at DESC LIMIT 50`;
+    const { rows } = await query(q, vals);
+    return rows;
+  });
 
   // ── Segments ──────────────────────────────────────────────────────────────
   fastify.get('/segments', auth, async (req) => {

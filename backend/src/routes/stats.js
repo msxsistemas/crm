@@ -348,6 +348,22 @@ export default async function statsRoutes(fastify) {
     return result;
   });
 
+  // Agent stats for today
+  fastify.get('/stats/agents-today', auth, async (req) => {
+    const { rows } = await query(`
+      SELECT
+        p.id, p.full_name AS name, p.avatar_url, p.status,
+        COUNT(DISTINCT c.id) FILTER (WHERE c.created_at >= CURRENT_DATE) AS conversations_today,
+        COUNT(DISTINCT c.id) FILTER (WHERE c.status != 'closed') AS open_now,
+        COUNT(DISTINCT c.id) FILTER (WHERE c.status = 'closed' AND c.updated_at >= CURRENT_DATE) AS closed_today
+      FROM profiles p
+      LEFT JOIN conversations c ON c.assigned_to = p.id
+      WHERE p.role IN ('agent', 'supervisor', 'admin')
+      GROUP BY p.id ORDER BY conversations_today DESC
+    `);
+    return rows;
+  });
+
   // Birthdays endpoint — replaces loading 2000 contacts on the client
   fastify.get('/stats/birthdays', auth, async (req) => {
     const cacheKey = `stats:birthdays`;

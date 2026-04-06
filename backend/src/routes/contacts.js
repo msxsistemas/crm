@@ -201,4 +201,52 @@ export default async function contactRoutes(fastify) {
     }
     return { imported, skipped, errors };
   });
+
+  // Import contacts via vCard (.vcf)
+  fastify.post('/contacts/import-vcf', auth, async (req, reply) => {
+    const { vcf } = req.body;
+    if (!vcf || typeof vcf !== 'string') return reply.status(400).send({ error: 'vcf text obrigatório' });
+
+    // Split into individual vCard blocks
+    const blocks = vcf.split(/BEGIN:VCARD/i).filter(b => b.includes('END:VCARD'));
+
+    let imported = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    for (const block of blocks) {
+      try {
+        // Extract FN (full name)
+        const fnMatch = block.match(/^FN[^:]*:(.+)$/mi);
+        const name = fnMatch ? fnMatch[1].trim().replace(/\\n/g, ' ').replace(/\r/g, '') : null;
+
+        // Extract first TEL
+        const telMatch = block.match(/^TEL[^:]*:(.+)$/mi);
+        let phone = telMatch ? telMatch[1].trim().replace(/\r/g, '') : null;
+        if (phone) {
+          // Keep digits and leading +
+          const cleaned = phone.replace(/[^\d+]/g, '');
+          phone = cleaned || null;
+        }
+
+        // Extract EMAIL (optional)
+        const emailMatch = block.match(/^EMAIL[^:]*:(.+)$/mi);
+        const email = emailMatch ? emailMatch[1].trim().replace(/\r/g, '') : null;
+
+        if (!phone) { skipped++; continue; }
+        if (!name) { skipped++; continue; }
+
+        await query(
+          `INSERT INTO contacts (name, phone, email) VALUES ($1, $2, $3)
+           ON CONFLICT (phone) DO UPDATE SET name = EXCLUDED.name RETURNING *`,
+          [name, phone, email || null]
+        );
+        imported++;
+      } catch (e) {
+        errors++;
+      }
+    }
+
+    return { imported, skipped, errors };
+  });
 }

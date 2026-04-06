@@ -44,6 +44,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import UserFormDialog from "@/components/users/UserFormDialog";
 import { AgentPermissions, DEFAULT_PERMISSIONS } from "@/hooks/usePermissions";
+import AgentStatsPanel from "@/components/users/AgentStatsPanel";
 
 // ─── Page permission definitions ───
 const PAGE_PERMISSIONS: { key: keyof AgentPermissions["pages"]; label: string; description: string }[] = [
@@ -544,6 +545,7 @@ const UsersPage = () => {
             {filtered.map(u => <UserCardList key={u.id} u={u} />)}
           </div>
         )}
+          <AgentStatsPanel />
         </div>
       </div>
 

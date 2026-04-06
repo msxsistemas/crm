@@ -160,6 +160,7 @@ const Contacts = () => {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 350);
   const csvInputRef = useRef<HTMLInputElement>(null);
+  const vcfInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
 
   // WhatsApp import
@@ -776,6 +777,22 @@ const Contacts = () => {
     }
   };
 
+  // ── vCard (.vcf) import ──
+  const handleImportVCF = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (vcfInputRef.current) vcfInputRef.current.value = "";
+    try {
+      const text = await file.text();
+      const result = await api.post<{ imported: number; skipped: number; errors: number }>('/contacts/import-vcf', { vcf: text });
+      toast.success(`${result.imported} contatos importados (${result.skipped} ignorados)`);
+      queryClient.invalidateQueries({ queryKey: ['contacts'] });
+      fetchContacts();
+    } catch (err: any) {
+      toast.error("Erro ao importar vCard: " + (err?.message || "Verifique o arquivo .vcf"));
+    }
+  };
+
   // ── Duplicate detection ──
   const checkDuplicatePhone = async (phone: string) => {
     const raw = unformatPhone(phone);
@@ -1147,6 +1164,9 @@ const Contacts = () => {
                   <DropdownMenuItem className="gap-2" onClick={openWhatsAppImport} disabled={importingWhatsApp}>
                     <Smartphone className="h-4 w-4 text-green-600" /> Importar do WhatsApp
                   </DropdownMenuItem>
+                  <DropdownMenuItem className="gap-2" onClick={() => vcfInputRef.current?.click()}>
+                    <Upload className="h-4 w-4 text-purple-600" /> Importar vCard (.vcf)
+                  </DropdownMenuItem>
                   <DropdownMenuItem className="gap-2" onClick={async () => {
                     toast.info("Sincronizando fotos de perfil...");
                     try {
@@ -1237,6 +1257,13 @@ const Contacts = () => {
         accept=".csv"
         className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) handleCsvFileSelect(f); if (csvImportFileRef.current) csvImportFileRef.current.value = ""; }}
+      />
+      <input
+        ref={vcfInputRef}
+        type="file"
+        accept=".vcf"
+        className="hidden"
+        onChange={handleImportVCF}
       />
 
       {/* CONTACTS TAB */}
