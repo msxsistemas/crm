@@ -604,6 +604,78 @@ const AppSidebar = ({ onStartTour }: AppSidebarProps) => {
               </div>
             )}
             <div className={cn("flex items-center", collapsed ? "flex-col gap-1" : "gap-1")}>
+              {/* Notification Bell */}
+              <div className="relative" ref={notifPanelRef}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => setNotifOpen(prev => !prev)}
+                      className="relative p-2 rounded-lg text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 transition-colors"
+                    >
+                      <Bell className="h-4 w-4" />
+                      {unreadCount > 0 && (
+                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-0.5 leading-none">
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side={collapsed ? "right" : "top"} className="text-xs">
+                    Notificações{unreadCount > 0 ? ` (${unreadCount})` : ''}
+                  </TooltipContent>
+                </Tooltip>
+
+                {/* Notifications dropdown panel */}
+                {notifOpen && (
+                  <div className="absolute bottom-10 left-0 z-50 w-80 rounded-xl shadow-lg border border-sidebar-border bg-sidebar text-sidebar-foreground overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-sidebar-border">
+                      <span className="text-sm font-semibold">Notificações</span>
+                      <div className="flex items-center gap-2">
+                        {unreadCount > 0 && (
+                          <button
+                            onClick={markAllRead}
+                            className="text-[11px] text-blue-500 hover:text-blue-400 transition-colors"
+                          >
+                            Marcar todas como lidas
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setNotifOpen(false)}
+                          className="p-0.5 rounded text-sidebar-foreground/50 hover:text-sidebar-foreground transition-colors"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="max-h-80 overflow-y-auto divide-y divide-sidebar-border/50">
+                      {notifications.length === 0 ? (
+                        <p className="text-center text-xs text-sidebar-foreground/50 py-8">Nenhuma notificação</p>
+                      ) : (
+                        notifications.map(n => (
+                          <button
+                            key={n.id}
+                            onClick={() => markOneRead(n.id)}
+                            className={cn(
+                              "w-full text-left px-4 py-3 hover:bg-sidebar-accent/50 transition-colors",
+                              !n.read && "bg-blue-500/5"
+                            )}
+                          >
+                            <div className="flex items-start gap-2">
+                              <span className={cn("mt-1.5 shrink-0 h-2 w-2 rounded-full", !n.read ? "bg-blue-500" : "bg-transparent")} />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-medium truncate">{n.title}</p>
+                                <p className="text-[11px] text-sidebar-foreground/60 mt-0.5 line-clamp-2">{n.message}</p>
+                                <p className="text-[10px] text-sidebar-foreground/40 mt-1">{formatRelativeTime(n.created_at)}</p>
+                              </div>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
