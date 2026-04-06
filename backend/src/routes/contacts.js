@@ -154,6 +154,30 @@ export default async function contactRoutes(fastify) {
     return { updated, total: contacts.length };
   });
 
+  // Contact unified profile
+  fastify.get('/contacts/:id/profile', auth, async (req, reply) => {
+    const { rows: contact } = await query('SELECT * FROM contacts WHERE id=$1', [req.params.id]);
+    if (!contact[0]) return reply.code(404).send({ error: 'Not found' });
+
+    const [convs, notes, csatData] = await Promise.all([
+      query(`SELECT c.id, c.status, c.created_at, c.closed_at, c.last_message_body, c.last_message_at, c.csat_score, p.full_name as agent_name, cat.name as category_name FROM conversations c LEFT JOIN profiles p ON p.id=c.assigned_to LEFT JOIN categories cat ON cat.id=c.category_id WHERE c.contact_id=$1 ORDER BY c.created_at DESC`, [req.params.id]),
+      query(`SELECT n.*, p.full_name as author_name FROM conversation_notes n JOIN profiles p ON p.id=n.author_id JOIN conversations c ON c.id=n.conversation_id WHERE c.contact_id=$1 ORDER BY n.created_at DESC LIMIT 20`, [req.params.id]),
+      query(`SELECT ROUND(AVG(csat_score)::numeric,2) as avg_csat, COUNT(*) FILTER (WHERE csat_score IS NOT NULL) as csat_count FROM conversations WHERE contact_id=$1`, [req.params.id])
+    ]);
+
+    return {
+      contact: contact[0],
+      conversations: convs.rows,
+      notes: notes.rows,
+      csat: csatData.rows[0],
+      stats: {
+        total_conversations: convs.rows.length,
+        open_conversations: convs.rows.filter(c => c.status === 'open').length,
+        avg_csat: csatData.rows[0]?.avg_csat
+      }
+    };
+  });
+
   // Contact conversation history
   fastify.get('/contacts/:id/conversations', auth, async (req) => {
     const { rows } = await query(`

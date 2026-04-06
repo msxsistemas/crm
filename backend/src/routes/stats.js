@@ -1,3 +1,16 @@
+// CREATE TABLE IF NOT EXISTS scheduled_reports (
+//   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+//   name TEXT NOT NULL,
+//   emails TEXT[] NOT NULL,
+//   frequency TEXT DEFAULT 'weekly',
+//   report_type TEXT DEFAULT 'conversations',
+//   is_active BOOLEAN DEFAULT true,
+//   created_by UUID REFERENCES profiles(id),
+//   next_run_at TIMESTAMPTZ,
+//   last_run_at TIMESTAMPTZ,
+//   created_at TIMESTAMPTZ DEFAULT NOW()
+// );
+
 import { query } from '../database.js';
 import { redis } from '../redis.js';
 
@@ -346,6 +359,28 @@ export default async function statsRoutes(fastify) {
     // Cache 2 minutes
     await redis.set(cacheKey, JSON.stringify(result), 'EX', 120).catch(() => null);
     return result;
+  });
+
+  // ── Scheduled Reports Config ──────────────────────────────────────────────
+  fastify.get('/scheduled-reports', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM scheduled_reports WHERE created_by=$1 ORDER BY created_at DESC', [req.user.id]);
+    return rows;
+  });
+
+  fastify.post('/scheduled-reports', auth, async (req, reply) => {
+    const { name, emails, frequency, report_type } = req.body;
+    // frequency: 'daily' | 'weekly'
+    // report_type: 'conversations' | 'agents' | 'csat'
+    const { rows } = await query(
+      "INSERT INTO scheduled_reports (name, emails, frequency, report_type, created_by, next_run_at) VALUES ($1,$2,$3,$4,$5, CASE WHEN $3='daily' THEN NOW() + interval '1 day' ELSE NOW() + interval '7 days' END) RETURNING *",
+      [name, emails, frequency, report_type || 'conversations', req.user.id]
+    );
+    return reply.code(201).send(rows[0]);
+  });
+
+  fastify.delete('/scheduled-reports/:id', auth, async (req) => {
+    await query('DELETE FROM scheduled_reports WHERE id=$1 AND created_by=$2', [req.params.id, req.user.id]);
+    return { ok: true };
   });
 
   // CSAT stats

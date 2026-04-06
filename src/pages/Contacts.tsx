@@ -8,7 +8,7 @@ import {
   Phone, CheckCircle, Users, MessageSquare, BarChart3,
   Calendar as CalendarIcon, CalendarDays, CalendarRange, ChevronDown,
   User, Mail, MapPin, Info, Settings, Cake, Filter, Smartphone,
-  Layers, Calculator, Eye, RefreshCw, Tag, Clock, GitMerge
+  Layers, Calculator, Eye, RefreshCw, Tag, Clock, GitMerge, ExternalLink
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1399,6 +1399,9 @@ const Contacts = () => {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center justify-center gap-0.5">
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50" onClick={() => navigate(`/contatos/${contact.id}/profile`)} title="Ver Perfil">
+                              <ExternalLink className="h-4 w-4" />
+                            </Button>
                             <Button variant="ghost" size="icon" className="h-8 w-8 text-purple-600 hover:text-purple-700 hover:bg-purple-50" onClick={() => navigate()} title="Ver Timeline">
                               <Clock className="h-4 w-4" />
                             </Button>

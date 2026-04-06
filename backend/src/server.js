@@ -164,6 +164,7 @@ await fastify.register(proposalRoutes);
 await fastify.register(internalChatRoutes);
 await fastify.register(metaWhatsAppRoutes);
 await fastify.register(statsRoutes);
+await fastify.register(import('./routes/webhooks-out.js'));
 
 // 404 handler
 fastify.setNotFoundHandler((req, reply) => {
@@ -233,6 +234,59 @@ const autoCloseInactive = async () => {
 };
 setInterval(autoCloseInactive, 60 * 60 * 1000); // a cada hora
 autoCloseInactive(); // rodar na inicialização também
+
+// Scheduled reports job — runs every hour
+setInterval(async () => {
+  try {
+    const { rows: reports } = await pool.query("SELECT * FROM scheduled_reports WHERE next_run_at <= NOW() AND is_active=true");
+    for (const report of reports) {
+      try {
+        // Generate CSV data
+        let csvData = '';
+        if (report.report_type === 'conversations') {
+          const { rows } = await pool.query(`
+            SELECT DATE(created_at) as date, COUNT(*) as total,
+              COUNT(*) FILTER (WHERE status='closed') as closed,
+              COUNT(*) FILTER (WHERE status='open') as open,
+              ROUND(AVG(csat_score)::numeric,2) as avg_csat
+            FROM conversations
+            WHERE created_at > NOW() - interval '7 days'
+            GROUP BY DATE(created_at) ORDER BY date DESC
+          `);
+          csvData = 'Data,Total,Fechadas,Abertas,CSAT Médio\n' + rows.map(r => `${r.date},${r.total},${r.closed},${r.open},${r.avg_csat||''}`).join('\n');
+        } else if (report.report_type === 'agents') {
+          const { rows } = await pool.query(`
+            SELECT p.full_name, COUNT(c.id) FILTER (WHERE c.status='closed' AND c.closed_at > NOW()-interval '7 days') as closed_week,
+              ROUND(AVG(c.csat_score)::numeric,2) as avg_csat
+            FROM profiles p LEFT JOIN conversations c ON c.assigned_to=p.id
+            WHERE p.role IN ('agent','supervisor') GROUP BY p.full_name ORDER BY closed_week DESC
+          `);
+          csvData = 'Agente,Fechadas (7d),CSAT Médio\n' + rows.map(r => `${r.full_name},${r.closed_week||0},${r.avg_csat||''}`).join('\n');
+        }
+
+        // Send via Resend API (if configured) or log
+        const resendKey = process.env.RESEND_API_KEY;
+        if (resendKey && csvData) {
+          const emails = Array.isArray(report.emails) ? report.emails : [report.emails];
+          await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${resendKey}` },
+            body: JSON.stringify({
+              from: process.env.REPORT_FROM_EMAIL || 'relatorios@msxcrm.com',
+              to: emails,
+              subject: `Relatório ${report.name} — ${new Date().toLocaleDateString('pt-BR')}`,
+              html: `<p>Segue o relatório <b>${report.name}</b> em anexo.</p><pre>${csvData}</pre>`
+            })
+          });
+        }
+
+        // Update next_run_at
+        const next = report.frequency === 'daily' ? "NOW() + interval '1 day'" : "NOW() + interval '7 days'";
+        await pool.query(`UPDATE scheduled_reports SET next_run_at=${next}, last_run_at=NOW() WHERE id=$1`, [report.id]);
+      } catch(e) { console.error('Report error:', report.id, e.message); }
+    }
+  } catch(e) { /* silent */ }
+}, 3600000); // every hour
 
 // Scheduled messages job — runs every minute
 setInterval(async () => {

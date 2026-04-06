@@ -2729,6 +2729,251 @@ const HsmTemplatesTab = () => {
   );
 };
 
+// ─── Relatórios Agendados Tab ───
+const RelatoriosAgendadosTab = () => {
+  const [reports, setReports] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ name: '', emails: '', frequency: 'weekly', report_type: 'conversations' });
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await api.get<any[]>('/scheduled-reports');
+      setReports(data || []);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleCreate = async () => {
+    if (!form.name || !form.emails) { toast.error("Nome e emails são obrigatórios"); return; }
+    setSaving(true);
+    try {
+      const emails = form.emails.split(',').map((e: string) => e.trim()).filter(Boolean);
+      await api.post('/scheduled-reports', { ...form, emails });
+      toast.success("Relatório agendado criado!");
+      setForm({ name: '', emails: '', frequency: 'weekly', report_type: 'conversations' });
+      await load();
+    } catch { toast.error("Erro ao criar relatório agendado"); }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await api.delete(`/scheduled-reports/${id}`);
+      toast.success("Relatório removido");
+      setReports(prev => prev.filter(r => r.id !== id));
+    } catch { toast.error("Erro ao remover relatório"); }
+  };
+
+  const freqLabel = (f: string) => f === 'daily' ? 'Diário' : 'Semanal';
+  const typeLabel = (t: string) => t === 'conversations' ? 'Conversas' : t === 'agents' ? 'Agentes' : 'CSAT';
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="font-semibold text-foreground">Relatórios Agendados por Email</h3>
+        <p className="text-sm text-muted-foreground mt-1">Configure relatórios que serão enviados automaticamente por email.</p>
+      </div>
+
+      <Card className="p-4 space-y-3">
+        <h4 className="text-sm font-medium text-foreground">Novo Relatório</h4>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Input placeholder="Nome do relatório" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
+          <Input placeholder="Emails (separados por vírgula)" value={form.emails} onChange={e => setForm(p => ({ ...p, emails: e.target.value }))} />
+          <Select value={form.frequency} onValueChange={v => setForm(p => ({ ...p, frequency: v }))}>
+            <SelectTrigger><SelectValue placeholder="Frequência" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="daily">Diário</SelectItem>
+              <SelectItem value="weekly">Semanal</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={form.report_type} onValueChange={v => setForm(p => ({ ...p, report_type: v }))}>
+            <SelectTrigger><SelectValue placeholder="Tipo" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="conversations">Conversas</SelectItem>
+              <SelectItem value="agents">Agentes</SelectItem>
+              <SelectItem value="csat">CSAT</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <Button size="sm" className="gap-1.5" onClick={handleCreate} disabled={saving}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Criar Relatório
+        </Button>
+      </Card>
+
+      {loading ? (
+        <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+      ) : reports.length === 0 ? (
+        <p className="text-center text-sm text-muted-foreground py-8">Nenhum relatório agendado</p>
+      ) : (
+        <div className="space-y-2">
+          {reports.map(r => (
+            <Card key={r.id} className="p-4 flex items-center justify-between gap-4">
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-foreground truncate">{r.name}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {Array.isArray(r.emails) ? r.emails.join(', ') : r.emails} &bull; {freqLabel(r.frequency)} &bull; {typeLabel(r.report_type)}
+                </p>
+                {r.last_run_at && <p className="text-xs text-muted-foreground">Último envio: {new Date(r.last_run_at).toLocaleString('pt-BR')}</p>}
+              </div>
+              <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-600 hover:bg-red-50 shrink-0" onClick={() => handleDelete(r.id)}>
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── Webhooks de Saída Tab ───
+const WebhooksOutTab = () => {
+  const [webhooks, setWebhooks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testResults, setTestResults] = useState<Record<string, any>>({});
+  const [form, setForm] = useState({ name: '', url: '', secret: '', events: [] as string[] });
+
+  const ALL_EVENTS = [
+    { value: 'conversation.created', label: 'Nova conversa' },
+    { value: 'conversation.closed', label: 'Conversa fechada' },
+    { value: 'conversation.assigned', label: 'Conversa atribuída' },
+    { value: 'message.received', label: 'Mensagem recebida' },
+  ];
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await api.get<any[]>('/webhooks-out');
+      setWebhooks(data || []);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleEvent = (ev: string) => {
+    setForm(p => ({
+      ...p,
+      events: p.events.includes(ev) ? p.events.filter(e => e !== ev) : [...p.events, ev]
+    }));
+  };
+
+  const handleCreate = async () => {
+    if (!form.name || !form.url) { toast.error("Nome e URL são obrigatórios"); return; }
+    setSaving(true);
+    try {
+      await api.post('/webhooks-out', form);
+      toast.success("Webhook criado!");
+      setForm({ name: '', url: '', secret: '', events: [] });
+      await load();
+    } catch { toast.error("Erro ao criar webhook"); }
+    finally { setSaving(false); }
+  };
+
+  const handleToggleActive = async (id: string, is_active: boolean) => {
+    try {
+      await api.patch(`/webhooks-out/${id}`, { is_active: !is_active });
+      setWebhooks(prev => prev.map(w => w.id === id ? { ...w, is_active: !is_active } : w));
+    } catch { toast.error("Erro ao atualizar webhook"); }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await api.delete(`/webhooks-out/${id}`);
+      toast.success("Webhook removido");
+      setWebhooks(prev => prev.filter(w => w.id !== id));
+    } catch { toast.error("Erro ao remover webhook"); }
+  };
+
+  const handleTest = async (id: string) => {
+    setTestResults(p => ({ ...p, [id]: { loading: true } }));
+    try {
+      const result = await api.post<any>(`/webhooks-out/${id}/test`, {});
+      setTestResults(p => ({ ...p, [id]: result }));
+    } catch {
+      setTestResults(p => ({ ...p, [id]: { ok: false, error: 'Erro de conexão' } }));
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="font-semibold text-foreground">Webhooks de Saída</h3>
+        <p className="text-sm text-muted-foreground mt-1">Configure URLs que receberão eventos do CRM em tempo real.</p>
+      </div>
+
+      <Card className="p-4 space-y-3">
+        <h4 className="text-sm font-medium text-foreground">Novo Webhook</h4>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Input placeholder="Nome" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
+          <Input placeholder="URL (https://...)" value={form.url} onChange={e => setForm(p => ({ ...p, url: e.target.value }))} />
+          <Input placeholder="Secret (opcional)" value={form.secret} onChange={e => setForm(p => ({ ...p, secret: e.target.value }))} />
+        </div>
+        <div>
+          <p className="text-xs font-medium text-muted-foreground mb-2">Eventos:</p>
+          <div className="flex flex-wrap gap-3">
+            {ALL_EVENTS.map(ev => (
+              <label key={ev.value} className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox checked={form.events.includes(ev.value)} onCheckedChange={() => toggleEvent(ev.value)} />
+                {ev.label}
+              </label>
+            ))}
+          </div>
+        </div>
+        <Button size="sm" className="gap-1.5" onClick={handleCreate} disabled={saving}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Criar Webhook
+        </Button>
+      </Card>
+
+      {loading ? (
+        <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+      ) : webhooks.length === 0 ? (
+        <p className="text-center text-sm text-muted-foreground py-8">Nenhum webhook configurado</p>
+      ) : (
+        <div className="space-y-2">
+          {webhooks.map(w => (
+            <Card key={w.id} className="p-4 space-y-2">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium text-foreground truncate">{w.name}</p>
+                    <Badge variant="outline" className={w.is_active ? 'text-green-600 border-green-500/30 bg-green-500/10' : 'text-gray-500 border-gray-300'}>
+                      {w.is_active ? 'Ativo' : 'Inativo'}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate">{w.url}</p>
+                  {Array.isArray(w.events) && w.events.length > 0 && (
+                    <p className="text-xs text-muted-foreground mt-0.5">{w.events.join(', ')}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <Switch checked={w.is_active} onCheckedChange={() => handleToggleActive(w.id, w.is_active)} />
+                  <Button variant="ghost" size="sm" className="text-xs gap-1" onClick={() => handleTest(w.id)}>
+                    {testResults[w.id]?.loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />} Testar
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50" onClick={() => handleDelete(w.id)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              {testResults[w.id] && !testResults[w.id].loading && (
+                <div className={`text-xs px-2 py-1 rounded ${testResults[w.id].ok ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'}`}>
+                  {testResults[w.id].ok ? `✓ Sucesso (HTTP ${testResults[w.id].status})` : `✗ Falhou: ${testResults[w.id].error || `HTTP ${testResults[w.id].status}`}`}
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("geral");
 
@@ -2758,6 +3003,8 @@ const Settings = () => {
             <TabsTrigger value="blacklist_kw" className="gap-1.5"><Ban className="h-3.5 w-3.5" /> Palavras Bloqueadas</TabsTrigger>
             <TabsTrigger value="webhook_log" className="gap-1.5"><Globe className="h-3.5 w-3.5" /> Log Webhooks</TabsTrigger>
             <TabsTrigger value="hsm_templates_local" className="gap-1.5"><Zap className="h-3.5 w-3.5" /> Templates HSM</TabsTrigger>
+            <TabsTrigger value="relatorios_agendados" className="gap-1.5"><Star className="h-3.5 w-3.5" /> Relatórios Agendados</TabsTrigger>
+            <TabsTrigger value="webhooks_out" className="gap-1.5"><Globe className="h-3.5 w-3.5" /> Webhooks de Saída</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -2777,6 +3024,8 @@ const Settings = () => {
           <TabsContent value="blacklist_kw"><BlacklistKeywordsTab /></TabsContent>
           <TabsContent value="webhook_log"><WebhookLogTab /></TabsContent>
           <TabsContent value="hsm_templates_local"><HsmTemplatesTab /></TabsContent>
+          <TabsContent value="relatorios_agendados"><RelatoriosAgendadosTab /></TabsContent>
+          <TabsContent value="webhooks_out"><WebhooksOutTab /></TabsContent>
         </Tabs>
       </div>
     </div>
