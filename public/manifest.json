@@ -4,16 +4,29 @@
   "description": "CRM de Atendimento MSX",
   "start_url": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#ffffff",
   "theme_color": "#3b82f6",
-  "orientation": "portrait-primary",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ],
   "categories": ["business", "productivity"],
   "shortcuts": [
-    { "name": "Inbox", "url": "/inbox", "description": "Ir para o Inbox" },
-    { "name": "Contatos", "url": "/contacts", "description": "Ver Contatos" }
-  ]
+    {
+      "name": "Inbox",
+      "short_name": "Inbox",
+      "description": "Ir para o Inbox de mensagens",
+      "url": "/inbox",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Contatos",
+      "short_name": "Contatos",
+      "description": "Ver lista de contatos",
+      "url": "/contatos",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "screenshots": []
 }

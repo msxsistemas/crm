@@ -5163,6 +5163,86 @@ const GoogleSheetsSection = () => {
   );
 };
 
+// ─── Google Calendar Section ──────────────────────────────────────────────────
+const GoogleCalendarSection = () => {
+  const [status, setStatus] = useState<{ connected: boolean; email?: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+
+  const loadStatus = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/google-calendar/status');
+      setStatus(res.data);
+    } catch {
+      setStatus({ connected: false });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadStatus(); }, []);
+
+  const handleConnect = async () => {
+    setConnecting(true);
+    try {
+      const res = await api.get('/google-calendar/auth-url');
+      window.location.href = res.data.url;
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || 'Erro ao obter URL de autenticação');
+      setConnecting(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    setDisconnecting(true);
+    try {
+      await api.delete('/google-calendar/disconnect');
+      toast.success('Google Calendar desconectado');
+      setStatus({ connected: false });
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error || 'Erro ao desconectar');
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
+  return (
+    <Card className="p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="font-semibold flex items-center gap-2">
+            <span>Google Calendar</span>
+            {status?.connected && <Badge variant="secondary" className="bg-emerald-100 text-emerald-700 text-xs">Conectado</Badge>}
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">
+            Sincronize seus compromissos do CRM com o Google Calendar
+          </p>
+          {status?.connected && status.email && (
+            <p className="text-xs text-muted-foreground mt-1">Conta: <span className="font-medium">{status.email}</span></p>
+          )}
+        </div>
+        <div>
+          {loading ? (
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mt-1" />
+          ) : status?.connected ? (
+            <Button variant="outline" size="sm" onClick={handleDisconnect} disabled={disconnecting}>
+              {disconnecting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Desconectar
+            </Button>
+          ) : (
+            <Button size="sm" onClick={handleConnect} disabled={connecting} className="gap-1.5">
+              {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Conectar Google Calendar
+            </Button>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+};
+
 // ─── Organização Tab ──────────────────────────────────────────────────────────
 const OrganizacaoTab = () => {
   const { user } = useAuth();
@@ -5493,6 +5573,9 @@ const IntegracaoTab = () => {
 
       {/* Google Sheets Export */}
       <GoogleSheetsSection />
+
+      {/* Google Calendar */}
+      <GoogleCalendarSection />
 
       {/* Create dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -6141,6 +6224,200 @@ const CustomSurveysTab = () => {
   );
 };
 
+// ─── Fila VIP / Queue Priority Tab ───
+interface QueueRule {
+  id: string;
+  name: string;
+  condition_type: string;
+  condition_value: string;
+  priority_boost: number;
+  enabled: boolean;
+}
+
+const CONDITION_LABELS: Record<string, string> = {
+  lead_score_above: "Lead Score acima de",
+  csat_above: "CSAT médio acima de",
+  tag_contains: "Tag contém",
+  is_returning: "Contato recorrente",
+};
+
+const QueuePriorityTab = () => {
+  const [rules, setRules] = useState<QueueRule[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<QueueRule | null>(null);
+  const [form, setForm] = useState({ name: '', condition_type: 'lead_score_above', condition_value: '70', priority_boost: 10 });
+
+  const fetchRules = useCallback(async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch('/queue-priority-rules', { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (res.ok) setRules(await res.json());
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchRules(); }, [fetchRules]);
+
+  const openCreate = () => {
+    setEditing(null);
+    setForm({ name: '', condition_type: 'lead_score_above', condition_value: '70', priority_boost: 10 });
+    setModalOpen(true);
+  };
+
+  const openEdit = (rule: QueueRule) => {
+    setEditing(rule);
+    setForm({ name: rule.name, condition_type: rule.condition_type, condition_value: rule.condition_value, priority_boost: rule.priority_boost });
+    setModalOpen(true);
+  };
+
+  const saveRule = async () => {
+    setSaving(true);
+    try {
+      const token = localStorage.getItem('token') || '';
+      const method = editing ? 'PUT' : 'POST';
+      const url = editing ? `/queue-priority-rules/${editing.id}` : '/queue-priority-rules';
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(form),
+      });
+      if (res.ok) { setModalOpen(false); fetchRules(); }
+    } finally { setSaving(false); }
+  };
+
+  const toggleRule = async (rule: QueueRule) => {
+    const token = localStorage.getItem('token') || '';
+    await fetch(`/queue-priority-rules/${rule.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ enabled: !rule.enabled }),
+    });
+    fetchRules();
+  };
+
+  const deleteRule = async (id: string) => {
+    if (!confirm('Remover esta regra de prioridade?')) return;
+    const token = localStorage.getItem('token') || '';
+    await fetch(`/queue-priority-rules/${id}`, {
+      method: 'DELETE',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    fetchRules();
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-base">Prioridade de Fila (VIP)</h3>
+          <p className="text-sm text-muted-foreground">Contatos com alto lead score ou bom histórico sobem automaticamente na fila.</p>
+        </div>
+        <Button size="sm" onClick={openCreate}><Plus className="h-4 w-4 mr-1" /> Nova Regra</Button>
+      </div>
+
+      {loading && <p className="text-sm text-muted-foreground">Carregando...</p>}
+
+      {!loading && rules.length === 0 && (
+        <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma regra criada. Crie uma regra para dar prioridade a contatos VIP.</p>
+      )}
+
+      <div className="space-y-2">
+        {rules.map(rule => (
+          <div key={rule.id} className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/30 transition-colors">
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-sm">{rule.name}</p>
+              <p className="text-xs text-muted-foreground">
+                {CONDITION_LABELS[rule.condition_type] || rule.condition_type}
+                {rule.condition_type !== 'is_returning' && ` ${rule.condition_value}`}
+                {' '}→ +{rule.priority_boost} pontos de prioridade
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => toggleRule(rule)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${rule.enabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+                title={rule.enabled ? 'Desativar' : 'Ativar'}
+              >
+                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${rule.enabled ? 'translate-x-4' : 'translate-x-1'}`} />
+              </button>
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(rule)}>
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500 hover:text-red-600" onClick={() => deleteRule(rule.id)}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-background rounded-xl shadow-xl p-6 w-full max-w-md space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="font-semibold">{editing ? 'Editar Regra' : 'Nova Regra de Prioridade'}</h4>
+              <button onClick={() => setModalOpen(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm font-medium">Nome</label>
+                <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Ex: Lead Score Alto" className="mt-1" />
+              </div>
+              <div>
+                <label className="text-sm font-medium">Tipo de Condição</label>
+                <Select value={form.condition_type} onValueChange={v => setForm(f => ({ ...f, condition_type: v }))}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(CONDITION_LABELS).map(([val, label]) => (
+                      <SelectItem key={val} value={val}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {form.condition_type !== 'is_returning' && (
+                <div>
+                  <label className="text-sm font-medium">
+                    {form.condition_type === 'tag_contains' ? 'Texto da tag' : 'Valor mínimo'}
+                  </label>
+                  <Input
+                    value={form.condition_value}
+                    onChange={e => setForm(f => ({ ...f, condition_value: e.target.value }))}
+                    placeholder={form.condition_type === 'tag_contains' ? 'Ex: vip' : 'Ex: 70'}
+                    className="mt-1"
+                  />
+                </div>
+              )}
+              <div>
+                <label className="text-sm font-medium">Boost de Prioridade (pontos)</label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={form.priority_boost}
+                  onChange={e => setForm(f => ({ ...f, priority_boost: parseInt(e.target.value) || 10 }))}
+                  className="mt-1"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setModalOpen(false)}>Cancelar</Button>
+              <Button onClick={saveRule} disabled={saving || !form.name}>
+                {saving ? 'Salvando...' : 'Salvar'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const Settings = () => {
   const [activeTab, setActiveTab] = useState("geral");
 
@@ -6188,6 +6465,7 @@ const Settings = () => {
             <TabsTrigger value="notificacoes_email" className="gap-1.5"><Bell className="h-3.5 w-3.5" /> Notificações E-mail</TabsTrigger>
             <TabsTrigger value="pesquisas_custom" className="gap-1.5"><Send className="h-3.5 w-3.5" /> Pesquisas</TabsTrigger>
             <TabsTrigger value="ai_chatbot" className="gap-1.5"><Bot className="h-3.5 w-3.5" /> Chatbot IA</TabsTrigger>
+            <TabsTrigger value="fila_vip" className="gap-1.5"><Star className="h-3.5 w-3.5" /> Prioridade de Fila</TabsTrigger>
           </TabsList>
 
           <TabsContent value="geral"><GeralTab /></TabsContent>
@@ -6225,6 +6503,7 @@ const Settings = () => {
           <TabsContent value="notificacoes_email"><Suspense fallback={<TabFallback />}><EmailNotificationsTabLazy /></Suspense></TabsContent>
           <TabsContent value="pesquisas_custom"><CustomSurveysTab /></TabsContent>
           <TabsContent value="ai_chatbot"><AIChatbotTab /></TabsContent>
+          <TabsContent value="fila_vip"><QueuePriorityTab /></TabsContent>
         </Tabs>
       </div>
     </div>

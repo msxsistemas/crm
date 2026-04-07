@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Search, Users, Building2, ArrowRight, ClipboardList, MessageSquare } from "lucide-react";
+import { Search, Users, Building2, ArrowRight, ClipboardList, MessageSquare, Sparkles, ChevronDown, ChevronUp } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,10 @@ const TransferDialog = ({ open, onOpenChange, onTransfer, conversationId, recent
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [transferNote, setTransferNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [includeSummary, setIncludeSummary] = useState(true);
+  const [summaryText, setSummaryText] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [showSummaryPreview, setShowSummaryPreview] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -61,9 +65,30 @@ const TransferDialog = ({ open, onOpenChange, onTransfer, conversationId, recent
       } catch {
         setTeams([]);
       }
+      // Load AI summary if conversationId provided
+      if (conversationId) {
+        setSummaryLoading(true);
+        try {
+          const sum = await api.get<{ summary: string; next_steps?: string[] }>(`/conversations/${conversationId}/summary`);
+          if (sum?.summary) {
+            let text = sum.summary;
+            const steps = sum.next_steps;
+            if (Array.isArray(steps) && steps.length) {
+              text += '\n\nPróximos passos: ' + steps.join(' | ');
+            }
+            setSummaryText(text);
+            setIncludeSummary(true);
+          }
+        } catch {
+          setSummaryText(null);
+          setIncludeSummary(false);
+        } finally {
+          setSummaryLoading(false);
+        }
+      }
     };
     load();
-  }, [open]);
+  }, [open, conversationId]);
 
   // Reset state when dialog closes
   useEffect(() => {
@@ -72,6 +97,9 @@ const TransferDialog = ({ open, onOpenChange, onTransfer, conversationId, recent
       setSearch("");
       setTransferNote("");
       setActiveTab("atendente" as const);
+      setSummaryText(null);
+      setIncludeSummary(true);
+      setShowSummaryPreview(false);
     }
   }, [open]);
 
@@ -109,8 +137,9 @@ const TransferDialog = ({ open, onOpenChange, onTransfer, conversationId, recent
           agent_id: activeTab === "atendente" ? selectedId : undefined,
           team_id: activeTab === "time" ? selectedId : undefined,
           note: transferNote,
+          include_summary: includeSummary && !!summaryText,
         });
-        toast.success(`Conversa transferida para ${selectedName}`);
+        toast.success(`Conversa transferida para ${selectedName} com contexto`);
         onTransfer(
           activeTab === "atendente" ? "user" : "department",
           selectedId,
@@ -259,8 +288,47 @@ const TransferDialog = ({ open, onOpenChange, onTransfer, conversationId, recent
           )}
         </div>
 
-        {/* Recent messages context */}
-        {recentMessages.length > 0 && (
+        {/* AI Summary context */}
+        {summaryLoading ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+            <Sparkles className="h-3.5 w-3.5 animate-pulse text-primary" />
+            <span>Carregando resumo IA...</span>
+          </div>
+        ) : summaryText ? (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                <span className="text-xs font-medium text-foreground">Resumo IA disponível</span>
+              </div>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={includeSummary}
+                  onChange={(e) => setIncludeSummary(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-border accent-primary"
+                />
+                <span className="text-[11px] text-muted-foreground">Incluir no contexto</span>
+              </label>
+            </div>
+            {includeSummary && (
+              <div className="rounded-md border border-primary/20 bg-primary/5 overflow-hidden">
+                <button
+                  onClick={() => setShowSummaryPreview(!showSummaryPreview)}
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] text-primary font-medium hover:bg-primary/10 transition-colors"
+                >
+                  <span>Ver preview do contexto</span>
+                  {showSummaryPreview ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                </button>
+                {showSummaryPreview && (
+                  <div className="px-2.5 pb-2 text-[11px] text-foreground whitespace-pre-wrap max-h-24 overflow-y-auto border-t border-primary/10">
+                    {summaryText}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : recentMessages.length > 0 ? (
           <div className="space-y-1">
             <div className="flex items-center gap-1.5">
               <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
@@ -276,7 +344,7 @@ const TransferDialog = ({ open, onOpenChange, onTransfer, conversationId, recent
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* Transfer note — always visible, required */}
         <div className="space-y-1.5 pt-1">

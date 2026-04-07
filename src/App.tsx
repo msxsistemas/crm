@@ -136,6 +136,9 @@ const TelegramBots = lazy(() => import("./pages/TelegramBots"));
 const TemplateLibrary = lazy(() => import("./pages/TemplateLibrary"));
 const CampaignROI = lazy(() => import("./pages/CampaignROI"));
 const FocusMode = lazy(() => import("./pages/FocusMode"));
+const ExecutiveDashboard = lazy(() => import("./pages/ExecutiveDashboard"));
+const IntentReport = lazy(() => import("./pages/IntentReport"));
+const GoogleCalendarCallback = lazy(() => import("./pages/GoogleCalendarCallback"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -264,7 +267,20 @@ const App = () => (
                     <Route path="/telegram-bots" element={<TelegramBots />} />
                     <Route path="/biblioteca-templates" element={<TemplateLibrary />} />
                     <Route path="/roi-campanhas" element={<CampaignROI />} />
+                    <Route path="/executive-dashboard" element={<ExecutiveDashboard />} />
+                    <Route path="/relatorio-intencoes" element={<IntentReport />} />
                   </Route>
+                  {/* Google Calendar callback — standalone, sem AppLayout */}
+                  <Route
+                    path="/google-calendar/callback"
+                    element={
+                      <ProtectedRoute requiredRole="user">
+                        <Suspense fallback={<PageLoader />}>
+                          <GoogleCalendarCallback />
+                        </Suspense>
+                      </ProtectedRoute>
+                    }
+                  />
                   {/* Modo Foco — standalone, sem AppLayout */}
                   <Route
                     path="/foco"

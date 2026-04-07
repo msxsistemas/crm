@@ -1,4 +1,4 @@
-const CACHE_NAME = 'msx-crm-v9'
+const CACHE_NAME = 'msx-crm-v10'
 const OFFLINE_URL = '/offline.html'
 
 // Assets estáticos a pré-cachear na instalação
@@ -25,23 +25,74 @@ self.addEventListener('activate', e => {
   self.clients.claim()
 })
 
+// ── Push Notifications ────────────────────────────────────────────────────────
 self.addEventListener('push', (event) => {
-  const data = event.data?.json() || {};
+  let data = {};
+  try {
+    data = event.data?.json() || {};
+  } catch {
+    data = { title: 'Nova mensagem', body: event.data?.text() || '' };
+  }
+
+  const title = data.title || 'MSX CRM';
+  const options = {
+    body: data.body || '',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    vibrate: [200, 100, 200],
+    tag: data.data?.conversationId ? `conv-${data.data.conversationId}` : 'msx-crm',
+    renotify: true,
+    data: {
+      url: data.data?.conversationId ? `/inbox?c=${data.data.conversationId}` : '/',
+      conversationId: data.data?.conversationId || null,
+      timestamp: data.timestamp || Date.now(),
+    },
+  };
+
   event.waitUntil(
-    self.registration.showNotification(data.title || 'Nova mensagem', {
-      body: data.body || '',
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
-      data: { url: data.url || '/' }
+    self.registration.showNotification(title, options)
+  );
+});
+
+// ── Notification Click ────────────────────────────────────────────────────────
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const targetUrl = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
+      // Tentar focar janela já aberta com a mesma URL
+      for (const client of windowClients) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          client.focus();
+          client.navigate(targetUrl);
+          return;
+        }
+      }
+      // Abrir nova aba se não houver nenhuma
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
     })
   );
 });
 
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  event.waitUntil(clients.openWindow(event.notification.data?.url || '/'));
+// ── Periodic Sync (sincronização offline) ────────────────────────────────────
+self.addEventListener('periodicsync', (event) => {
+  if (event.tag === 'sync-conversations') {
+    event.waitUntil(
+      // Notifica os clientes para re-buscar dados
+      clients.matchAll({ type: 'window' }).then(windowClients => {
+        for (const client of windowClients) {
+          client.postMessage({ type: 'PERIODIC_SYNC', tag: event.tag });
+        }
+      })
+    );
+  }
 });
 
+// ── Fetch Handler ─────────────────────────────────────────────────────────────
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return
 

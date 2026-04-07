@@ -6,6 +6,7 @@ import { query, pool } from '../database.js';
 import { sendMetaMessage } from './meta-whatsapp.js';
 import { enqueueSend } from '../jobs/messageQueue.js';
 import { deliverWebhook } from '../jobs/webhookDelivery.js';
+import { sendPushNotification } from '../notifications/pushNotifications.js';
 
 export default async function messageRoutes(fastify) {
   const auth = { preHandler: fastify.authenticate };
@@ -389,23 +390,31 @@ async function handleEvolutionWebhook(payload, fastify) {
     // Ignore protocol/system messages
     if (messageContent?.protocolMessage || messageContent?.senderKeyDistributionMessage) return;
 
-    // Extract text content
+    // Extract text content (including button/list responses)
+    const buttonsResponse = messageContent?.buttonsResponseMessage;
+    const listResponse = messageContent?.listResponseMessage;
     const textContent = messageContent?.conversation
       || messageContent?.extendedTextMessage?.text
       || messageContent?.imageMessage?.caption
       || messageContent?.videoMessage?.caption
       || messageContent?.documentMessage?.caption
+      || buttonsResponse?.selectedDisplayText
+      || buttonsResponse?.selectedButtonId
+      || listResponse?.singleSelectReply?.selectedRowId
+      || listResponse?.title
       || null;
 
     // Extract media
     const { mediaUrl, mediaType } = extractMedia(messageContent);
 
+    const isButtonResponse = !!(messageContent?.buttonsResponseMessage);
+    const isListResponse = !!(messageContent?.listResponseMessage);
     const content = textContent || (mediaType ? `[${mediaType}]` : '[mensagem]');
-    const type = mediaType || (textContent ? 'text' : 'media');
+    const type = isButtonResponse ? 'button_response' : isListResponse ? 'list_response' : mediaType || (textContent ? 'text' : 'media');
 
     // Use DB transaction for contact + conversation + message creation
     const client = await pool.connect();
-    let conv, msgRow;
+    let conv, msgRow, isNewConversation = false;
     try {
       await client.query('BEGIN');
 
@@ -433,6 +442,7 @@ async function handleEvolutionWebhook(payload, fastify) {
       );
       conv = convs[0];
       if (!conv) {
+        isNewConversation = true;
         const { rows } = await client.query(
           "INSERT INTO conversations (contact_id, connection_name, status) VALUES ($1,$2,'open') RETURNING *",
           [contact.id, instance]
@@ -496,6 +506,65 @@ async function handleEvolutionWebhook(payload, fastify) {
         await recalculateLeadScore(contactIdForScore);
       } catch(e) { /* silent */ }
     })();
+
+    // ── Queue Priority — calcular e aplicar para nova conversa ────────────
+    if (isNewConversation) {
+      (async () => {
+        try {
+          const { rows: rules } = await pool.query(
+            "SELECT * FROM queue_priority_rules WHERE enabled = true"
+          );
+          if (!rules.length) return;
+
+          const { rows: ctData } = await pool.query(
+            'SELECT lead_score, tags FROM contacts WHERE id=$1', [contact.id]
+          );
+          const ct = ctData[0];
+
+          const { rows: csatRows } = await pool.query(
+            `SELECT AVG(csat_score) as avg_csat FROM conversations
+             WHERE contact_id=$1 AND csat_score IS NOT NULL AND status='closed'`,
+            [contact.id]
+          );
+          const avgCsat = parseFloat(csatRows[0]?.avg_csat || '0');
+
+          const { rows: prevConvRows } = await pool.query(
+            "SELECT id FROM conversations WHERE contact_id=$1 AND id != $2 LIMIT 1",
+            [contact.id, conv.id]
+          );
+          const isReturning = prevConvRows.length > 0;
+
+          let boost = 0;
+          for (const rule of rules) {
+            const val = rule.condition_value;
+            if (rule.condition_type === 'lead_score_above') {
+              if ((ct?.lead_score || 0) >= parseInt(val)) boost += rule.priority_boost;
+            } else if (rule.condition_type === 'csat_above') {
+              if (avgCsat >= parseFloat(val)) boost += rule.priority_boost;
+            } else if (rule.condition_type === 'tag_contains') {
+              const tags = ct?.tags || [];
+              if (tags.some(t => t.toLowerCase().includes(val.toLowerCase()))) boost += rule.priority_boost;
+            } else if (rule.condition_type === 'is_returning') {
+              if (isReturning) boost += rule.priority_boost;
+            }
+          }
+
+          if (boost > 0) {
+            await pool.query('UPDATE conversations SET priority=$1 WHERE id=$2', [boost, conv.id]);
+          }
+        } catch(e) { /* silent */ }
+      })();
+    }
+
+    // ── Push notification para agente atribuído ───────────────────────────
+    if (conv.assigned_to) {
+      sendPushNotification(
+        conv.assigned_to,
+        'Nova mensagem',
+        `${contact.name || phone}: ${content}`,
+        { conversationId: conv.id }
+      ).catch(() => {});
+    }
 
     // ── Queue position message — send on new conversation ─────────────────
     if (!conv.assigned_to) {

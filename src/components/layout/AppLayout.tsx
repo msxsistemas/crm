@@ -13,6 +13,7 @@ import { SessionTimeoutWarning } from "@/components/SessionTimeoutWarning";
 import OnboardingWizard from "@/components/OnboardingWizard";
 import { ShortcutsCheatsheet } from "@/components/ShortcutsCheatsheet";
 import { KeyboardShortcutsManager } from "@/components/KeyboardShortcutsManager";
+import PushNotificationSetup from "@/components/PushNotificationSetup";
 
 const AppLayout = () => {
   const { user } = useAuth();
@@ -76,6 +77,7 @@ const AppLayout = () => {
       <ShortcutsCheatsheet open={cheatsheetOpen} onClose={() => setCheatsheetOpen(false)} />
       <SessionTimeoutWarning />
       <OnboardingWizard />
+      <PushNotificationSetup />
     </div>
   );
 };

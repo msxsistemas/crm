@@ -23,6 +23,8 @@
 // ALTER TABLE conversations ADD COLUMN IF NOT EXISTS nps_responded_at TIMESTAMPTZ;
 // ALTER TABLE settings ADD COLUMN IF NOT EXISTS nps_enabled BOOLEAN DEFAULT false;
 // ALTER TABLE settings ADD COLUMN IF NOT EXISTS nps_message TEXT;
+// ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_type TEXT;
+// ALTER TABLE messages ADD COLUMN IF NOT EXISTS metadata JSONB;
 
 import { query, pool, withTransaction } from '../database.js';
 import { cached, invalidate } from '../redis.js';
@@ -94,7 +96,7 @@ export default async function conversationRoutes(fastify) {
       LEFT JOIN contacts ct ON ct.id = c.contact_id
       LEFT JOIN profiles p ON p.id = c.assigned_to
       WHERE ${where} ${cursorClause}
-      ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC
+      ORDER BY c.priority DESC NULLS LAST, c.last_message_at DESC NULLS LAST, c.id DESC
       LIMIT $${p} ${offsetClause}
     `;
 
@@ -212,7 +214,7 @@ export default async function conversationRoutes(fastify) {
   });
 
   fastify.patch('/conversations/:id', auth, async (req, reply) => {
-    const allowed = ['status','assigned_to','category_id','starred','sentiment','label_ids','awaiting_csat','is_merged','merged_into','unread_count','connection_name','last_message_at'];
+    const allowed = ['status','assigned_to','category_id','starred','sentiment','label_ids','awaiting_csat','is_merged','merged_into','unread_count','connection_name','last_message_at','priority','intent_category'];
     const updates = [];
     const params = [];
     let p = 1;
@@ -490,6 +492,52 @@ export default async function conversationRoutes(fastify) {
           fastify.io?.emit('conversation:summary_ready', { conversation_id: req.params.id });
         } catch (e) {
           console.error('AI summary error:', e.message);
+        }
+      })();
+    }
+
+    // ── Classificação de intenção por IA ao fechar conversa ───────────────
+    if (req.body.status === 'closed' && process.env.ANTHROPIC_API_KEY) {
+      (async () => {
+        try {
+          const { rows: intentMsgs } = await query(
+            `SELECT direction, content FROM messages WHERE conversation_id=$1 AND content IS NOT NULL AND content != '' ORDER BY created_at ASC LIMIT 30`,
+            [req.params.id]
+          );
+          if (!intentMsgs.length) return;
+          const transcript = intentMsgs.map(m =>
+            `${m.direction === 'outbound' ? 'Agente' : 'Cliente'}: ${m.content}`
+          ).join('\n');
+
+          const intentRes = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': process.env.ANTHROPIC_API_KEY,
+              'anthropic-version': '2023-06-01',
+            },
+            body: JSON.stringify({
+              model: 'claude-haiku-4-5-20251001',
+              max_tokens: 20,
+              messages: [{
+                role: 'user',
+                content: `Classifique esta conversa em UMA das categorias: duvida, reclamacao, venda, suporte_tecnico, cobranca, agendamento, cancelamento, elogio, outro. Responda APENAS com a categoria.\n\nConversa:\n${transcript}`,
+              }],
+            }),
+          });
+
+          if (!intentRes.ok) return;
+          const intentData = await intentRes.json();
+          const rawCategory = (intentData?.content?.[0]?.text || '').trim().toLowerCase().replace(/\s+/g, '_');
+          const validCategories = ['duvida','reclamacao','venda','suporte_tecnico','cobranca','agendamento','cancelamento','elogio','outro'];
+          const category = validCategories.includes(rawCategory) ? rawCategory : 'outro';
+
+          await query(
+            'UPDATE conversations SET intent_category=$1 WHERE id=$2',
+            [category, req.params.id]
+          );
+        } catch (e) {
+          console.error('Intent classification error:', e.message);
         }
       })();
     }
@@ -1025,5 +1073,120 @@ ${'─'.repeat(60)}
     await query('UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1', [convId]).catch(() => {});
 
     return { video_link: videoLink, room: roomName };
+  });
+
+  // ── Transfer conversa com contexto ────────────────────────────────────────
+  fastify.post('/conversations/:id/transfer', auth, async (req, reply) => {
+    const { agent_id, team_id, note, include_summary = true } = req.body;
+    const convId = req.params.id;
+
+    // Load current conversation + contact info
+    const { rows: convRows } = await query(
+      `SELECT c.*, ct.name as contact_name, ct.phone as contact_phone,
+              p.name as current_agent_name
+       FROM conversations c
+       JOIN contacts ct ON ct.id = c.contact_id
+       LEFT JOIN profiles p ON p.id = c.assigned_to
+       WHERE c.id = $1`,
+      [convId]
+    );
+    if (!convRows[0]) return reply.status(404).send({ error: 'Conversa não encontrada' });
+    const conv = convRows[0];
+    const previousAgentId = conv.assigned_to;
+
+    // Resolve new agent
+    let newAgentId = agent_id || null;
+    let newAgentName = null;
+    if (agent_id) {
+      const { rows: agentRows } = await query('SELECT id, name FROM profiles WHERE id=$1', [agent_id]);
+      if (!agentRows[0]) return reply.status(404).send({ error: 'Agente destino não encontrado' });
+      newAgentId = agentRows[0].id;
+      newAgentName = agentRows[0].name;
+    }
+
+    // Update assigned_to
+    await query(
+      'UPDATE conversations SET assigned_to=$1, updated_at=NOW() WHERE id=$2',
+      [newAgentId, convId]
+    );
+
+    // Register transfer event
+    query(
+      "INSERT INTO conversation_events (conversation_id, event_type, actor_id, actor_name, old_value, new_value) VALUES ($1,'transferred',$2,$3,$4,$5)",
+      [convId, req.user?.id || null, req.user?.name || 'Sistema', conv.current_agent_name || null, newAgentName || newAgentId]
+    ).catch(() => {});
+
+    // Build context: try to get AI summary first (if include_summary=true), fallback to last 10 messages
+    let contextText = '';
+    const { rows: summaryRows } = include_summary ? await query(
+      'SELECT summary, next_steps FROM conversation_summaries WHERE conversation_id=$1',
+      [convId]
+    ).catch(() => ({ rows: [] })) : { rows: [] };
+
+    if (include_summary && summaryRows[0]?.summary) {
+      contextText = summaryRows[0].summary;
+      if (summaryRows[0].next_steps) {
+        let steps = summaryRows[0].next_steps;
+        if (typeof steps === 'string') { try { steps = JSON.parse(steps); } catch { steps = [steps]; } }
+        if (Array.isArray(steps) && steps.length) {
+          contextText += '\n\n**Próximos passos:** ' + steps.join(' | ');
+        }
+      }
+    } else {
+      const { rows: lastMsgs } = await query(
+        `SELECT direction, content, created_at FROM messages
+         WHERE conversation_id=$1 AND is_whisper IS NOT TRUE AND content IS NOT NULL AND content != ''
+         ORDER BY created_at DESC LIMIT 10`,
+        [convId]
+      ).catch(() => ({ rows: [] }));
+      if (lastMsgs.length) {
+        contextText = lastMsgs.reverse().map(m =>
+          `${m.direction === 'outbound' ? 'Agente' : 'Cliente'}: ${m.content}`
+        ).join('\n');
+      }
+    }
+
+    // Build whisper message
+    const transferNote = note ? '\n\n**Nota do agente:** ' + note : '';
+    const whisperContent = '📋 **Contexto da transferência:**\n\n' + (contextText || '(sem histórico disponível)') + transferNote;
+
+    const { rows: whisperRows } = await query(
+      "INSERT INTO messages (conversation_id, content, direction, is_whisper, type) VALUES ($1,$2,'outbound',true,'text') RETURNING *, content as body, (direction='outbound') as from_me",
+      [convId, whisperContent]
+    ).catch(() => ({ rows: [] }));
+
+    await query('UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1', [convId]).catch(() => {});
+
+    // Notify new agent
+    if (newAgentId) {
+      query(
+        "INSERT INTO notifications (user_id, type, title, message, metadata) VALUES ($1,'assignment','Conversa transferida para você',$2,$3) RETURNING *",
+        [newAgentId, `Conversa com ${conv.contact_name || conv.contact_phone} foi transferida para você`, JSON.stringify({ conversation_id: convId })]
+      ).then(({ rows: n }) => {
+        if (n[0]) fastify.io?.to(`user:${newAgentId}`).emit('notification:new', n[0]);
+      }).catch(() => {});
+    }
+
+    // Emit socket events
+    fastify.io?.to(`conversation:${convId}`).emit('message:new', whisperRows[0] || {});
+    fastify.io?.emit('conversation:updated', { id: convId, assigned_to: newAgentId });
+    fastify.io?.emit('conversation:transferred', {
+      conversation_id: convId,
+      from_agent_id: previousAgentId,
+      to_agent_id: newAgentId,
+      to_agent_name: newAgentName,
+      note: note || null,
+    });
+
+    invalidate('conv:list:*').catch(() => {});
+
+    return {
+      ok: true,
+      conversation_id: convId,
+      from_agent_id: previousAgentId,
+      to_agent_id: newAgentId,
+      to_agent_name: newAgentName,
+      context_message: whisperRows[0] || null,
+    };
   });
 }

@@ -121,6 +121,7 @@ interface DBConversation {
   is_merged?: boolean;
   merged_into?: string | null;
   priority?: 'low' | 'normal' | 'high' | 'urgent';
+  queue_priority?: number;
   pinned_message_id?: string | null;
   contacts: DBContact;
   contact_conv_count?: number;
@@ -140,6 +141,9 @@ interface DBMessage {
   whatsapp_message_id?: string | null;
   content?: string;
   is_whisper?: boolean;
+  message_type?: string;
+  metadata?: Record<string, unknown> | null;
+  type?: string;
 }
 
 type TabFilter = "atendendo" | "aguardando" | "encerradas" | "favoritas" | "arquivadas";
@@ -1054,7 +1058,7 @@ const Inbox = () => {
   const loadConversations = useCallback(async () => {
     const { data, error } = await db
       .from("conversations")
-      .select("id, contact_id, instance_name, status, unread_count, last_message_at, assigned_to, category_id, starred, sentiment, label_ids, created_at, is_merged, merged_into, contacts(*)")
+      .select("id, contact_id, instance_name, status, unread_count, last_message_at, assigned_to, category_id, starred, sentiment, label_ids, created_at, is_merged, merged_into, priority, contacts(*)")
       .eq("is_merged", false)
       .order("last_message_at", { ascending: false });
 
@@ -3463,6 +3467,9 @@ const Inbox = () => {
                         {convo.priority === 'low' && (
                           <span className="inline-flex items-center rounded px-1 py-0.5 text-[9px] font-bold text-white bg-gray-500 uppercase shrink-0">BAIXA</span>
                         )}
+                        {(convo as any).queue_priority > 0 && (
+                          <span title={`Prioridade de fila: +${(convo as any).queue_priority}`} className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[9px] font-bold text-yellow-800 bg-yellow-300 uppercase shrink-0">⭐ VIP</span>
+                        )}
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground truncate mb-1.5">
@@ -4418,7 +4425,44 @@ const Inbox = () => {
                             body={msg.body}
                             fromMe={msg.from_me}
                           />
-                        ) : msg.body.startsWith("⤳") ? (
+                        ) : (msg.message_type === 'interactive' || (msg.metadata as any)?.interactive) ? (() => {
+                          const meta = (msg.metadata || {}) as any;
+                          const itype = meta.type || 'button';
+                          return (
+                            <div className="min-w-[200px]">
+                              {meta.header_text && (
+                                <p className="text-[13px] font-semibold mb-1">{meta.header_text}</p>
+                              )}
+                              <p className="whitespace-pre-wrap leading-[19px] text-[14.2px]">{msg.body}</p>
+                              {meta.footer_text && (
+                                <p className="text-[11px] text-[#667781] mt-1">{meta.footer_text}</p>
+                              )}
+                              {itype === 'button' && Array.isArray(meta.buttons) && meta.buttons.length > 0 && (
+                                <div className="mt-2 flex flex-col gap-1">
+                                  {meta.buttons.map((btn: string, bi: number) => btn && (
+                                    <div key={bi} className="border border-[#53bdeb] rounded-md px-3 py-1.5 text-center text-[13px] text-[#53bdeb] font-medium cursor-default">
+                                      {btn}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {itype === 'list' && Array.isArray(meta.sections) && meta.sections.length > 0 && (
+                                <div className="mt-2">
+                                  <div className="border border-[#53bdeb] rounded-md px-3 py-1.5 text-center text-[13px] text-[#53bdeb] font-medium cursor-default flex items-center justify-center gap-1">
+                                    <LayoutList className="h-3.5 w-3.5" />
+                                    Ver opções
+                                  </div>
+                                </div>
+                              )}
+                              {(msg.type === 'button_response' || msg.type === 'list_response') && (
+                                <div className="mt-1 flex items-center gap-1">
+                                  <CheckCircle className="h-3 w-3 text-[#25d366]" />
+                                  <span className="text-[11px] text-[#667781]">Resposta selecionada</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })() : msg.body.startsWith("⤳") ? (
                           <div>
                             <div className="flex items-center gap-1 mb-1">
                               <span className="text-[11px] text-[#53bdeb] italic font-medium">Encaminhada</span>
@@ -5349,8 +5393,15 @@ const Inbox = () => {
       {/* Transfer Dialog */}
       <TransferDialog
         open={showTransfer}
-        onOpenChange={setShowTransfer}
+        onOpenChange={(open) => {
+          setShowTransfer(open);
+          // After successful transfer, close the conversation in current view
+          if (!open && selected) {
+            // The transfer was processed — optionally deselect
+          }
+        }}
         onTransfer={handleTransfer}
+        conversationId={selected || undefined}
         recentMessages={messages.slice(-5)}
       />
 

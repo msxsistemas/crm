@@ -15,7 +15,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { CalendarDays, Plus, Trash2, Bell } from "lucide-react";
+import { CalendarDays, Plus, Trash2, Bell, CalendarCheck, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Appointment {
@@ -31,6 +31,7 @@ interface Appointment {
   contact_phone: string | null;
   agent_name: string | null;
   created_at: string;
+  google_event_id?: string | null;
 }
 
 interface ContactSuggestion {
@@ -139,6 +140,26 @@ export default function Appointments() {
       setAppointments(prev => prev.filter(a => a.id !== id));
     } catch {
       toast.error("Erro ao excluir");
+    }
+  };
+
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+
+  const handleGoogleSync = async (appt: Appointment) => {
+    setSyncingId(appt.id);
+    try {
+      const res = await api.post(`/google-calendar/sync-appointment/${appt.id}`);
+      toast.success("Sincronizado com Google Calendar!");
+      setAppointments(prev => prev.map(a => a.id === appt.id ? { ...a, google_event_id: res.data.google_event_id } : a));
+    } catch (e: any) {
+      const msg = e?.response?.data?.error || "Erro ao sincronizar";
+      if (msg.includes("não conectado") || msg.includes("not connected")) {
+        toast.error("Conecte o Google Calendar em Configurações > Integrações");
+      } else {
+        toast.error(msg);
+      }
+    } finally {
+      setSyncingId(null);
     }
   };
 
@@ -309,6 +330,12 @@ export default function Appointments() {
                         Notificado
                       </Badge>
                     )}
+                    {appt.google_event_id && (
+                      <Badge className="bg-blue-500/20 text-blue-600 border-blue-500/30 text-[10px] py-0 gap-1">
+                        <CalendarCheck className="h-2.5 w-2.5" />
+                        Sincronizado
+                      </Badge>
+                    )}
                   </div>
                   {appt.description && (
                     <p className="text-xs text-muted-foreground mt-0.5 truncate">{appt.description}</p>
@@ -325,13 +352,25 @@ export default function Appointments() {
                     )}
                   </div>
                 </div>
-                <button
-                  onClick={() => handleDelete(appt.id)}
-                  className="shrink-0 h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                  title="Excluir compromisso"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => handleGoogleSync(appt)}
+                    disabled={syncingId === appt.id}
+                    className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 transition-colors disabled:opacity-50"
+                    title={appt.google_event_id ? "Atualizar no Google Calendar" : "Sincronizar com Google Calendar"}
+                  >
+                    {syncingId === appt.id
+                      ? <Loader2 className="h-4 w-4 animate-spin" />
+                      : <CalendarCheck className="h-4 w-4" />}
+                  </button>
+                  <button
+                    onClick={() => handleDelete(appt.id)}
+                    className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                    title="Excluir compromisso"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             ))
           )}

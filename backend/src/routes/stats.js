@@ -1303,6 +1303,231 @@ export default async function statsRoutes(fastify) {
     return results;
   });
 
+  // ── Executive Dashboard ───────────────────────────────────────────────────
+  fastify.get('/stats/executive-dashboard', auth, async (req) => {
+    const days = parseInt(req.query.days) || 30;
+    const since = `NOW() - ($1 || ' days')::interval`;
+    const prevSince = `NOW() - ($2 || ' days')::interval`;
+    const prevUntil = `NOW() - ($1 || ' days')::interval`;
+
+    // ── Revenue ──────────────────────────────────────────────────────────────
+    const { rows: revRows } = await query(`
+      SELECT
+        COALESCE(SUM(CASE WHEN status='paid' THEN amount ELSE 0 END), 0) AS total_revenue,
+        COUNT(*) FILTER (WHERE status='paid') AS paid_count,
+        COUNT(*) AS total_count,
+        COALESCE(AVG(CASE WHEN status='paid' THEN amount END), 0) AS avg_ticket
+      FROM pix_charges
+      WHERE created_at >= ${since}
+    `, [days]);
+
+    const { rows: prevRevRows } = await query(`
+      SELECT COALESCE(SUM(CASE WHEN status='paid' THEN amount ELSE 0 END), 0) AS total_revenue,
+             COUNT(*) FILTER (WHERE status='paid') AS paid_count
+      FROM pix_charges
+      WHERE created_at >= ${prevSince} AND created_at < ${prevUntil}
+    `, [days, days * 2]);
+
+    // ── Conversations ─────────────────────────────────────────────────────────
+    const { rows: convRows } = await query(`
+      SELECT
+        COUNT(*) AS total,
+        COUNT(*) FILTER (WHERE status='closed') AS closed,
+        COUNT(*) FILTER (WHERE status='open') AS open,
+        COUNT(*) FILTER (WHERE status='pending') AS pending
+      FROM conversations
+      WHERE created_at >= ${since}
+    `, [days]);
+
+    const { rows: prevConvRows } = await query(`
+      SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status='closed') AS closed
+      FROM conversations
+      WHERE created_at >= ${prevSince} AND created_at < ${prevUntil}
+    `, [days, days * 2]);
+
+    // ── Satisfaction (CSAT + NPS) ─────────────────────────────────────────────
+    const { rows: csatRows } = await query(`
+      SELECT
+        ROUND(AVG(csat_score)::numeric, 2) AS avg_csat,
+        COUNT(*) FILTER (WHERE csat_score IS NOT NULL) AS csat_responses,
+        COUNT(*) FILTER (WHERE csat_score = 5) AS score_5,
+        COUNT(*) FILTER (WHERE csat_score = 4) AS score_4,
+        COUNT(*) FILTER (WHERE csat_score = 3) AS score_3,
+        COUNT(*) FILTER (WHERE csat_score = 2) AS score_2,
+        COUNT(*) FILTER (WHERE csat_score = 1) AS score_1,
+        ROUND(AVG(nps_score)::numeric, 1) AS avg_nps,
+        COUNT(*) FILTER (WHERE nps_score IS NOT NULL) AS nps_responses,
+        ROUND((
+          (COUNT(*) FILTER (WHERE nps_score >= 9)::numeric
+           - COUNT(*) FILTER (WHERE nps_score <= 6 AND nps_score IS NOT NULL)::numeric)
+          / NULLIF(COUNT(*) FILTER (WHERE nps_score IS NOT NULL), 0)::numeric * 100
+        ), 1) AS nps_index
+      FROM conversations
+      WHERE created_at >= ${since}
+    `, [days]);
+
+    const { rows: prevCsatRows } = await query(`
+      SELECT ROUND(AVG(csat_score)::numeric, 2) AS avg_csat
+      FROM conversations
+      WHERE created_at >= ${prevSince} AND created_at < ${prevUntil}
+    `, [days, days * 2]);
+
+    // ── SLA ───────────────────────────────────────────────────────────────────
+    const { rows: slaRows } = await query(`
+      SELECT
+        COUNT(*) FILTER (WHERE sla_deadline IS NOT NULL AND closed_at IS NOT NULL AND closed_at <= sla_deadline) AS within_sla,
+        COUNT(*) FILTER (WHERE sla_deadline IS NOT NULL AND (closed_at > sla_deadline OR (sla_deadline < NOW() AND status != 'closed'))) AS breached,
+        COUNT(*) FILTER (WHERE sla_deadline IS NOT NULL) AS total_with_sla,
+        ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(first_response_at, NOW()) - created_at))/60)::numeric, 1) AS avg_response_min
+      FROM conversations
+      WHERE created_at >= ${since}
+    `, [days]);
+
+    const { rows: prevSlaRows } = await query(`
+      SELECT
+        COUNT(*) FILTER (WHERE sla_deadline IS NOT NULL AND closed_at IS NOT NULL AND closed_at <= sla_deadline) AS within_sla,
+        COUNT(*) FILTER (WHERE sla_deadline IS NOT NULL) AS total_with_sla
+      FROM conversations
+      WHERE created_at >= ${prevSince} AND created_at < ${prevUntil}
+    `, [days, days * 2]);
+
+    // ── Top Agents ────────────────────────────────────────────────────────────
+    const { rows: agentRows } = await query(`
+      SELECT
+        p.id, p.full_name, p.name, p.avatar_url,
+        COUNT(c.id) FILTER (WHERE c.status='closed') AS closed_count,
+        ROUND(AVG(c.csat_score) FILTER (WHERE c.csat_score IS NOT NULL)::numeric, 2) AS avg_csat
+      FROM profiles p
+      JOIN conversations c ON c.assigned_to = p.id
+      WHERE c.created_at >= ${since}
+      GROUP BY p.id, p.full_name, p.name, p.avatar_url
+      HAVING COUNT(c.id) FILTER (WHERE c.status='closed') > 0
+      ORDER BY closed_count DESC
+      LIMIT 5
+    `, [days]);
+
+    // ── Channels breakdown ────────────────────────────────────────────────────
+    const { rows: channelRows } = await query(`
+      SELECT
+        COALESCE(channel, 'whatsapp') AS channel,
+        COUNT(*) AS total,
+        COUNT(*) FILTER (WHERE status='closed') AS closed
+      FROM conversations
+      WHERE created_at >= ${since}
+      GROUP BY COALESCE(channel, 'whatsapp')
+      ORDER BY total DESC
+    `, [days]);
+
+    // ── Daily Volume ──────────────────────────────────────────────────────────
+    const { rows: dailyRows } = await query(`
+      SELECT
+        DATE(created_at) AS date,
+        COUNT(*) AS opened,
+        COUNT(*) FILTER (WHERE status='closed') AS closed
+      FROM conversations
+      WHERE created_at >= ${since}
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+    `, [days]);
+
+    // ── Compute SLA % ─────────────────────────────────────────────────────────
+    const sla = slaRows[0];
+    const totalWithSla = parseInt(sla?.total_with_sla || '0');
+    const withinSla = parseInt(sla?.within_sla || '0');
+    const breached = parseInt(sla?.breached || '0');
+    const slaCompliance = totalWithSla > 0 ? Math.round((withinSla / totalWithSla) * 100) : null;
+
+    const prevSla = prevSlaRows[0];
+    const prevTotalSla = parseInt(prevSla?.total_with_sla || '0');
+    const prevWithinSla = parseInt(prevSla?.within_sla || '0');
+    const prevSlaCompliance = prevTotalSla > 0 ? Math.round((prevWithinSla / prevTotalSla) * 100) : null;
+
+    // ── Growth calculations ───────────────────────────────────────────────────
+    const calcGrowth = (curr, prev) => {
+      if (!prev || prev === 0) return curr > 0 ? 100 : 0;
+      return Math.round(((curr - prev) / prev) * 100);
+    };
+
+    const rev = revRows[0];
+    const prevRev = prevRevRows[0];
+    const conv = convRows[0];
+    const prevConv = prevConvRows[0];
+    const csat = csatRows[0];
+    const prevCsat = prevCsatRows[0];
+
+    const currentRevenue = parseFloat(rev?.total_revenue || '0');
+    const prevRevenue = parseFloat(prevRev?.total_revenue || '0');
+    const currentClosed = parseInt(conv?.closed || '0');
+    const prevClosed = parseInt(prevConv?.closed || '0');
+    const currentCsat = parseFloat(csat?.avg_csat || '0');
+    const prevCsatVal = parseFloat(prevCsat?.avg_csat || '0');
+
+    return {
+      period: { days, since: new Date(Date.now() - days * 86400000).toISOString(), until: new Date().toISOString() },
+      revenue: {
+        total: currentRevenue,
+        paid_count: parseInt(rev?.paid_count || '0'),
+        total_charges: parseInt(rev?.total_count || '0'),
+        avg_ticket: parseFloat(rev?.avg_ticket || '0'),
+      },
+      conversations: {
+        total: parseInt(conv?.total || '0'),
+        closed: currentClosed,
+        open: parseInt(conv?.open || '0'),
+        pending: parseInt(conv?.pending || '0'),
+        resolution_rate: parseInt(conv?.total || '0') > 0
+          ? Math.round((currentClosed / parseInt(conv?.total || '1')) * 100)
+          : 0,
+      },
+      satisfaction: {
+        avg_csat: currentCsat,
+        csat_responses: parseInt(csat?.csat_responses || '0'),
+        csat_distribution: {
+          5: parseInt(csat?.score_5 || '0'),
+          4: parseInt(csat?.score_4 || '0'),
+          3: parseInt(csat?.score_3 || '0'),
+          2: parseInt(csat?.score_2 || '0'),
+          1: parseInt(csat?.score_1 || '0'),
+        },
+        avg_nps: parseFloat(csat?.avg_nps || '0'),
+        nps_responses: parseInt(csat?.nps_responses || '0'),
+        nps_index: parseFloat(csat?.nps_index || '0'),
+      },
+      sla: {
+        compliance_pct: slaCompliance,
+        within_sla: withinSla,
+        breached,
+        total_with_sla: totalWithSla,
+        avg_response_min: parseFloat(sla?.avg_response_min || '0'),
+      },
+      top_agents: agentRows.map(a => ({
+        id: a.id,
+        name: a.full_name || a.name || 'Agente',
+        avatar_url: a.avatar_url,
+        closed_count: parseInt(a.closed_count || '0'),
+        avg_csat: a.avg_csat ? parseFloat(a.avg_csat) : null,
+      })),
+      channels: channelRows.map(c => ({
+        channel: c.channel,
+        total: parseInt(c.total || '0'),
+        closed: parseInt(c.closed || '0'),
+      })),
+      daily_volume: dailyRows.map(d => ({
+        date: d.date,
+        opened: parseInt(d.opened || '0'),
+        closed: parseInt(d.closed || '0'),
+      })),
+      growth: {
+        revenue: calcGrowth(currentRevenue, prevRevenue),
+        conversations_closed: calcGrowth(currentClosed, prevClosed),
+        avg_csat: prevCsatVal > 0 ? Math.round(((currentCsat - prevCsatVal) / prevCsatVal) * 100) : 0,
+        sla_compliance: prevSlaCompliance !== null && slaCompliance !== null
+          ? slaCompliance - prevSlaCompliance
+          : null,
+      },
+    };
+  });
+
   // ── Public Agent Profile ──────────────────────────────────────────────────
   fastify.get('/public/agent/:id', async (req, reply) => {
     const { rows } = await query(`
@@ -1326,5 +1551,76 @@ export default async function statsRoutes(fastify) {
       average_csat: agent.average_csat ? parseFloat(agent.average_csat) : null,
       total_conversations_closed: parseInt(agent.total_conversations_closed) || 0,
     };
+  });
+
+  // ── Intent Report ─────────────────────────────────────────────────────────
+
+  fastify.get('/stats/intent-report', auth, async (req) => {
+    const { days = 30, channel } = req.query;
+    const daysInt = Math.min(Math.max(parseInt(days) || 30, 1), 365);
+
+    const conditions = [`c.created_at >= NOW() - INTERVAL '${daysInt} days'`, `c.status = 'closed'`];
+    const params = [];
+    let p = 1;
+    if (channel) { conditions.push(`c.connection_name = $${p}`); params.push(channel); p++; }
+
+    const where = conditions.join(' AND ');
+
+    const { rows: current } = await query(`
+      SELECT
+        COALESCE(c.intent_category, 'outro') as intent_category,
+        COUNT(*) as count,
+        ROUND(AVG(c.csat_score) FILTER (WHERE c.csat_score IS NOT NULL)::numeric, 2) as avg_csat,
+        ROUND(AVG(EXTRACT(EPOCH FROM (c.updated_at - c.created_at))/60)::numeric, 1) as avg_handle_time_min
+      FROM conversations c
+      WHERE ${where}
+      GROUP BY COALESCE(c.intent_category, 'outro')
+      ORDER BY count DESC
+    `, params);
+
+    const total = current.reduce((s, r) => s + parseInt(r.count), 0);
+
+    const prevConds = [
+      `c.created_at >= NOW() - INTERVAL '${daysInt * 2} days'`,
+      `c.created_at < NOW() - INTERVAL '${daysInt} days'`,
+      `c.status = 'closed'`,
+    ];
+    if (channel) prevConds.push(`c.connection_name = $${p}`);
+    const { rows: previous } = await query(`
+      SELECT COALESCE(c.intent_category, 'outro') as intent_category, COUNT(*) as count
+      FROM conversations c
+      WHERE ${prevConds.join(' AND ')}
+      GROUP BY COALESCE(c.intent_category, 'outro')
+    `, channel ? [...params] : []);
+
+    const prevMap = {};
+    for (const r of previous) prevMap[r.intent_category] = parseInt(r.count);
+
+    const data = current.map(r => {
+      const cnt = parseInt(r.count);
+      const prevCnt = prevMap[r.intent_category] || 0;
+      return {
+        intent_category: r.intent_category,
+        count: cnt,
+        percentage: total > 0 ? Math.round((cnt / total) * 100) : 0,
+        avg_csat: r.avg_csat ? parseFloat(r.avg_csat) : null,
+        avg_handle_time_min: r.avg_handle_time_min ? parseFloat(r.avg_handle_time_min) : null,
+        prev_count: prevCnt,
+        change_pct: prevCnt > 0 ? Math.round(((cnt - prevCnt) / prevCnt) * 100) : null,
+      };
+    });
+
+    const { rows: daily } = await query(`
+      SELECT
+        DATE_TRUNC('day', c.created_at)::date as day,
+        COALESCE(c.intent_category, 'outro') as intent_category,
+        COUNT(*) as count
+      FROM conversations c
+      WHERE ${where}
+      GROUP BY 1, 2
+      ORDER BY 1 ASC
+    `, params);
+
+    return { data, total, days: daysInt, daily };
   });
 }

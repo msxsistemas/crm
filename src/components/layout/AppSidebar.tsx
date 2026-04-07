@@ -227,6 +227,8 @@ const userNavSections: NavSection[] = [
       { to: "/crescimento-contatos", icon: TrendingUp, label: "Crescimento de Contatos" },
       { to: "/minha-produtividade", icon: Target, label: "Minha Produtividade" },
       { to: "/roi-campanhas", icon: DollarSign, label: "ROI de Campanhas" },
+      { to: "/executive-dashboard", icon: LayoutDashboard, label: "Dashboard Executivo" },
+      { to: "/relatorio-intencoes", icon: PieChart, label: "Relatório por Intenção" },
     ],
   },
   {

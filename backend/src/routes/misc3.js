@@ -1088,12 +1088,14 @@ export default async function misc3Routes(fastify) {
       });
     }
 
-    await query(
-      "INSERT INTO messages (conversation_id, content, sender_type, metadata, created_at) VALUES ($1,$2,'agent',$3,NOW())",
-      [req.params.id, body_text, JSON.stringify({ interactive: true, type, buttons, sections })]
+    const { rows: savedMsg } = await query(
+      "INSERT INTO messages (conversation_id, content, direction, message_type, metadata, created_at) VALUES ($1,$2,'outbound','interactive',$3,NOW()) RETURNING *, content as body, (direction='outbound') as from_me",
+      [req.params.id, body_text, JSON.stringify({ interactive: true, type, buttons, sections, header_text, footer_text })]
     );
+    await query('UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1', [req.params.id]);
+    fastify.io?.to('conversation:' + req.params.id).emit('message:new', savedMsg[0]);
 
-    return { success: true };
+    return { success: true, message: savedMsg[0] };
   });
 
   // ── Appointments ──────────────────────────────────────────────────────────────
@@ -1559,38 +1561,6 @@ export default async function misc3Routes(fastify) {
     const data = await res.json();
     if (data.erro) return reply.status(404).send({ error: 'CEP não encontrado' });
     return data;
-  });
-
-  // ── Conversation Transfer with Mandatory Note ──────────────────────────────
-  fastify.post('/conversations/:id/transfer', { onRequest: [fastify.authenticate] }, async (req, reply) => {
-    const { agent_id, team_id, note } = req.body;
-    if (!note || note.trim().length < 5) return reply.status(400).send({ error: 'Nota de transferência obrigatória (mínimo 5 caracteres)' });
-
-    const updates = [];
-    const vals = [];
-    let i = 1;
-    if (agent_id) { updates.push(`assigned_to=$${i++}`); vals.push(agent_id); }
-    if (team_id) { updates.push(`assigned_team_id=$${i++}`); vals.push(team_id); }
-    if (!updates.length) return reply.status(400).send({ error: 'Informe agente ou time' });
-
-    vals.push(req.params.id);
-    await query(`UPDATE conversations SET ${updates.join(',')} WHERE id=$${i}`, vals);
-
-    // Save transfer note as an internal note
-    await query(
-      "INSERT INTO messages (conversation_id, content, sender_type, sender_id, metadata) VALUES ($1,$2,'note',$3,$4)",
-      [req.params.id, `🔀 Transferência: ${note}`, req.user.id, JSON.stringify({ transfer_note: true, to_agent: agent_id, to_team: team_id })]
-    );
-
-    // Log event
-    await query(
-      "INSERT INTO conversation_events (conversation_id, event_type, actor_name, new_value) VALUES ($1,'transferred',$2,$3)",
-      [req.params.id, req.user.full_name || req.user.id, note]
-    ).catch(() => {});
-
-    if (fastify.io) fastify.io.emit('conversation:transferred', { conversation_id: req.params.id, agent_id, team_id, note });
-
-    return { success: true };
   });
 
   // ── Custom Field Definitions ──────────────────────────────────────────────
@@ -2931,6 +2901,269 @@ ${conversationContext ? `Contexto da conversa atual:\n${conversationContext}\n\n
     }
 
     return reply.status(200).send({ ok: true });
+  });
+
+  // ── Google Calendar OAuth ─────────────────────────────────────────────────
+
+  const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+  const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+  const FRONTEND_URL = process.env.FRONTEND_URL || 'https://app.msxzap.pro';
+  const GOOGLE_REDIRECT_URI = `${FRONTEND_URL}/google-calendar/callback`;
+  const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/calendar.events';
+
+  async function refreshGoogleToken(userId) {
+    const { rows } = await query('SELECT * FROM google_calendar_tokens WHERE user_id=$1', [userId]);
+    const token = rows[0];
+    if (!token || !token.refresh_token) return null;
+
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        refresh_token: token.refresh_token,
+        grant_type: 'refresh_token',
+      }),
+    });
+    const data = await res.json();
+    if (!data.access_token) return null;
+
+    const expiresAt = new Date(Date.now() + (data.expires_in || 3600) * 1000).toISOString();
+    await query(
+      'UPDATE google_calendar_tokens SET access_token=$1, expires_at=$2, updated_at=NOW() WHERE user_id=$3',
+      [data.access_token, expiresAt, userId]
+    );
+    return data.access_token;
+  }
+
+  async function getValidAccessToken(userId) {
+    const { rows } = await query('SELECT * FROM google_calendar_tokens WHERE user_id=$1', [userId]);
+    const token = rows[0];
+    if (!token) return null;
+
+    // Refresh se expira em menos de 5 minutos
+    if (token.expires_at && new Date(token.expires_at) < new Date(Date.now() + 5 * 60 * 1000)) {
+      return await refreshGoogleToken(userId);
+    }
+    return token.access_token;
+  }
+
+  // GET /google-calendar/auth-url
+  fastify.get('/google-calendar/auth-url', auth, async (req) => {
+    const params = new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: GOOGLE_REDIRECT_URI,
+      response_type: 'code',
+      scope: GOOGLE_SCOPES,
+      access_type: 'offline',
+      prompt: 'consent',
+      state: req.user.id,
+    });
+    return { url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` };
+  });
+
+  // GET /google-calendar/callback?code=&state=
+  fastify.get('/google-calendar/callback', auth, async (req, reply) => {
+    const { code, state } = req.query;
+    if (!code) return reply.status(400).send({ error: 'Código ausente' });
+
+    const userId = state || req.user.id;
+
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri: GOOGLE_REDIRECT_URI,
+        code,
+        grant_type: 'authorization_code',
+      }),
+    });
+    const data = await res.json();
+    if (!data.access_token) return reply.status(400).send({ error: data.error_description || 'Falha na autenticação' });
+
+    const expiresAt = new Date(Date.now() + (data.expires_in || 3600) * 1000).toISOString();
+
+    // Buscar e-mail da conta Google
+    let email = null;
+    try {
+      const infoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { Authorization: `Bearer ${data.access_token}` },
+      });
+      const info = await infoRes.json();
+      email = info.email || null;
+    } catch (_) {}
+
+    await query(`
+      INSERT INTO google_calendar_tokens (user_id, access_token, refresh_token, expires_at, email)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (user_id) DO UPDATE SET
+        access_token = EXCLUDED.access_token,
+        refresh_token = COALESCE(EXCLUDED.refresh_token, google_calendar_tokens.refresh_token),
+        expires_at = EXCLUDED.expires_at,
+        email = COALESCE(EXCLUDED.email, google_calendar_tokens.email),
+        updated_at = NOW()
+    `, [userId, data.access_token, data.refresh_token || null, expiresAt, email]);
+
+    return { ok: true, email };
+  });
+
+  // GET /google-calendar/status
+  fastify.get('/google-calendar/status', auth, async (req) => {
+    const { rows } = await query(
+      'SELECT email, calendar_id, expires_at FROM google_calendar_tokens WHERE user_id=$1',
+      [req.user.id]
+    );
+    if (!rows[0]) return { connected: false };
+    return { connected: true, email: rows[0].email, calendar_id: rows[0].calendar_id, expires_at: rows[0].expires_at };
+  });
+
+  // DELETE /google-calendar/disconnect
+  fastify.delete('/google-calendar/disconnect', auth, async (req) => {
+    await query('DELETE FROM google_calendar_tokens WHERE user_id=$1', [req.user.id]);
+    return { ok: true };
+  });
+
+  // POST /google-calendar/sync-appointment/:appointmentId
+  fastify.post('/google-calendar/sync-appointment/:appointmentId', auth, async (req, reply) => {
+    const { appointmentId } = req.params;
+
+    const accessToken = await getValidAccessToken(req.user.id);
+    if (!accessToken) return reply.status(401).send({ error: 'Google Calendar não conectado' });
+
+    const { rows: apptRows } = await query(
+      'SELECT * FROM appointments WHERE id=$1',
+      [appointmentId]
+    );
+    const appt = apptRows[0];
+    if (!appt) return reply.status(404).send({ error: 'Compromisso não encontrado' });
+
+    const { rows: tokenRows } = await query(
+      'SELECT calendar_id, email FROM google_calendar_tokens WHERE user_id=$1',
+      [req.user.id]
+    );
+    const calendarId = tokenRows[0]?.calendar_id || 'primary';
+
+    const eventStart = new Date(appt.scheduled_at).toISOString();
+    const eventEnd = new Date(new Date(appt.scheduled_at).getTime() + 60 * 60 * 1000).toISOString();
+
+    const eventBody = {
+      summary: appt.title,
+      description: appt.description || '',
+      start: { dateTime: eventStart, timeZone: 'America/Sao_Paulo' },
+      end: { dateTime: eventEnd, timeZone: 'America/Sao_Paulo' },
+    };
+
+    let gcalRes;
+    if (appt.google_event_id) {
+      // Atualizar evento existente
+      gcalRes = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${appt.google_event_id}`,
+        {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(eventBody),
+        }
+      );
+    } else {
+      // Criar novo evento
+      gcalRes = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(eventBody),
+        }
+      );
+    }
+
+    const gcalData = await gcalRes.json();
+    if (!gcalRes.ok) return reply.status(502).send({ error: gcalData.error?.message || 'Erro Google Calendar' });
+
+    await query(
+      'UPDATE appointments SET google_event_id=$1 WHERE id=$2',
+      [gcalData.id, appointmentId]
+    );
+
+    return { ok: true, google_event_id: gcalData.id, event_link: gcalData.htmlLink };
+  });
+
+  // ── Queue Priority Rules ──────────────────────────────────────────────────
+
+  fastify.get('/queue-priority-rules', auth, async (_req) => {
+    const { rows } = await query('SELECT * FROM queue_priority_rules ORDER BY created_at ASC');
+    return rows;
+  });
+
+  fastify.post('/queue-priority-rules', auth, async (req, reply) => {
+    const { name, condition_type, condition_value, priority_boost = 10, enabled = true } = req.body;
+    if (!name || !condition_type || condition_value === undefined) {
+      return reply.status(400).send({ error: 'name, condition_type e condition_value são obrigatórios' });
+    }
+    const { rows } = await query(
+      `INSERT INTO queue_priority_rules (name, condition_type, condition_value, priority_boost, enabled)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [name, condition_type, String(condition_value), priority_boost, enabled]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.put('/queue-priority-rules/:id', auth, async (req, reply) => {
+    const { name, condition_type, condition_value, priority_boost, enabled } = req.body;
+    const updates = [];
+    const params = [];
+    let p = 1;
+    if (name !== undefined)            { updates.push(`name=$${p}`);            params.push(name); p++; }
+    if (condition_type !== undefined)  { updates.push(`condition_type=$${p}`);  params.push(condition_type); p++; }
+    if (condition_value !== undefined) { updates.push(`condition_value=$${p}`); params.push(String(condition_value)); p++; }
+    if (priority_boost !== undefined)  { updates.push(`priority_boost=$${p}`);  params.push(priority_boost); p++; }
+    if (enabled !== undefined)         { updates.push(`enabled=$${p}`);         params.push(enabled); p++; }
+    if (!updates.length) return reply.status(400).send({ error: 'Nada para atualizar' });
+    params.push(req.params.id);
+    const { rows } = await query(
+      `UPDATE queue_priority_rules SET ${updates.join(',')} WHERE id=$${p} RETURNING *`,
+      params
+    );
+    if (!rows[0]) return reply.status(404).send({ error: 'Regra não encontrada' });
+    return rows[0];
+  });
+
+  fastify.delete('/queue-priority-rules/:id', auth, async (req, reply) => {
+    await query('DELETE FROM queue_priority_rules WHERE id=$1', [req.params.id]);
+    return { ok: true };
+  });
+
+  // ── Push Subscriptions ────────────────────────────────────────────────────
+
+  fastify.get('/push-subscriptions/vapid-key', auth, async (_req) => {
+    return { publicKey: process.env.VAPID_PUBLIC_KEY || null };
+  });
+
+  fastify.post('/push-subscriptions', auth, async (req, reply) => {
+    const { endpoint, keys } = req.body;
+    const userId = req.user.id;
+    if (!endpoint || !keys) return reply.status(400).send({ error: 'endpoint e keys são obrigatórios' });
+    const { rows } = await query(
+      `INSERT INTO push_subscriptions (user_id, endpoint, keys)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (user_id, endpoint) DO UPDATE SET keys=EXCLUDED.keys
+       RETURNING *`,
+      [userId, endpoint, JSON.stringify(keys)]
+    );
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.delete('/push-subscriptions', auth, async (req, reply) => {
+    const { endpoint } = req.body;
+    const userId = req.user.id;
+    if (endpoint) {
+      await query('DELETE FROM push_subscriptions WHERE user_id=$1 AND endpoint=$2', [userId, endpoint]);
+    } else {
+      await query('DELETE FROM push_subscriptions WHERE user_id=$1', [userId]);
+    }
+    return { ok: true };
   });
 
 }
