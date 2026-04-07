@@ -412,8 +412,8 @@ async function handleEvolutionWebhook(payload, fastify) {
       let { rows: contacts } = await client.query('SELECT * FROM contacts WHERE phone = $1', [phone]);
       contact = contacts[0];
       if (!contact) {
-        // For groups: pushName may be the sender's name, not the group name — use phone as fallback group name
-        const name = isGroup ? (data.groupName || data.pushName || `Grupo ${phone}`) : (data.pushName || phone);
+        // For groups: use groupName or a generic name — never use pushName (that's the sender, not the group)
+        const name = isGroup ? (data.groupName || data.group?.subject || `Grupo ${phone}`) : (data.pushName || phone);
         const { rows } = await client.query(
           'INSERT INTO contacts (name, phone, avatar_url, is_group) VALUES ($1,$2,$3,$4) RETURNING *',
           [name, phone, data.profilePicUrl || null, isGroup]
@@ -494,6 +494,29 @@ async function handleEvolutionWebhook(payload, fastify) {
 
     fastify.io?.emit('message:new', { ...msgRow, conversation_id: conv.id });
     fastify.io?.emit('conversation:updated', { id: conv.id });
+
+    // ── Sync group name from Evolution API asynchronously ─────────────────
+    if (isGroup && contact?.name?.startsWith('Grupo ')) {
+      (async () => {
+        try {
+          const { rows: connRows } = await query(
+            "SELECT api_url, api_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1",
+            [instance]
+          );
+          const conn = connRows[0];
+          if (!conn?.api_url) return;
+          const res = await fetch(`${conn.api_url}/group/findGroupInfos/${instance}?groupJid=${phone}@g.us`, {
+            headers: { 'apikey': conn.api_key },
+          });
+          if (!res.ok) return;
+          const info = await res.json();
+          const subject = info?.subject || info?.name;
+          if (subject) {
+            await query('UPDATE contacts SET name=$1 WHERE id=$2', [subject, contact.id]);
+          }
+        } catch { /* silent */ }
+      })();
+    }
 
     // ── Recalculate lead score asynchronously ─────────────────────────────
     const contactIdForScore = contact?.id;
