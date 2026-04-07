@@ -1,4 +1,4 @@
-const CACHE_NAME = 'msx-crm-v11'
+const CACHE_NAME = 'msx-crm-v12'
 const OFFLINE_URL = '/offline.html'
 
 // Assets estáticos a pré-cachear na instalação

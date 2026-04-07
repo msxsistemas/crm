@@ -927,13 +927,6 @@ const Inbox = () => {
 
   const notificationAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Create notification audio element
-  useEffect(() => {
-    const audio = new Audio("https://cdn.pixabay.com/audio/2022/12/12/audio_e8e16a1497.mp3");
-    audio.volume = 0.5;
-    notificationAudioRef.current = audio;
-  }, []);
-
   // Request browser notification permission on mount
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
@@ -1237,12 +1230,7 @@ const Inbox = () => {
         // Play notification sound + browser notification for incoming messages
         if (!newMsg.from_me) {
           if (soundEnabled) {
-            if (notificationAudioRef.current) {
-              notificationAudioRef.current.currentTime = 0;
-              notificationAudioRef.current.play().catch(() => { playWebAudioNotification(); });
-            } else {
-              playWebAudioNotification();
-            }
+            playWebAudioNotification();
           }
           // Browser notification when tab is not focused
           if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {

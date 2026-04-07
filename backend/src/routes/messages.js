@@ -444,6 +444,7 @@ async function handleEvolutionWebhook(payload, fastify) {
 
         // ── Auto-assign round-robin ─────────────────────────────────────────
         try {
+          await client.query('SAVEPOINT auto_assign');
           const { rows: s } = await client.query('SELECT auto_assign_enabled FROM settings WHERE id=1');
           if (s[0]?.auto_assign_enabled) {
             const { rows: agents } = await client.query(`
@@ -458,12 +459,14 @@ async function handleEvolutionWebhook(payload, fastify) {
             if (agents[0]) {
               await client.query('UPDATE conversations SET assigned_to=$1 WHERE id=$2', [agents[0].id, conv.id]);
               conv.assigned_to = agents[0].id;
-              // Log event
               client.query("INSERT INTO conversation_events (conversation_id, event_type, actor_name, new_value) VALUES ($1,'assigned','Sistema',$2)",
                 [conv.id, agents[0].id]).catch(() => {});
             }
           }
-        } catch {}
+          await client.query('RELEASE SAVEPOINT auto_assign');
+        } catch {
+          await client.query('ROLLBACK TO SAVEPOINT auto_assign').catch(() => {});
+        }
 
         // Log conversation created event
         client.query("INSERT INTO conversation_events (conversation_id, event_type, actor_name, new_value) VALUES ($1,'created','Sistema','open')",
