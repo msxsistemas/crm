@@ -39,7 +39,7 @@ export default async function conversationRoutes(fastify) {
   // Use ?cursor=<last_message_at>_<id> to get next page (opaque cursor)
   fastify.get('/conversations', auth, async (req) => {
     const { status, assigned_to, search, limit = 50, connection_name, cursor, page } = req.query;
-    const conditions = ['c.is_merged = false'];
+    const conditions = ['c.is_merged = false', '(ct.is_group IS NOT TRUE)'];
     const params = [];
     let p = 1;
 
