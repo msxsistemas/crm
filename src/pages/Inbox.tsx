@@ -4,7 +4,7 @@ type RealtimeChannel = { unsubscribe: () => void; on: (...args: unknown[]) => un
 import whatsappLightWallpaper from "@/assets/whatsapp-light-wallpaper.png";
 import whatsappDarkWallpaper from "@/assets/whatsapp-dark-wallpaper.png";
 import { formatPhoneBR, unformatPhone } from "@/lib/phone-mask";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   Search, Phone, MessageCircle, Send, Smile, Paperclip, QrCode, RefreshCw,
   Wifi, WifiOff, Plus, Filter, Bell, BellOff, RotateCw, ArrowRight, User,
@@ -246,6 +246,7 @@ const Inbox = () => {
   }, [isOnline]);
 
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [conversations, setConversations] = useState<DBConversation[]>([]);
   const [messages, setMessages] = useState<DBMessage[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -259,7 +260,7 @@ const Inbox = () => {
   const [signing, setSigning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [connected, setConnected] = useState(false);
+  const [connected, setConnected] = useState<boolean | null>(null); // null = ainda verificando
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [showQR, setShowQR] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -1128,10 +1129,11 @@ const Inbox = () => {
     if (!instanceName) return;
     try {
       const result = await getInstanceStatus(instanceName);
-      const state = result?.instance?.state || result?.state;
+      // Evolution API v2 usa instance.status; v1 usa instance.state ou connectionStatus
+      const state = result?.instance?.status || result?.instance?.state || result?.state || result?.connectionStatus;
       setConnected(state === "open");
     } catch {
-      setConnected(false);
+      // Não marcar como desconectado em erro de rede — manter estado anterior
     }
   }, [instanceName]);
 
@@ -1150,11 +1152,10 @@ const Inbox = () => {
     reconnectIntervalRef.current = setInterval(async () => {
       try {
         const result = await getInstanceStatus(instanceName);
-        const state = result?.instance?.state || result?.state || result?.connectionStatus;
-        const isConnected = state === "open";
-        setConnected(isConnected);
+        const state = result?.instance?.status || result?.instance?.state || result?.state || result?.connectionStatus;
+        setConnected(state === "open");
       } catch {
-        setConnected(false);
+        // Não marcar como desconectado em erro de rede
       }
     }, 30000);
 
@@ -2885,14 +2886,14 @@ const Inbox = () => {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Disconnected banner */}
-      {instanceName && !connected && (
+      {/* Disconnected banner — só aparece quando confirmado desconectado (não durante verificação inicial) */}
+      {instanceName && connected === false && (
         <div className="flex items-center justify-between gap-2 bg-destructive/10 border-b border-destructive/30 px-4 py-2 text-sm text-destructive">
           <div className="flex items-center gap-2">
             <WifiOff className="h-4 w-4 shrink-0" />
             <span>WhatsApp desconectado — as mensagens não serão recebidas.</span>
           </div>
-          <Button size="sm" variant="outline" className="h-7 text-xs border-destructive/40 text-destructive hover:bg-destructive/10" onClick={() => window.location.href = '/connections'}>
+          <Button size="sm" variant="outline" className="h-7 text-xs border-destructive/40 text-destructive hover:bg-destructive/10" onClick={() => navigate('/connections')}>
             Reconectar
           </Button>
         </div>
