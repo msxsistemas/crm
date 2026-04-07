@@ -187,7 +187,7 @@ const App = () => (
                     <Route path="/dashboard-legado" element={<DashboardLegacy />} />
                     <Route path="/inbox" element={<Inbox />} />
                     <Route path="/pesquisar" element={<SearchPage />} />
-                    <Route path="/kanban" element={<SalesFunnel />} />
+                    <Route path="/kanban" element={<KanbanConversas />} />
                     <Route path="/kanban/grupos" element={<KanbanGroups />} />
                     <Route path="/kanban/visao-geral" element={<KanbanOverview />} />
                     <Route path="/kanban/filas" element={<KanbanQueues />} />
