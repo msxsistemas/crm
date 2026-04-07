@@ -3124,8 +3124,7 @@ const Inbox = () => {
             { key: "aguardando" as TabFilter, label: "AGUARDANDO", count: statusCounts.aguardando },
             { key: "atendendo" as TabFilter, label: "ATENDENDO", count: statusCounts.atendendo },
             { key: "encerradas" as TabFilter, label: "ENCERRADAS", count: statusCounts.encerradas },
-            { key: "grupos" as TabFilter, label: "GRUPOS", count: statusCounts.grupos },
-            { key: "favoritas" as TabFilter, label: "⭐ FAVORITAS", count: statusCounts.favoritas },
+            { key: "grupos" as TabFilter, label: "👥 GRUPOS", count: statusCounts.grupos },
             { key: "arquivadas" as TabFilter, label: "📦 ARQUIVADAS", count: statusCounts.arquivadas },
           ]).map((tab) => (
             <button
