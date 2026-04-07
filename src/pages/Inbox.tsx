@@ -144,6 +144,8 @@ interface DBMessage {
   message_type?: string;
   metadata?: Record<string, unknown> | null;
   type?: string;
+  sender_name?: string | null;
+  sender_phone?: string | null;
 }
 
 type TabFilter = "atendendo" | "aguardando" | "encerradas" | "favoritas" | "arquivadas" | "grupos";
@@ -4262,6 +4264,13 @@ const Inbox = () => {
                           }
                         }}
                       >
+
+                        {/* Group sender name — WhatsApp style */}
+                        {!msg.from_me && !msg.is_whisper && (selectedConvo as any)?.contacts?.is_group && msg.sender_name && (
+                          <p className="text-[12px] font-semibold mb-0.5" style={{ color: '#' + ((msg.sender_phone || msg.sender_name || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 6 === 0 ? '00a884' : (msg.sender_phone || msg.sender_name || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 6 === 1 ? '0e84d1' : (msg.sender_phone || msg.sender_name || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 6 === 2 ? 'd1670e' : (msg.sender_phone || msg.sender_name || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 6 === 3 ? 'a8004d' : (msg.sender_phone || msg.sender_name || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 6 === 4 ? '6f42c1' : 'e67e22') }}>
+                            {msg.sender_name}
+                          </p>
+                        )}
 
                         {/* WhatsApp-style dropdown menu */}
                         <DropdownMenu>

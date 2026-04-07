@@ -366,11 +366,16 @@ async function handleEvolutionWebhook(payload, fastify) {
     const messageContent = data.message;
     const remoteJid = key?.remoteJid || '';
 
-    // Filter group messages
-    if (remoteJid.endsWith('@g.us')) return;
-
-    const phone = remoteJid.replace('@s.whatsapp.net', '');
+    const isGroup = remoteJid.endsWith('@g.us');
+    const phone = isGroup
+      ? remoteJid.replace('@g.us', '')
+      : remoteJid.replace('@s.whatsapp.net', '');
     if (!phone || key?.fromMe) return;
+
+    // For groups: get sender info from participant field
+    const senderJid = isGroup ? (key?.participant || data?.participant || '') : '';
+    const senderPhone = senderJid.replace('@s.whatsapp.net', '').replace('@g.us', '');
+    const senderName = isGroup ? (data?.pushName || senderPhone || null) : null;
 
     // Ignore protocol/system messages
     if (messageContent?.protocolMessage || messageContent?.senderKeyDistributionMessage) return;
@@ -407,11 +412,14 @@ async function handleEvolutionWebhook(payload, fastify) {
       let { rows: contacts } = await client.query('SELECT * FROM contacts WHERE phone = $1', [phone]);
       contact = contacts[0];
       if (!contact) {
-        const name = data.pushName || phone;
-        const { rows } = await client.query('INSERT INTO contacts (name, phone, avatar_url) VALUES ($1,$2,$3) RETURNING *', [name, phone, data.profilePicUrl || null]);
+        // For groups: pushName may be the sender's name, not the group name — use phone as fallback group name
+        const name = isGroup ? (data.groupName || data.pushName || `Grupo ${phone}`) : (data.pushName || phone);
+        const { rows } = await client.query(
+          'INSERT INTO contacts (name, phone, avatar_url, is_group) VALUES ($1,$2,$3,$4) RETURNING *',
+          [name, phone, data.profilePicUrl || null, isGroup]
+        );
         contact = rows[0];
       } else if (data.profilePicUrl && !contact.avatar_url) {
-        // Save profile pic if we didn't have it yet
         await client.query('UPDATE contacts SET avatar_url=$1 WHERE id=$2', [data.profilePicUrl, contact.id]);
       }
 
@@ -463,8 +471,8 @@ async function handleEvolutionWebhook(payload, fastify) {
       }
 
       const { rows: msgRows } = await client.query(
-        'INSERT INTO messages (conversation_id, content, direction, type, media_url, external_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-        [conv.id, content, 'inbound', type, mediaUrl, key?.id]
+        'INSERT INTO messages (conversation_id, content, direction, type, media_url, external_id, sender_name, sender_phone) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+        [conv.id, content, 'inbound', type, mediaUrl, key?.id, senderName, senderPhone || null]
       );
       msgRow = msgRows[0];
 
