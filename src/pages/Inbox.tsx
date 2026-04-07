@@ -146,7 +146,7 @@ interface DBMessage {
   type?: string;
 }
 
-type TabFilter = "atendendo" | "aguardando" | "encerradas" | "favoritas" | "arquivadas";
+type TabFilter = "atendendo" | "aguardando" | "encerradas" | "favoritas" | "arquivadas" | "grupos";
 
 interface CatalogProduct {
   id: string;
@@ -1058,8 +1058,11 @@ const Inbox = () => {
   // Load conversations
   const loadConversations = useCallback(async () => {
     try {
-      const data = await api.get<DBConversation[]>('/conversations?limit=200');
-      setConversations(data || []);
+      const [individual, groups] = await Promise.all([
+        api.get<DBConversation[]>('/conversations?limit=200'),
+        api.get<DBConversation[]>('/conversations?limit=200&groups=only'),
+      ]);
+      setConversations([...(individual || []), ...(groups || [])]);
     } catch (err) {
       console.error("Error loading conversations:", err);
     }
@@ -2541,16 +2544,24 @@ const Inbox = () => {
     return () => { document.title = 'MSX CRM'; };
   }, [unreadCount]);
 
-  const statusCounts = useMemo(() => ({
-    aguardando: conversations.filter(c => c.status === "open").length,
-    atendendo: conversations.filter(c => c.status === "in_progress").length,
-    encerradas: conversations.filter(c => c.status === "closed").length,
-    favoritas: conversations.filter(c => c.starred).length,
-    arquivadas: conversations.filter(c => c.status === "archived").length,
-  }), [conversations]);
+  const statusCounts = useMemo(() => {
+    const ind = conversations.filter(c => !(c as any).contacts?.is_group);
+    const grp = conversations.filter(c => (c as any).contacts?.is_group);
+    return {
+      aguardando: ind.filter(c => c.status === "open").length,
+      atendendo: ind.filter(c => c.status === "in_progress").length,
+      encerradas: ind.filter(c => c.status === "closed").length,
+      favoritas: ind.filter(c => c.starred === true && c.status !== "archived").length,
+      arquivadas: ind.filter(c => c.status === "archived").length,
+      grupos: grp.length,
+    };
+  }, [conversations]);
 
   const filtered = conversations
     .filter((c) => {
+      const isGroup = (c as any).contacts?.is_group === true;
+      if (activeTab === "grupos") return isGroup;
+      if (isGroup) return false; // hide groups from all other tabs
       if (activeTab === "atendendo") return c.status === "in_progress";
       if (activeTab === "aguardando") return c.status === "open";
       if (activeTab === "encerradas") return c.status === "closed";
@@ -2894,7 +2905,7 @@ const Inbox = () => {
       )}
       <div className="flex flex-1 min-h-0">
       {/* Conversations panel */}
-      <div className="w-[380px] border-r border-border flex flex-col bg-card">
+      <div className="w-[430px] border-r border-border flex flex-col bg-card">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h1 className="text-lg font-bold text-foreground">Conversas</h1>
@@ -3108,27 +3119,32 @@ const Inbox = () => {
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-4 px-4 py-0 border-b border-border overflow-x-auto scrollbar-none">
+        <div className="flex items-center gap-0 px-2 py-0 border-b border-border overflow-x-auto scrollbar-none">
           {([
-            { key: "atendendo" as TabFilter, label: "ATENDENDO", count: statusCounts.atendendo },
-            { key: "aguardando" as TabFilter, label: "AGUARDANDO", count: statusCounts.aguardando },
-            { key: "encerradas" as TabFilter, label: "ENCERRADAS", count: statusCounts.encerradas },
-            { key: "favoritas" as TabFilter, label: "⭐ FAVORITAS", count: statusCounts.favoritas },
-            { key: "arquivadas" as TabFilter, label: "📦 ARQUIVADAS", count: statusCounts.arquivadas },
+            { key: "aguardando" as TabFilter, label: "Aguardando", icon: "🟡", count: statusCounts.aguardando, activeColor: "text-yellow-500 after:bg-yellow-500" },
+            { key: "atendendo" as TabFilter, label: "Em Atendimento", icon: "🟢", count: statusCounts.atendendo, activeColor: "text-green-500 after:bg-green-500" },
+            { key: "encerradas" as TabFilter, label: "Encerradas", icon: "✅", count: statusCounts.encerradas, activeColor: "text-muted-foreground after:bg-muted-foreground" },
+            { key: "grupos" as TabFilter, label: "Grupos", icon: "👥", count: statusCounts.grupos, activeColor: "text-blue-500 after:bg-blue-500" },
+            { key: "favoritas" as TabFilter, label: "Favoritas", icon: "⭐", count: statusCounts.favoritas, activeColor: "text-amber-500 after:bg-amber-500" },
+            { key: "arquivadas" as TabFilter, label: "Arquivadas", icon: "📦", count: statusCounts.arquivadas, activeColor: "text-muted-foreground after:bg-muted-foreground" },
           ]).map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={cn(
-                "relative flex items-center gap-1.5 py-2.5 text-[11px] font-semibold tracking-wide whitespace-nowrap transition-colors",
+                "relative flex items-center gap-1 px-3 py-2.5 text-[11px] font-semibold whitespace-nowrap transition-colors",
                 activeTab === tab.key
-                  ? "text-primary after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-primary after:rounded-full"
+                  ? `${tab.activeColor} after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:rounded-full`
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {tab.label}
+              <span>{tab.icon}</span>
+              <span>{tab.label}</span>
               {tab.count !== undefined && tab.count > 0 && (
-                <span className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded-full text-[10px] font-bold bg-primary text-primary-foreground">
+                <span className={cn(
+                  "inline-flex items-center justify-center h-[17px] min-w-[17px] px-1 rounded-full text-[9px] font-bold",
+                  activeTab === tab.key ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"
+                )}>
                   {tab.count}
                 </span>
               )}

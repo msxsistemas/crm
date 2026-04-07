@@ -39,7 +39,9 @@ export default async function conversationRoutes(fastify) {
   // Use ?cursor=<last_message_at>_<id> to get next page (opaque cursor)
   fastify.get('/conversations', auth, async (req) => {
     const { status, assigned_to, search, limit = 50, connection_name, cursor, page } = req.query;
-    const conditions = ['c.is_merged = false', '(ct.is_group IS NOT TRUE)'];
+    const { groups } = req.query; // 'only' | 'exclude' (default)
+    const groupFilter = groups === 'only' ? '(ct.is_group IS TRUE)' : '(ct.is_group IS NOT TRUE)';
+    const conditions = ['c.is_merged = false', groupFilter];
     const params = [];
     let p = 1;
 
@@ -88,7 +90,7 @@ export default async function conversationRoutes(fastify) {
         ct.name as contact_name, ct.phone as contact_phone, ct.tags as contact_tags,
         ct.avatar_url as contact_avatar_url,
         ct.is_blocked as contact_is_blocked,
-        jsonb_build_object('id', ct.id, 'name', ct.name, 'phone', ct.phone, 'tags', ct.tags, 'avatar_url', ct.avatar_url, 'is_blocked', ct.is_blocked) as contacts,
+        jsonb_build_object('id', ct.id, 'name', ct.name, 'phone', ct.phone, 'tags', ct.tags, 'avatar_url', ct.avatar_url, 'is_blocked', ct.is_blocked, 'is_group', ct.is_group) as contacts,
         p.name as assigned_to_name, p.avatar_url as assigned_to_avatar,
         (SELECT content FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) as last_message_body,
         (SELECT COUNT(*) FROM conversations c2 WHERE c2.contact_id = c.contact_id) as contact_conv_count
