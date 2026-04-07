@@ -3115,9 +3115,7 @@ const Inbox = () => {
           {([
             { key: "aguardando" as TabFilter, label: "AGUARDANDO", count: statusCounts.aguardando },
             { key: "atendendo" as TabFilter, label: "ATENDENDO", count: statusCounts.atendendo },
-            { key: "encerradas" as TabFilter, label: "ENCERRADAS", count: statusCounts.encerradas },
             { key: "grupos" as TabFilter, label: "👥 GRUPOS", count: statusCounts.grupos },
-            { key: "arquivadas" as TabFilter, label: "📦 ARQUIVADAS", count: statusCounts.arquivadas },
           ]).map((tab) => (
             <button
               key={tab.key}
@@ -3560,15 +3558,6 @@ const Inbox = () => {
                         </button>
                       </>
                     )}
-                    {convo.status !== "archived" && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleArchiveConversation(convo.id); }}
-                        className="px-2 py-0.5 rounded text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                        title="Arquivar conversa"
-                      >
-                        📦
-                      </button>
-                    )}
                   </div>
                   {/* Inline hover actions */}
                   {activeTab !== "aguardando" && (
@@ -3587,15 +3576,6 @@ const Inbox = () => {
                       >
                         <CheckCircle className="h-3.5 w-3.5" />
                       </button>
-                      {convo.status !== "archived" && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleArchiveConversation(convo.id); }}
-                          title="Arquivar conversa"
-                          className="flex items-center justify-center w-6 h-6 rounded text-muted-foreground hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-950/40 transition-colors"
-                        >
-                          <Archive className="h-3.5 w-3.5" />
-                        </button>
-                      )}
                     </div>
                   )}
                 </div>
@@ -3652,12 +3632,6 @@ const Inbox = () => {
                 className="px-2 py-1 rounded bg-primary-foreground/20 hover:bg-primary-foreground/30 transition-colors whitespace-nowrap"
               >
                 Atribuir a mim
-              </button>
-              <button
-                onClick={handleBulkArchiveSelected}
-                className="px-2 py-1 rounded bg-primary-foreground/20 hover:bg-primary-foreground/30 transition-colors whitespace-nowrap"
-              >
-                Arquivar selecionadas
               </button>
               <button
                 onClick={() => setBulkSelected(new Set())}
