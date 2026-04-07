@@ -29,19 +29,20 @@ export default function GoogleCalendarCallback() {
     }
 
     const state = searchParams.get("state");
-    api.get(`/google-calendar/callback?code=${encodeURIComponent(code)}&state=${state || ""}`)
+    api.get<{ email?: string }>(`/google-calendar/callback?code=${encodeURIComponent(code)}&state=${state || ""}`)
       .then(res => {
+        const email = (res as any)?.email;
         setStatus("success");
-        setMessage(`Google Calendar conectado com sucesso${res.data.email ? ` (${res.data.email})` : ""}!`);
+        setMessage(`Google Calendar conectado com sucesso${email ? ` (${email})` : ""}!`);
         toast.success("Google Calendar conectado!");
         setTimeout(() => navigate("/compromissos"), 2000);
       })
       .catch(e => {
         setStatus("error");
-        setMessage(e?.response?.data?.error || "Erro ao trocar o código de autorização.");
+        setMessage(e?.data?.error || e?.message || "Erro ao trocar o código de autorização.");
         setTimeout(() => navigate("/configuracoes"), 3000);
       });
-  }, []);
+  }, [searchParams, navigate]);
 
   return (
     <div className="flex flex-col items-center justify-center h-screen gap-4">

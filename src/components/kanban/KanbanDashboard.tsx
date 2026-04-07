@@ -273,7 +273,7 @@ const KanbanDashboard = ({ board, unassigned, onBack }: Props) => {
                 .map((item, i) => (
                   <div key={i} className="flex items-center gap-3">
                     <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary">
-                      {item.contact.name.substring(0, 2).toUpperCase()}
+                      {(item.contact.name || item.contact.phone || "??").substring(0, 2).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-foreground truncate">

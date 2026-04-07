@@ -1402,12 +1402,12 @@ const Inbox = () => {
     if (!linkShortenerUrl.trim()) return;
     setLinkShortening(true);
     try {
-      const { data } = await api.post("/track-links/shorten", {
+      const data = await api.post<{ short_url?: string; short_code?: string }>("/track-links/shorten", {
         original_url: linkShortenerUrl.trim(),
         conversation_id: selected || null,
       });
-      const shortUrl = data.short_url || data.short_code;
-      setMessage((prev: string) => prev ? prev + " " + shortUrl : shortUrl);
+      const shortUrl = data?.short_url || data?.short_code;
+      setMessageInput((prev: string) => prev ? prev + " " + shortUrl : shortUrl);
       setLinkShortenerUrl("");
       setLinkShortenerOpen(false);
       toast.success("Link encurtado e inserido na mensagem!");
@@ -2202,18 +2202,23 @@ const Inbox = () => {
   // Load flow templates
   const loadFlowTemplates = useCallback(async () => {
     setFlowTemplatesLoading(true);
-    const { data } = await (db.from("attendance_flow_templates" as any) as any)
-      .select("*")
-      .order("name");
-    if (data) {
-      setFlowTemplates(
-        (data as any[]).map((t) => ({
-          ...t,
-          steps: Array.isArray(t.steps) ? (t.steps as FlowTemplateStep[]) : [],
-        }))
-      );
+    try {
+      const { data } = await (db.from("attendance_flow_templates" as any) as any)
+        .select("*")
+        .order("name");
+      if (data) {
+        setFlowTemplates(
+          (data as any[]).map((t) => ({
+            ...t,
+            steps: Array.isArray(t.steps) ? (t.steps as FlowTemplateStep[]) : [],
+          }))
+        );
+      }
+    } catch {
+      // table may not exist yet
+    } finally {
+      setFlowTemplatesLoading(false);
     }
-    setFlowTemplatesLoading(false);
   }, []);
 
   // Apply a flow template to the current conversation
@@ -2403,7 +2408,7 @@ const Inbox = () => {
     try {
       const ctx = messages.slice(-10).map((m) => ({
         role: m.direction === 'inbound' ? 'user' : (m.from_me ? 'assistant' : 'user'),
-        content: m.body || m.caption || '[mídia]',
+        content: m.body || '[mídia]',
       }));
       const contactName = conversations.find((c) => c.id === selected)?.contacts?.name;
       const res = await api.post<{ suggestion: string }>('/ai/suggest-reply', {
@@ -2480,7 +2485,7 @@ const Inbox = () => {
     const recentInbound = lastMessages.filter(m => !m.from_me).slice(-5);
     if (recentInbound.length === 0) return;
 
-    const text = recentInbound.map(m => m.body).join(' ');
+    const text = recentInbound.map(m => m.body || '').join(' ');
     const urgentWords = ['urgente', 'socorro', 'problema', 'erro', 'cancelar', 'reembolso', 'nunca', 'péssimo'];
     const negativeWords = ['ruim', 'mal', 'não funciona', 'insatisfeito', 'decepcionado', 'raiva', 'absurdo'];
     const positiveWords = ['ótimo', 'excelente', 'perfeito', 'obrigado', 'maravilhoso', 'satisfeito', 'adorei'];
@@ -2693,9 +2698,10 @@ const Inbox = () => {
 
   const selectedConvo = conversations.find((c) => c.id === selected);
 
-  const getInitials = (name: string | null, phone: string) => {
+  const getInitials = (name: string | null | undefined, phone: string | undefined) => {
     if (name) return name.split(" ").map((n) => n[0]).join("").substring(0, 2).toUpperCase();
-    return phone.substring(phone.length - 2);
+    const p = phone || "";
+    return p.substring(p.length - 2);
   };
 
   const formatTime = (dateStr: string | null) => {
@@ -3482,7 +3488,7 @@ const Inbox = () => {
                       )}
                     </p>
                     <div className="flex items-center gap-1 flex-wrap">
-                      {convo.channel === 'telegram' ? (
+                      {(convo as any).channel === 'telegram' ? (
                         <span className="inline-flex items-center gap-0.5 rounded bg-sky-500 px-1.5 py-0.5 text-[9px] font-semibold text-white uppercase">
                           <svg viewBox="0 0 24 24" className="h-2.5 w-2.5 fill-white" xmlns="http://www.w3.org/2000/svg"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
                           Telegram
@@ -4363,7 +4369,7 @@ const Inbox = () => {
                                 <DropdownMenuItem
                                   className="text-[14px] cursor-pointer hover:bg-accent focus:bg-accent focus:text-accent-foreground rounded px-3 py-2"
                                   onClick={() => {
-                                    navigator.clipboard.writeText(msg.body);
+                                    navigator.clipboard.writeText(msg.body || '');
                                     toast.success("Mensagem copiada");
                                   }}
                                 >
@@ -4462,13 +4468,13 @@ const Inbox = () => {
                               )}
                             </div>
                           );
-                        })() : msg.body.startsWith("⤳") ? (
+                        })() : (msg.body || '').startsWith("⤳") ? (
                           <div>
                             <div className="flex items-center gap-1 mb-1">
                               <span className="text-[11px] text-[#53bdeb] italic font-medium">Encaminhada</span>
                             </div>
                             <p className="whitespace-pre-wrap leading-[19px]">
-                              {highlightText(msg.body.replace(/^⤳\s*_Mensagem encaminhada_\n\n?/, '').replace(/\*(.*?)\*/g, '$1'), msgSearch)}
+                              {highlightText((msg.body || '').replace(/^⤳\s*_Mensagem encaminhada_\n\n?/, '').replace(/\*(.*?)\*/g, '$1'), msgSearch)}
                             </p>
                           </div>
                         ) : (
@@ -4476,15 +4482,15 @@ const Inbox = () => {
                             {msg.from_me && /(\*\*|\*|`|^#|^-)/m.test(msg.body || '') ? (
                               <div
                                 className="leading-[19px] prose prose-sm dark:prose-invert max-w-none"
-                                dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.body) }}
+                                dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.body || '') }}
                               />
                             ) : (
                               <p className="whitespace-pre-wrap leading-[19px]">
-                                {highlightText(msg.body.replace(/\*(.*?)\*/g, '$1'), msgSearch)}
+                                {highlightText((msg.body || '').replace(/\*(.*?)\*/g, '$1'), msgSearch)}
                               </p>
                             )}
-                            {/https?:\/\//.test(msg.body) && (
-                              <LinkPreview text={msg.body} fromMe={msg.from_me} />
+                            {/https?:\/\//.test(msg.body || '') && (
+                              <LinkPreview text={msg.body || ''} fromMe={msg.from_me} />
                             )}
                             {/* Translate button for inbound messages */}
                             {!msg.from_me && msg.body && (
@@ -5139,8 +5145,8 @@ const Inbox = () => {
                               return;
                             }
                           }
-                          if (e.key === "Enter" && !e.shiftKey) handleSendMessage();
-                          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleSendMessage(); }
+                          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); handleSendMessage(); return; }
+                          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }
                         }}
                         disabled={uploading}
                       />
@@ -5379,9 +5385,9 @@ const Inbox = () => {
       {showDetails && selectedConvo && (
         <ContactDetailsSidebar
           contactId={selectedConvo.contact_id}
-          contactName={selectedConvo.contacts?.name}
-          contactPhone={selectedConvo.contacts?.phone}
-          contactAvatar={selectedConvo.contacts?.avatar_url}
+          contactName={selectedConvo.contacts?.name ?? null}
+          contactPhone={selectedConvo.contacts?.phone ?? ""}
+          contactAvatar={selectedConvo.contacts?.avatar_url ?? null}
           conversationId={selectedConvo.id}
           conversationCreatedAt={selectedConvo.last_message_at || new Date().toISOString()}
           conversationStatus={selectedConvo.status}
@@ -5859,7 +5865,7 @@ const Inbox = () => {
                 if (msgsToForward.length === 0) return;
 
                 setForwardSending(true);
-                const fwdBody = `⤳ _Mensagem encaminhada_\n\n${msgsToForward.map(m => m.body).join("\n\n")}`;
+                const fwdBody = `⤳ _Mensagem encaminhada_\n\n${msgsToForward.map(m => m.body || '').join("\n\n")}`;
                 try {
                   const targets = conversations.filter(c => selectedForwardTargets.has(c.id));
                   await Promise.all(targets.map(async (convo) => {

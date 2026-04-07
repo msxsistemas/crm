@@ -1210,8 +1210,8 @@ const ContactDetailsSidebar = ({
                       className="text-muted-foreground hover:text-yellow-500 transition-colors"
                       onClick={async () => {
                         try {
-                          const { api } = await import("@/lib/api");
-                          await api.patch(`/conversations/${conversationId}/notes/${note.id}`, { is_pinned: !note.is_pinned });
+                          const { api: _api } = await import("@/lib/api");
+                          await _api.patch(`/conversations/${conversationId}/notes/${note.id}`, { is_pinned: !note.is_pinned });
                           setNotes(prev => prev.map(n => n.id === note.id ? { ...n, is_pinned: !n.is_pinned } : n));
                         } catch {}
                       }}

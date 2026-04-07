@@ -33,7 +33,7 @@ export default async function statsRoutes(fastify) {
 
     const { rows } = await query(`
       SELECT
-        p.full_name, p.status,
+        p.name AS full_name, p.status,
         (SELECT COUNT(*)::int FROM evolution_connections WHERE user_id = $1 AND status = 'open') AS connection_count,
         (SELECT COUNT(*)::int FROM conversations WHERE unread_count > 0) AS unread_conversations,
         (SELECT COUNT(*)::int FROM conversations WHERE status = 'open') AS waiting_conversations
@@ -167,7 +167,7 @@ export default async function statsRoutes(fastify) {
         )
         SELECT
           p.id,
-          COALESCE(p.full_name, p.email, 'Agente') AS name,
+          COALESCE(p.name, p.email, 'Agente') AS name,
           COALESCE(p.email, '') AS email,
           COALESCE(p.status, 'offline') AS status,
           COUNT(c.id) AS total,
@@ -178,7 +178,7 @@ export default async function statsRoutes(fastify) {
           AND c.created_at >= $1 AND c.created_at <= $2
         LEFT JOIN agent_resp ar ON ar.assigned_to = p.id
         WHERE p.role IN ('agent','supervisor','admin','manager','owner')
-        GROUP BY p.id, p.full_name, p.email, p.status, ar.avg_resp_mins
+        GROUP BY p.id, p.name, p.email, p.status, ar.avg_resp_mins
         ORDER BY COUNT(c.id) DESC
         LIMIT 10
       `, [start, end]),
@@ -229,7 +229,7 @@ export default async function statsRoutes(fastify) {
       `, [start, end]),
 
       // 9. Profiles list for selectors
-      query(`SELECT id, full_name, email, status FROM profiles ORDER BY full_name NULLS LAST`),
+      query(`SELECT id, name AS full_name, email, status FROM profiles ORDER BY name NULLS LAST`),
 
       // 10. Total sent/received messages in period
       query(`
@@ -451,7 +451,7 @@ export default async function statsRoutes(fastify) {
   fastify.get('/stats/agents-today', auth, async (req) => {
     const { rows } = await query(`
       SELECT
-        p.id, p.full_name AS name, p.avatar_url, p.status,
+        p.id, p.name AS full_name, p.avatar_url, p.status,
         COUNT(DISTINCT c.id) FILTER (WHERE c.created_at >= CURRENT_DATE) AS conversations_today,
         COUNT(DISTINCT c.id) FILTER (WHERE c.status != 'closed') AS open_now,
         COUNT(DISTINCT c.id) FILTER (WHERE c.status = 'closed' AND c.updated_at >= CURRENT_DATE) AS closed_today
@@ -513,7 +513,7 @@ export default async function statsRoutes(fastify) {
     if (!agent_id) return reply.code(400).send({ error: 'agent_id é obrigatório' });
     const { rows } = await query(`
       SELECT
-        p.full_name,
+        p.name AS full_name,
         COUNT(c.id) FILTER (WHERE c.status='closed') as closed_count,
         ROUND(AVG(c.csat_score)::numeric, 2) as avg_csat,
         COUNT(m.id) as messages_sent,
@@ -522,8 +522,8 @@ export default async function statsRoutes(fastify) {
       LEFT JOIN conversations c ON c.assigned_to = p.id AND c.created_at BETWEEN $2 AND $3
       LEFT JOIN messages m ON m.conversation_id = c.id AND m.sender_type='agent'
       WHERE p.id = $1
-      GROUP BY p.full_name
-    `, [agent_id, start || 'NOW() - interval \'30 days\'', end || 'NOW()']);
+      GROUP BY p.name
+    `, [agent_id, start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), end || new Date().toISOString()]);
     return rows[0] || {};
   });
 
@@ -602,7 +602,7 @@ export default async function statsRoutes(fastify) {
 
     const { rows: byAgent } = await query(`
       SELECT
-        p.full_name as agent_name,
+        p.name as agent_name,
         COUNT(*) FILTER (WHERE c.sentiment='positivo') as positive,
         COUNT(*) FILTER (WHERE c.sentiment='negativo') as negative,
         COUNT(*) FILTER (WHERE c.sentiment='neutro') as neutral,
@@ -610,7 +610,7 @@ export default async function statsRoutes(fastify) {
       FROM conversations c
       JOIN profiles p ON p.id=c.assigned_to
       WHERE c.created_at BETWEEN $1 AND $2 AND c.sentiment IS NOT NULL
-      GROUP BY p.id, p.full_name ORDER BY negative DESC
+      GROUP BY p.id, p.name ORDER BY negative DESC
     `, [startDate, endDate]);
 
     const { rows: trend } = await query(`
@@ -626,7 +626,7 @@ export default async function statsRoutes(fastify) {
 
     // Recent negative conversations (for alerts)
     const { rows: alerts } = await query(`
-      SELECT c.id, ct.name as contact_name, c.created_at, p.full_name as agent_name
+      SELECT c.id, ct.name as contact_name, c.created_at, p.name as agent_name
       FROM conversations c
       JOIN contacts ct ON ct.id=c.contact_id
       LEFT JOIN profiles p ON p.id=c.assigned_to
@@ -690,7 +690,7 @@ export default async function statsRoutes(fastify) {
     // By agent
     const { rows: byAgent } = await query(`
       SELECT
-        p.full_name as name,
+        p.name as name,
         COUNT(c.id) as total,
         ROUND(AVG(EXTRACT(EPOCH FROM (c.closed_at - c.created_at))/60)::numeric, 1) as avg_handling_min,
         ROUND(AVG(EXTRACT(EPOCH FROM (c.first_response_at - c.created_at))/60)::numeric, 1) as avg_first_response_min,
@@ -699,7 +699,7 @@ export default async function statsRoutes(fastify) {
       FROM conversations c
       JOIN profiles p ON p.id = c.assigned_to
       WHERE c.status='closed' AND c.closed_at IS NOT NULL AND c.created_at BETWEEN $1 AND $2
-      GROUP BY p.id, p.full_name ORDER BY avg_handling_min ASC
+      GROUP BY p.id, p.name ORDER BY avg_handling_min ASC
     `, [startDate, endDate]);
 
     // By team
@@ -775,7 +775,7 @@ export default async function statsRoutes(fastify) {
   fastify.get('/stats/supervisor-live', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const { rows: agents } = await query(`
       SELECT
-        p.id, p.full_name, p.status, p.avatar_url,
+        p.id, p.name AS full_name, p.status, p.avatar_url,
         COUNT(c.id) FILTER (WHERE c.status='open') as open_count,
         COUNT(c.id) FILTER (WHERE c.status='open' AND c.assigned_to=p.id) as assigned_count,
         MAX(m.created_at) FILTER (WHERE m.sender_type='agent') as last_message_at,
@@ -791,7 +791,7 @@ export default async function statsRoutes(fastify) {
     `);
 
     const { rows: alerts } = await query(`
-      SELECT c.id, ct.name as contact_name, c.assigned_to, p.full_name as agent_name,
+      SELECT c.id, ct.name as contact_name, c.assigned_to, p.name as agent_name,
         EXTRACT(EPOCH FROM (NOW() - c.last_message_at))/60 as minutes_waiting,
         c.priority
       FROM conversations c
@@ -941,7 +941,7 @@ export default async function statsRoutes(fastify) {
   fastify.get('/stats/gamification', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const { rows } = await query(`
       SELECT
-        p.id, p.full_name, p.avatar_url,
+        p.id, p.name AS full_name, p.avatar_url,
         (COUNT(c.id) FILTER (WHERE c.status='closed' AND c.closed_at > NOW() - interval '7 days') * 10) +
         (COALESCE(ROUND(AVG(c.csat_score) FILTER (WHERE c.csat_score IS NOT NULL AND c.closed_at > NOW() - interval '7 days'))::int, 0) * 5) +
         (COUNT(c.id) FILTER (WHERE c.status='closed' AND c.closed_at > NOW() - interval '7 days' AND c.first_response_at IS NOT NULL AND EXTRACT(EPOCH FROM (c.first_response_at - c.created_at)) < 300) * 3) as points_week,
@@ -1394,13 +1394,13 @@ export default async function statsRoutes(fastify) {
     // ── Top Agents ────────────────────────────────────────────────────────────
     const { rows: agentRows } = await query(`
       SELECT
-        p.id, p.full_name, p.name, p.avatar_url,
+        p.id, p.name AS full_name, p.avatar_url,
         COUNT(c.id) FILTER (WHERE c.status='closed') AS closed_count,
         ROUND(AVG(c.csat_score) FILTER (WHERE c.csat_score IS NOT NULL)::numeric, 2) AS avg_csat
       FROM profiles p
       JOIN conversations c ON c.assigned_to = p.id
       WHERE c.created_at >= ${since}
-      GROUP BY p.id, p.full_name, p.name, p.avatar_url
+      GROUP BY p.id, p.name, p.avatar_url
       HAVING COUNT(c.id) FILTER (WHERE c.status='closed') > 0
       ORDER BY closed_count DESC
       LIMIT 5
@@ -1502,7 +1502,7 @@ export default async function statsRoutes(fastify) {
       },
       top_agents: agentRows.map(a => ({
         id: a.id,
-        name: a.full_name || a.name || 'Agente',
+        name: a.full_name || 'Agente',
         avatar_url: a.avatar_url,
         closed_count: parseInt(a.closed_count || '0'),
         avg_csat: a.avg_csat ? parseFloat(a.avg_csat) : null,
@@ -1532,7 +1532,7 @@ export default async function statsRoutes(fastify) {
   fastify.get('/public/agent/:id', async (req, reply) => {
     const { rows } = await query(`
       SELECT
-        p.id, p.full_name, p.name, p.avatar_url, p.role, p.bio,
+        p.id, p.name AS full_name, p.avatar_url, p.role, p.bio,
         COUNT(c.id) FILTER (WHERE c.status = 'closed') AS total_conversations_closed,
         ROUND(AVG(c.csat_score) FILTER (WHERE c.status = 'closed' AND c.csat_score IS NOT NULL)::numeric, 2) AS average_csat
       FROM profiles p

@@ -88,9 +88,12 @@ export default function MyProductivity() {
     try {
       setLoading(true);
       const result = await api.get<ProductivityData>("/stats/my-productivity");
+      if (!result) return;
       setData(result);
-      setDailyGoal(result.goal.daily_conversations);
-      setWeeklyGoal(result.goal.weekly_conversations);
+      if (result.goal) {
+        setDailyGoal(result.goal.daily_conversations);
+        setWeeklyGoal(result.goal.weekly_conversations);
+      }
     } catch {
       toast.error("Erro ao carregar dados de produtividade");
     } finally {

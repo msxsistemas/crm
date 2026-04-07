@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   LayoutDashboard, TrendingUp, Clock, AlertTriangle, RefreshCw, Columns
 } from "lucide-react";
@@ -72,11 +72,7 @@ const KanbanOverview = () => {
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-  useEffect(() => {
-    loadAll();
-  }, [user]);
-
-  const loadAll = async () => {
+  const loadAll = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
@@ -136,7 +132,11 @@ const KanbanOverview = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
 
   // Aggregate stats
   const totalBoards = boards.length;

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Zap, Search, Pencil, Trash2, Paperclip, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,7 +70,7 @@ const QuickReplies = () => {
   const [attachmentName, setAttachmentName] = useState("");
   const [errors, setErrors] = useState<{ shortcut?: boolean; message?: boolean }>({});
 
-  const fetchReplies = async () => {
+  const fetchReplies = useCallback(async () => {
     if (!user) return;
     const { data, error } = await db
       .from("quick_replies")
@@ -87,11 +87,11 @@ const QuickReplies = () => {
       })));
     }
     setLoading(false);
-  };
+  }, [user]);
 
   useEffect(() => {
     fetchReplies();
-  }, [user]);
+  }, [fetchReplies]);
 
   const resetForm = () => {
     setShortcut("");

@@ -36,8 +36,8 @@ export default function LinkTracker() {
 
   const loadLinks = useCallback(async () => {
     try {
-      const { data } = await api.get("/track-links");
-      setLinks(data);
+      const data = await api.get<TrackedLink[]>("/track-links");
+      setLinks(data || []);
     } catch {
       toast.error("Erro ao carregar links");
     } finally {
@@ -53,7 +53,7 @@ export default function LinkTracker() {
     if (!newUrl.trim()) return;
     setShortening(true);
     try {
-      const { data } = await api.post("/track-links/shorten", { original_url: newUrl.trim() });
+      const data = await api.post<TrackedLink>("/track-links/shorten", { original_url: newUrl.trim() });
       setLinks((prev) => [data, ...prev]);
       setNewUrl("");
       toast.success("Link encurtado com sucesso!");
@@ -69,8 +69,9 @@ export default function LinkTracker() {
     setClicksLoading(true);
     setClicks([]);
     try {
-      const { data } = await api.get(`/track-links/${link.id}/clicks`);
-      setClicks(data.data || []);
+      const res = await api.get<LinkClick[] | { data: LinkClick[] }>(`/track-links/${link.id}/clicks`);
+      const list = Array.isArray(res) ? res : (res as any)?.data || [];
+      setClicks(list);
     } catch {
       toast.error("Erro ao carregar cliques");
     } finally {

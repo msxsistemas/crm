@@ -364,6 +364,7 @@ const Contacts = () => {
 
   useEffect(() => {
     if (mainTab === "segments") fetchSegments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mainTab]);
 
   const loadWhatsAppConnections = async () => {
@@ -729,15 +730,20 @@ const Contacts = () => {
   const handleBulkDelete = async () => {
     setBulkDeleting(true);
     const ids = Array.from(selectedContacts);
-    const { error } = await db.from("contacts").delete().in("id", ids);
-    setBulkDeleting(false);
-    if (error) {
+    try {
+      const { error } = await db.from("contacts").delete().in("id", ids);
+      if (error) {
+        toast.error("Erro ao excluir contatos");
+      } else {
+        toast.success(`${ids.length} contato(s) excluído(s)`);
+        setBulkDeleteOpen(false);
+        clearSelection();
+        fetchContacts();
+      }
+    } catch {
       toast.error("Erro ao excluir contatos");
-    } else {
-      toast.success(`${ids.length} contato(s) excluído(s)`);
-      setBulkDeleteOpen(false);
-      clearSelection();
-      fetchContacts();
+    } finally {
+      setBulkDeleting(false);
     }
   };
 

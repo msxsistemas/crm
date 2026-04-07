@@ -113,7 +113,7 @@ const SessionsSection = () => {
       const data = await api.get<any[]>('/auth/sessions');
       setSessions(data || []);
     } catch {}
-    setLoadingSessions(false);
+    finally { setLoadingSessions(false); }
   }, []);
 
   useEffect(() => { loadSessions(); }, [loadSessions]);
@@ -125,7 +125,7 @@ const SessionsSection = () => {
       setSessions(prev => prev.map(s => s.id === id ? { ...s, logged_out_at: new Date().toISOString() } : s));
       toast.success('Sessão encerrada');
     } catch { toast.error('Erro ao encerrar sessão'); }
-    setTerminating(null);
+    finally { setTerminating(null); }
   };
 
   const handleTerminateAll = async () => {
@@ -135,7 +135,7 @@ const SessionsSection = () => {
       loadSessions();
       toast.success('Todas as outras sessões encerradas');
     } catch { toast.error('Erro ao encerrar sessões'); }
-    setTerminatingAll(false);
+    finally { setTerminatingAll(false); }
   };
 
   const activeSessions = sessions.filter(s => !s.logged_out_at);
@@ -232,8 +232,9 @@ const TwoFactorSection = ({ userId }: { userId: string | null }) => {
       toast.success(val ? "2FA ativado com sucesso!" : "2FA desativado");
     } catch {
       toast.error("Erro ao salvar configuração de 2FA");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   const confirmEnable = async () => {
@@ -436,8 +437,9 @@ const GeralTab = () => {
       toast.success("Perfil atualizado!");
     } catch {
       toast.error("Erro ao salvar perfil");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   const handleChangePassword = async () => {
@@ -753,8 +755,9 @@ const AusenciaSection = ({ userId }: { userId: string | null }) => {
       toast.success("Configurações de ausência salvas!");
     } catch {
       toast.error("Erro ao salvar configurações de ausência");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   return (
@@ -849,7 +852,7 @@ const TagsTab = () => {
       const data = await api.get<any[]>('/tags');
       setTags(data || []);
     } catch {}
-    setLoading(false);
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchTags(); }, [fetchTags]);
@@ -971,7 +974,7 @@ const CategoriasTab = () => {
       const data = await api.get<any[]>('/categories');
       setCategories(data || []);
     } catch {}
-    setLoading(false);
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchCats(); }, [fetchCats]);
@@ -1127,7 +1130,7 @@ const RespostasRapidasTab = () => {
       setShortcut(""); setTitle(""); setMessage("");
       loadReplies();
     } catch { toast.error("Erro ao salvar resposta"); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   const handleApprove = async (id: string) => {
@@ -1138,7 +1141,7 @@ const RespostasRapidasTab = () => {
       loadApprovalSettings();
       loadReplies();
     } catch { toast.error("Erro ao aprovar template"); }
-    setApproving(null);
+    finally { setApproving(null); }
   };
 
   const handleReject = async (id: string) => {
@@ -1150,7 +1153,7 @@ const RespostasRapidasTab = () => {
       setRejectReason("");
       loadApprovalSettings();
     } catch { toast.error("Erro ao rejeitar template"); }
-    setApproving(null);
+    finally { setApproving(null); }
   };
 
   const filtered = replies.filter(r => r.shortcut?.toLowerCase().includes(search.toLowerCase()) || r.message?.toLowerCase().includes(search.toLowerCase()));
@@ -1813,7 +1816,6 @@ interface Webhook {
 }
 
 const WebhooksTab = () => {
-  const { user } = useAuth();
   const [webhooks, setWebhooks] = useState<Webhook[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -1833,7 +1835,7 @@ const WebhooksTab = () => {
       const data = await api.get<Webhook[]>('/webhooks');
       setWebhooks(data || []);
     } catch {}
-    setLoading(false);
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchWebhooks(); }, [fetchWebhooks]);
@@ -1873,7 +1875,7 @@ const WebhooksTab = () => {
       setDialogOpen(false);
       fetchWebhooks();
     } catch { toast.error(editingWebhook ? "Erro ao atualizar webhook" : "Erro ao criar webhook"); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
@@ -2133,7 +2135,7 @@ const ApiTokensTab = () => {
       const data = await api.get<ApiToken[]>('/api-tokens');
       setTokens(data || []);
     } catch {}
-    setLoading(false);
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchTokens(); }, [fetchTokens]);
@@ -2171,7 +2173,7 @@ const ApiTokensTab = () => {
       setCreatedToken(created.token);
       fetchTokens();
     } catch { toast.error("Erro ao criar token"); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   const handleRevoke = async (id: string) => {
@@ -2459,7 +2461,7 @@ const LeadScoringTab = () => {
       const data = await api.get<ScoringRule[]>('/lead-scoring-rules');
       setRules(data || []);
     } catch {}
-    setLoadingRules(false);
+    finally { setLoadingRules(false); }
   }, []);
 
   useEffect(() => { fetchRules(); }, [fetchRules]);
@@ -2505,7 +2507,7 @@ const LeadScoringTab = () => {
       setDialogOpen(false);
       fetchRules();
     } catch { toast.error(editingRule ? 'Erro ao salvar regra' : 'Erro ao criar regra'); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
@@ -2696,7 +2698,7 @@ const EtiquetasTab = () => {
       const data = await api.get<ConversationLabel[]>('/conversation-labels');
       setLabels(data || []);
     } catch {}
-    setLoading(false);
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchLabels(); }, [fetchLabels]);
@@ -3098,7 +3100,7 @@ const WebhookLogTab = () => {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load("all"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFilter = (s: "all" | "success" | "error") => {
     setStatusFilter(s);
@@ -3796,8 +3798,9 @@ const AILabelsTab = () => {
       toast.success(val ? "Etiquetas automáticas ativadas!" : "Etiquetas automáticas desativadas");
     } catch {
       toast.error("Erro ao salvar configuração");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   const categories = [
@@ -3890,8 +3893,9 @@ const AIRoutingSection = () => {
       toast.success(val ? "Roteamento inteligente ativado!" : "Roteamento inteligente desativado");
     } catch {
       toast.error("Erro ao salvar configuração");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   return (
@@ -3958,8 +3962,9 @@ const OutOfHoursBotTab = () => {
       toast.success("Configuração salva!");
     } catch {
       toast.error("Erro ao salvar configuração");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   return (
@@ -4109,8 +4114,9 @@ const RotamentoTab = () => {
       setModalOpen(false);
     } catch {
       toast.error('Erro ao salvar regra');
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   const handleDelete = async (id: string) => {
@@ -4323,7 +4329,7 @@ const CustomFieldsTab = () => {
       const data = await api.get<CustomFieldDef[]>('/custom-fields');
       setFields(data || []);
     } catch { /* ignore */ }
-    setLoading(false);
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchFields(); }, [fetchFields]);
@@ -4356,7 +4362,7 @@ const CustomFieldsTab = () => {
       setDialogOpen(false);
       fetchFields();
     } catch { toast.error("Erro ao salvar campo"); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
@@ -4366,7 +4372,7 @@ const CustomFieldsTab = () => {
       toast.success("Campo excluído!");
       fetchFields();
     } catch { toast.error("Erro ao excluir campo"); }
-    setDeleting(null);
+    finally { setDeleting(null); }
   };
 
   const moveField = async (field: CustomFieldDef, direction: 'up' | 'down') => {
@@ -5264,7 +5270,7 @@ const OrganizacaoTab = () => {
         const first = orgs?.[0];
         if (first?.member_count !== undefined) setMemberCount(Number(first.member_count));
       } catch {}
-      setLoading(false);
+      finally { setLoading(false); }
     };
     load();
   }, []);
@@ -5276,7 +5282,7 @@ const OrganizacaoTab = () => {
       await api.patch('/organizations/current', { name: orgName.trim(), logo_url: orgLogoUrl || null });
       toast.success('Organização atualizada!');
     } catch { toast.error('Erro ao salvar'); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   if (loading) return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
@@ -5402,7 +5408,7 @@ const IntegracaoTab = () => {
       const data = await api.get<Integration[]>('/integrations');
       setIntegrations(data || []);
     } catch {}
-    setLoading(false);
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchIntegrations(); }, [fetchIntegrations]);
@@ -5424,7 +5430,7 @@ const IntegracaoTab = () => {
       setDialogOpen(false);
       fetchIntegrations();
     } catch { toast.error('Erro ao criar integração'); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
@@ -5455,7 +5461,7 @@ const IntegracaoTab = () => {
         toast.error(`Teste retornou HTTP ${res?.status}`);
       }
     } catch { toast.error('Erro ao testar integração'); }
-    setTestingId(null);
+    finally { setTestingId(null); }
   };
 
   const toggleEvent = (ev: string) => {
@@ -5663,7 +5669,7 @@ const EscalationRulesTab = () => {
       const data = await api.get<any[]>('/escalation-rules');
       setRules(Array.isArray(data) ? data : []);
     } catch {}
-    setLoading(false);
+    finally { setLoading(false); }
   };
 
   useEffect(() => { load(); }, []);
@@ -5694,7 +5700,7 @@ const EscalationRulesTab = () => {
       setModalOpen(false);
       load();
     } catch { toast.error("Erro ao salvar regra"); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   const handleToggle = async (rule: any) => {
@@ -5831,7 +5837,7 @@ const AIChatbotTab = () => {
       });
       toast.success("Configuração do chatbot salva!");
     } catch { toast.error("Erro ao salvar configuração"); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   const handlePreview = async () => {
@@ -6019,7 +6025,7 @@ const CustomSurveysTab = () => {
       setShowModal(false);
       toast.success("Pesquisa salva!");
     } catch { toast.error("Erro ao salvar pesquisa"); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
@@ -6042,7 +6048,7 @@ const CustomSurveysTab = () => {
       const data = await api.get<any>(`/custom-surveys/${s.id}/responses`);
       setResponses(data.data || []);
     } catch { toast.error("Erro ao carregar respostas"); }
-    setResponsesLoading(false);
+    finally { setResponsesLoading(false); }
   };
 
   const addQuestion = () => {

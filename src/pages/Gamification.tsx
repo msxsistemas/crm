@@ -87,8 +87,8 @@ export default function Gamification() {
   });
 
   const now = new Date();
-  const weekStart = format(startOfWeek(now, { locale: ptBR }), "dd/MM", { locale: ptBR });
-  const weekEnd = format(endOfWeek(now, { locale: ptBR }), "dd/MM/yyyy", { locale: ptBR });
+  const weekStart = format(startOfWeek(now, { weekStartsOn: 1 }), "dd/MM", { locale: ptBR });
+  const weekEnd = format(endOfWeek(now, { weekStartsOn: 1 }), "dd/MM/yyyy", { locale: ptBR });
 
   const top3 = agents.slice(0, 3);
   const rest = agents.slice(3);

@@ -97,6 +97,7 @@ export default function ContactTimeline() {
   useEffect(() => {
     if (!contactId) return;
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contactId]);
 
   const loadData = async () => {

@@ -148,45 +148,55 @@ const BlacklistPage = () => {
     if (!blockPhone.trim()) { toast.error("Informe o número de telefone"); return; }
     if (!blockReason.trim()) { toast.error("Motivo é obrigatório"); return; }
     setBlocking(true);
-    const expiresAt = computeExpiresAt();
-    const profileName = user?.user_metadata?.full_name || user?.email || null;
-    const { error } = await db.from("blacklist" as any).upsert({
-      phone: blockPhone.trim(),
-      reason: blockReason.trim(),
-      blocked_by: user?.id || null,
-      blocked_by_name: profileName,
-      expires_at: expiresAt,
-      is_active: true,
-    }, { onConflict: "phone" });
-    setBlocking(false);
-    if (error) {
-      toast.error("Erro ao bloquear número: " + error.message);
-    } else {
-      toast.success("Número bloqueado com sucesso!");
-      setBlockOpen(false);
-      setBlockPhone("");
-      setBlockReason("");
-      setBlockExpiration("nunca");
-      setBlockCustomDate("");
-      load();
+    try {
+      const expiresAt = computeExpiresAt();
+      const profileName = user?.user_metadata?.full_name || user?.email || null;
+      const { error } = await db.from("blacklist" as any).upsert({
+        phone: blockPhone.trim(),
+        reason: blockReason.trim(),
+        blocked_by: user?.id || null,
+        blocked_by_name: profileName,
+        expires_at: expiresAt,
+        is_active: true,
+      }, { onConflict: "phone" });
+      if (error) {
+        toast.error("Erro ao bloquear número: " + error.message);
+      } else {
+        toast.success("Número bloqueado com sucesso!");
+        setBlockOpen(false);
+        setBlockPhone("");
+        setBlockReason("");
+        setBlockExpiration("nunca");
+        setBlockCustomDate("");
+        load();
+      }
+    } catch (err: any) {
+      toast.error("Erro ao bloquear número: " + (err?.message || "Erro inesperado"));
+    } finally {
+      setBlocking(false);
     }
   };
 
   const handleUnblock = async () => {
     if (!unblockEntry) return;
     setUnblocking(true);
-    const { error } = await db
-      .from("blacklist" as any)
-      .update({ is_active: false })
-      .eq("id", unblockEntry.id);
-    setUnblocking(false);
-    if (error) {
-      toast.error("Erro ao desbloquear");
-    } else {
-      toast.success("Número desbloqueado!");
-      setUnblockOpen(false);
-      setUnblockEntry(null);
-      load();
+    try {
+      const { error } = await db
+        .from("blacklist" as any)
+        .update({ is_active: false })
+        .eq("id", unblockEntry.id);
+      if (error) {
+        toast.error("Erro ao desbloquear");
+      } else {
+        toast.success("Número desbloqueado!");
+        setUnblockOpen(false);
+        setUnblockEntry(null);
+        load();
+      }
+    } catch (err: any) {
+      toast.error("Erro ao desbloquear: " + (err?.message || "Erro inesperado"));
+    } finally {
+      setUnblocking(false);
     }
   };
 
@@ -199,18 +209,23 @@ const BlacklistPage = () => {
   const handleSaveEdit = async () => {
     if (!editEntry) return;
     setSaving(true);
-    const { error } = await db
-      .from("blacklist" as any)
-      .update({ reason: editReason.trim() })
-      .eq("id", editEntry.id);
-    setSaving(false);
-    if (error) {
-      toast.error("Erro ao salvar motivo");
-    } else {
-      toast.success("Motivo atualizado!");
-      setEditOpen(false);
-      setEditEntry(null);
-      load();
+    try {
+      const { error } = await db
+        .from("blacklist" as any)
+        .update({ reason: editReason.trim() })
+        .eq("id", editEntry.id);
+      if (error) {
+        toast.error("Erro ao salvar motivo");
+      } else {
+        toast.success("Motivo atualizado!");
+        setEditOpen(false);
+        setEditEntry(null);
+        load();
+      }
+    } catch (err: any) {
+      toast.error("Erro ao salvar motivo: " + (err?.message || "Erro inesperado"));
+    } finally {
+      setSaving(false);
     }
   };
 

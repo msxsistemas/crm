@@ -64,7 +64,7 @@ const ApiTokensTab = () => {
       const data = await api.get<ApiToken[]>('/api-tokens');
       setTokens(data || []);
     } catch {}
-    setLoading(false);
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchTokens(); }, [fetchTokens]);
@@ -102,7 +102,7 @@ const ApiTokensTab = () => {
       setCreatedToken(created.token);
       fetchTokens();
     } catch { toast.error("Erro ao criar token"); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   const handleRevoke = async (id: string) => {

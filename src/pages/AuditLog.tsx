@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import api from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
@@ -64,6 +64,7 @@ export default function AuditLog() {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [offset, setOffset] = useState(0);
+  const offsetRef = useRef(0);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -82,17 +83,22 @@ export default function AuditLog() {
   }, [user, navigate]);
 
   const fetchEntries = useCallback(async (reset = false) => {
-    const currentOffset = reset ? 0 : offset;
-    if (reset) setLoading(true);
-    else setLoadingMore(true);
+    if (reset) {
+      setLoading(true);
+    } else {
+      setLoadingMore(true);
+    }
     try {
+      const currentOffset = reset ? 0 : offsetRef.current;
       const data = await api.get(`/admin/audit-log?limit=${PAGE_SIZE}&offset=${currentOffset}`);
       const rows: AuditEntry[] = Array.isArray(data) ? data : [];
       if (reset) {
         setEntries(rows);
+        offsetRef.current = rows.length;
         setOffset(rows.length);
       } else {
         setEntries(prev => [...prev, ...rows]);
+        offsetRef.current = offsetRef.current + rows.length;
         setOffset(prev => prev + rows.length);
       }
       setHasMore(rows.length === PAGE_SIZE);
@@ -103,8 +109,7 @@ export default function AuditLog() {
       setLoading(false);
       setLoadingMore(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset]);
+  }, []);
 
   useEffect(() => {
     fetchEntries(true);

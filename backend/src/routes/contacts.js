@@ -132,7 +132,7 @@ export default async function contactRoutes(fastify) {
   // Contact version history
   fastify.get('/contacts/:id/history', auth, async (req, reply) => {
     const { rows } = await query(
-      `SELECT cv.*, p.full_name as changed_by_name
+      `SELECT cv.*, p.name as changed_by_name
        FROM contact_versions cv
        LEFT JOIN profiles p ON p.id=cv.changed_by
        WHERE cv.contact_id=$1
@@ -280,8 +280,8 @@ export default async function contactRoutes(fastify) {
     if (!contact[0]) return reply.code(404).send({ error: 'Not found' });
 
     const [convs, notes, csatData] = await Promise.all([
-      query(`SELECT c.id, c.status, c.created_at, c.closed_at, c.last_message_body, c.last_message_at, c.csat_score, p.full_name as agent_name, cat.name as category_name FROM conversations c LEFT JOIN profiles p ON p.id=c.assigned_to LEFT JOIN categories cat ON cat.id=c.category_id WHERE c.contact_id=$1 ORDER BY c.created_at DESC`, [req.params.id]),
-      query(`SELECT n.*, p.full_name as author_name FROM conversation_notes n JOIN profiles p ON p.id=n.author_id JOIN conversations c ON c.id=n.conversation_id WHERE c.contact_id=$1 ORDER BY n.created_at DESC LIMIT 20`, [req.params.id]),
+      query(`SELECT c.id, c.status, c.created_at, c.closed_at, c.last_message_body, c.last_message_at, c.csat_score, p.name as agent_name, cat.name as category_name FROM conversations c LEFT JOIN profiles p ON p.id=c.assigned_to LEFT JOIN categories cat ON cat.id=c.category_id WHERE c.contact_id=$1 ORDER BY c.created_at DESC`, [req.params.id]),
+      query(`SELECT n.*, p.name as author_name FROM conversation_notes n JOIN profiles p ON p.id=n.author_id JOIN conversations c ON c.id=n.conversation_id WHERE c.contact_id=$1 ORDER BY n.created_at DESC LIMIT 20`, [req.params.id]),
       query(`SELECT ROUND(AVG(csat_score)::numeric,2) as avg_csat, COUNT(*) FILTER (WHERE csat_score IS NOT NULL) as csat_count FROM conversations WHERE contact_id=$1`, [req.params.id])
     ]);
 
@@ -302,7 +302,7 @@ export default async function contactRoutes(fastify) {
   fastify.get('/contacts/:id/conversations', auth, async (req) => {
     const { rows } = await query(`
       SELECT c.id, c.status, c.created_at, c.closed_at, c.last_message_body, c.last_message_at,
-             c.csat_score, p.full_name as agent_name, cat.name as category_name
+             c.csat_score, p.name as agent_name, cat.name as category_name
       FROM conversations c
       LEFT JOIN profiles p ON p.id = c.assigned_to
       LEFT JOIN categories cat ON cat.id = c.category_id
@@ -339,7 +339,7 @@ export default async function contactRoutes(fastify) {
     const ph = merge_ids.map((_, i) => `$${i + 2}`).join(',');
     // Reassign conversations + messages contact data
     await query(`UPDATE conversations SET contact_id=$1 WHERE contact_id IN (${ph})`, [keep_id, ...merge_ids]);
-    await query(`DELETE FROM contacts WHERE id IN (${ph})`, merge_ids);
+    await query(`DELETE FROM contacts WHERE id IN (${ph})`, [keep_id, ...merge_ids]);
     invalidate('contacts:list:*').catch(() => {});
     return { ok: true, merged: merge_ids.length };
   });
@@ -489,7 +489,7 @@ export default async function contactRoutes(fastify) {
   // ── Contact Documents ────────────────────────────────────────────────────
   fastify.get('/contacts/:id/documents', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const { rows } = await query(
-      'SELECT d.*, p.full_name as uploaded_by_name FROM contact_documents d LEFT JOIN profiles p ON p.id=d.uploaded_by WHERE d.contact_id=$1 ORDER BY d.created_at DESC',
+      'SELECT d.*, p.name as uploaded_by_name FROM contact_documents d LEFT JOIN profiles p ON p.id=d.uploaded_by WHERE d.contact_id=$1 ORDER BY d.created_at DESC',
       [req.params.id]
     );
     return rows;

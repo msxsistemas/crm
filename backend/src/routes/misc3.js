@@ -633,7 +633,7 @@ export default async function misc3Routes(fastify) {
       data: {
         conversation: { id: 'test-id', status: 'open', priority: 'normal' },
         contact: { name: 'Contato Teste', phone: '5511999990000' },
-        agent: { name: req.user.full_name },
+        agent: { name: req.user.name || req.user.full_name },
       }
     };
     try {
@@ -938,7 +938,7 @@ export default async function misc3Routes(fastify) {
   // ── Conversation Collaborators (Co-atendimento) ──────────────────────────────
   fastify.get('/conversations/:id/collaborators', auth, async (req) => {
     const { rows } = await query(
-      `SELECT cc.*, p.name, p.full_name, p.avatar_url, p.email
+      `SELECT cc.*, p.name, p.name AS full_name, p.avatar_url, p.email
        FROM conversation_collaborators cc
        JOIN profiles p ON p.id = cc.agent_id
        WHERE cc.conversation_id=$1`,
@@ -954,7 +954,7 @@ export default async function misc3Routes(fastify) {
       'INSERT INTO conversation_collaborators (conversation_id, agent_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING *',
       [req.params.id, agent_id]
     );
-    const { rows: agentRows } = await query('SELECT id, name, full_name, avatar_url FROM profiles WHERE id=$1', [agent_id]);
+    const { rows: agentRows } = await query('SELECT id, name, name AS full_name, avatar_url FROM profiles WHERE id=$1', [agent_id]);
     const agentRow = agentRows[0] || { id: agent_id };
     fastify.io?.emit('conversation:collaborator_added', { conversation_id: req.params.id, agent: agentRow });
     return reply.status(201).send(rows[0] || { conversation_id: req.params.id, agent_id });
@@ -1101,7 +1101,7 @@ export default async function misc3Routes(fastify) {
   // ── Appointments ──────────────────────────────────────────────────────────────
   fastify.get('/appointments', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const { contact_id, agent_id } = req.query;
-    let q = 'SELECT a.*, ct.name as contact_name, ct.phone as contact_phone, p.full_name as agent_name FROM appointments a LEFT JOIN contacts ct ON ct.id=a.contact_id LEFT JOIN profiles p ON p.id=a.created_by WHERE 1=1';
+    let q = 'SELECT a.*, ct.name as contact_name, ct.phone as contact_phone, p.name as agent_name FROM appointments a LEFT JOIN contacts ct ON ct.id=a.contact_id LEFT JOIN profiles p ON p.id=a.created_by WHERE 1=1';
     const params = [];
     if (contact_id) { params.push(contact_id); q += ` AND a.contact_id=$${params.length}`; }
     if (agent_id) { params.push(agent_id); q += ` AND a.created_by=$${params.length}`; }
@@ -1146,7 +1146,7 @@ export default async function misc3Routes(fastify) {
     const limit = parseInt(req.query.limit) || 50;
     const offset = parseInt(req.query.offset) || 0;
     const { rows } = await query(
-      'SELECT al.*, p.full_name as actor_name FROM audit_log al LEFT JOIN profiles p ON p.id=al.actor_id ORDER BY al.created_at DESC LIMIT $1 OFFSET $2',
+      'SELECT al.*, p.name as actor_name FROM audit_log al LEFT JOIN profiles p ON p.id=al.actor_id ORDER BY al.created_at DESC LIMIT $1 OFFSET $2',
       [limit, offset]
     );
     return rows;
@@ -1345,7 +1345,7 @@ export default async function misc3Routes(fastify) {
       SELECT m.id, m.content, m.sender_type, m.created_at,
              c.id as conversation_id, c.labels, c.sentiment, c.csat_score, c.connection_name,
              ct.name as contact_name, ct.phone,
-             p.full_name as agent_name
+             p.name as agent_name
       FROM messages m
       JOIN conversations c ON c.id=m.conversation_id
       JOIN contacts ct ON ct.id=c.contact_id
@@ -1361,7 +1361,7 @@ export default async function misc3Routes(fastify) {
   fastify.get('/conversations/:id/export-pdf', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const { rows: msgs } = await query(
       `SELECT m.content, m.sender_type, m.created_at, m.metadata,
-              p.full_name as agent_name
+              p.name as agent_name
        FROM messages m
        LEFT JOIN profiles p ON p.id=m.sender_id
        WHERE m.conversation_id=$1 ORDER BY m.created_at ASC`,
@@ -1369,7 +1369,7 @@ export default async function misc3Routes(fastify) {
     );
     const { rows: conv } = await query(
       `SELECT c.*, ct.name as contact_name, ct.phone, ct.email,
-              p.full_name as agent_name, t.name as team_name
+              p.name as agent_name, t.name as team_name
        FROM conversations c
        JOIN contacts ct ON ct.id=c.contact_id
        LEFT JOIN profiles p ON p.id=c.assigned_to
@@ -1530,7 +1530,7 @@ export default async function misc3Routes(fastify) {
   fastify.post('/conversations/:id/pin-message', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const { message_id } = req.body;
     await query('UPDATE conversations SET pinned_message_id=$1 WHERE id=$2', [message_id, req.params.id]);
-    const { rows } = await query('SELECT m.*, p.full_name as sender_name FROM messages m LEFT JOIN profiles p ON p.id=m.sender_id WHERE m.id=$1', [message_id]);
+    const { rows } = await query('SELECT m.*, p.name as sender_name FROM messages m LEFT JOIN profiles p ON p.id=m.sender_id WHERE m.id=$1', [message_id]);
     if (fastify.io) fastify.io.emit('conversation:message_pinned', { conversation_id: req.params.id, message: rows[0] });
     return { success: true, message: rows[0] };
   });
@@ -1618,7 +1618,7 @@ export default async function misc3Routes(fastify) {
   fastify.get('/templates/pending', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     if (!['admin','supervisor'].includes(req.user.role)) return reply.status(403).send({ error: 'Forbidden' });
     const { rows } = await query(
-      "SELECT t.*, p.full_name as created_by_name FROM quick_replies t LEFT JOIN profiles p ON p.id=t.created_by WHERE t.approval_status='pending' ORDER BY t.created_at DESC"
+      "SELECT t.*, p.name as created_by_name FROM quick_replies t LEFT JOIN profiles p ON p.id=t.created_by WHERE t.approval_status='pending' ORDER BY t.created_at DESC"
     );
     return rows;
   });
@@ -1684,7 +1684,7 @@ export default async function misc3Routes(fastify) {
   fastify.get('/shifts', auth, async (req, reply) => {
     const { rows } = await query(`
       SELECT s.*,
-        json_agg(json_build_object('id', p.id, 'name', p.full_name) ORDER BY p.full_name) FILTER (WHERE p.id IS NOT NULL) as agents
+        json_agg(json_build_object('id', p.id, 'name', p.name) ORDER BY p.name) FILTER (WHERE p.id IS NOT NULL) as agents
       FROM shifts s
       LEFT JOIN shift_agents sa ON sa.shift_id = s.id
       LEFT JOIN profiles p ON p.id = sa.agent_id
@@ -1737,7 +1737,7 @@ export default async function misc3Routes(fastify) {
     const currentTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
     const { rows } = await query(`
       SELECT s.*,
-        json_agg(json_build_object('id', p.id, 'name', p.full_name)) FILTER (WHERE p.id IS NOT NULL) as agents
+        json_agg(json_build_object('id', p.id, 'name', p.name)) FILTER (WHERE p.id IS NOT NULL) as agents
       FROM shifts s
       LEFT JOIN shift_agents sa ON sa.shift_id = s.id
       LEFT JOIN profiles p ON p.id = sa.agent_id
@@ -1845,7 +1845,7 @@ export default async function misc3Routes(fastify) {
   // ── Note Version History ──────────────────────────────────────────────────
   fastify.get('/notes/:id/versions', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const { rows } = await query(
-      'SELECT nv.*, p.full_name as edited_by_name FROM note_versions nv LEFT JOIN profiles p ON p.id=nv.edited_by WHERE nv.note_id=$1 ORDER BY nv.created_at DESC',
+      'SELECT nv.*, p.name as edited_by_name FROM note_versions nv LEFT JOIN profiles p ON p.id=nv.edited_by WHERE nv.note_id=$1 ORDER BY nv.created_at DESC',
       [req.params.id]
     );
     return rows;
@@ -2018,7 +2018,7 @@ ${conversationContext ? `Contexto da conversa atual:\n${conversationContext}\n\n
   fastify.get('/contact-segments', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     try {
       const { rows } = await query(`
-        SELECT cs.*, p.full_name as created_by_name
+        SELECT cs.*, p.name as created_by_name
         FROM dynamic_segments cs
         LEFT JOIN profiles p ON p.id = cs.created_by
         ORDER BY cs.created_at DESC
@@ -2153,7 +2153,7 @@ ${conversationContext ? `Contexto da conversa atual:\n${conversationContext}\n\n
       rows = contacts.map(c => [c.name, c.phone, c.email, c.organization, c.city, c.state, new Date(c.created_at).toLocaleDateString('pt-BR')]);
     } else if (data_type === 'conversations') {
       const { rows: convs } = await query(`
-        SELECT ct.name, ct.phone, c.status, c.csat_score, p.full_name as agent, c.created_at, c.closed_at
+        SELECT ct.name, ct.phone, c.status, c.csat_score, p.name as agent, c.created_at, c.closed_at
         FROM conversations c JOIN contacts ct ON ct.id=c.contact_id LEFT JOIN profiles p ON p.id=c.assigned_to
         ORDER BY c.created_at DESC LIMIT 1000
       `);
@@ -2565,7 +2565,7 @@ ${conversationContext ? `Contexto da conversa atual:\n${conversationContext}\n\n
 
   fastify.get('/pix-charges', auth, async (req) => {
     const { conversation_id } = req.query;
-    let sql = 'SELECT pc.*, p.full_name as created_by_name FROM pix_charges pc LEFT JOIN profiles p ON p.id=pc.created_by';
+    let sql = 'SELECT pc.*, p.name as created_by_name FROM pix_charges pc LEFT JOIN profiles p ON p.id=pc.created_by';
     const params = [];
     if (conversation_id) {
       sql += ' WHERE pc.conversation_id=$1';
@@ -2604,7 +2604,7 @@ ${conversationContext ? `Contexto da conversa atual:\n${conversationContext}\n\n
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const { rows } = await query(
-      `SELECT tl.*, pr.full_name as created_by_name
+      `SELECT tl.*, pr.name as created_by_name
        FROM template_library tl
        LEFT JOIN profiles pr ON pr.id = tl.created_by
        ${where}

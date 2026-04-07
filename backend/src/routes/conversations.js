@@ -636,6 +636,9 @@ export default async function conversationRoutes(fastify) {
 
   fastify.post('/conversations/:id/notes', auth, async (req, reply) => {
     const { content, is_internal = true } = req.body;
+    if (!content || typeof content !== 'string' || !content.trim()) {
+      return reply.status(400).send({ error: 'Conteúdo da nota é obrigatório' });
+    }
     const note = await withTransaction(async (client) => {
       const { rows: profile } = await client.query('SELECT name FROM profiles WHERE id = $1', [req.user.id]);
       const { rows } = await client.query(
@@ -840,6 +843,7 @@ ${'─'.repeat(60)}
   // ── Scheduled Messages ────────────────────────────────────────────────────
   fastify.post('/conversations/:id/scheduled-messages', auth, async (req, reply) => {
     const { content, scheduled_at } = req.body;
+    if (!content || !scheduled_at) return reply.status(400).send({ error: 'content e scheduled_at são obrigatórios' });
     const { rows } = await query(
       'INSERT INTO scheduled_messages (conversation_id, content, scheduled_at, created_by, status) VALUES ($1,$2,$3,$4,\'pending\') RETURNING *',
       [req.params.id, content, scheduled_at, req.user.id]

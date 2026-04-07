@@ -263,17 +263,18 @@ const FinancialReport = () => {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    const currentRange = getPeriodRange(period);
     try {
       // Previous period for comparison
-      const prevFrom = subMonths(range.from, 1);
-      const prevTo = subMonths(range.to, 1);
+      const prevFrom = subMonths(currentRange.from, 1);
+      const prevTo = subMonths(currentRange.to, 1);
 
       const [oppsRes, prevOppsRes, propsRes] = await Promise.all([
         db
           .from("opportunities")
           .select("id, title, value, status, created_at, assigned_to, contact_id")
-          .gte("created_at", range.from.toISOString())
-          .lte("created_at", range.to.toISOString()),
+          .gte("created_at", currentRange.from.toISOString())
+          .lte("created_at", currentRange.to.toISOString()),
         db
           .from("opportunities")
           .select("id, value, status, created_at, assigned_to")
@@ -282,8 +283,8 @@ const FinancialReport = () => {
         db
           .from("proposals")
           .select("id, total, status, created_at")
-          .gte("created_at", range.from.toISOString())
-          .lte("created_at", range.to.toISOString()),
+          .gte("created_at", currentRange.from.toISOString())
+          .lte("created_at", currentRange.to.toISOString()),
       ]);
 
       const rawOpps: any[] = oppsRes.data || [];

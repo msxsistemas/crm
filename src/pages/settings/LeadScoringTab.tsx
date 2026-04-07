@@ -51,7 +51,7 @@ const LeadScoringTab = () => {
       const data = await api.get<ScoringRule[]>('/lead-scoring-rules');
       setRules(data || []);
     } catch {}
-    setLoadingRules(false);
+    finally { setLoadingRules(false); }
   }, []);
 
   useEffect(() => { fetchRules(); }, [fetchRules]);
@@ -97,7 +97,7 @@ const LeadScoringTab = () => {
       setDialogOpen(false);
       fetchRules();
     } catch { toast.error(editingRule ? 'Erro ao salvar regra' : 'Erro ao criar regra'); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {

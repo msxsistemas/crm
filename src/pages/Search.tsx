@@ -99,7 +99,7 @@ const Search = () => {
         const { data: msgData } = await db
           .from("messages")
           .select("conversation_id")
-          .ilike("body", `%${messageText.trim()}%`);
+          .ilike("content", `%${messageText.trim()}%`);
         const msgConvIds = [...new Set((msgData || []).map((m: any) => m.conversation_id))];
         if (conversationIds !== null) {
           conversationIds = conversationIds.filter(id => msgConvIds.includes(id));
@@ -170,6 +170,8 @@ const Search = () => {
         setResultTags({});
         setResultReviews({});
       }
+    } catch (err: any) {
+      console.error("Erro na busca:", err);
     } finally {
       setLoading(false);
     }

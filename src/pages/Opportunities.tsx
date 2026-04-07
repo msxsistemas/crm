@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle
@@ -14,9 +14,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/db";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -25,7 +23,7 @@ type OpportunityStatus = "prospecting" | "qualification" | "proposal" | "negotia
 
 interface Opportunity {
   id: string;
-  user_id: string;
+  user_id?: string;
   contact_id: string | null;
   title: string;
   value: number;
@@ -75,7 +73,6 @@ const emptyForm = {
 };
 
 const Opportunities = () => {
-  const { user } = useAuth();
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,23 +84,19 @@ const Opportunities = () => {
   const [form, setForm] = useState({ ...emptyForm });
 
   const fetchContacts = useCallback(async () => {
-    if (!user) return;
     const { data } = await db
       .from("contacts")
       .select("id, name")
-      .eq("user_id", user.id)
       .order("name");
     if (data) setContacts(data as Contact[]);
-  }, [user]);
+  }, []);
 
   const fetchOpportunities = useCallback(async () => {
-    if (!user) return;
     setLoading(true);
     try {
       const { data, error } = await db
         .from("opportunities")
         .select("*")
-        .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -133,7 +126,7 @@ const Opportunities = () => {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     fetchContacts();
@@ -162,13 +155,11 @@ const Opportunities = () => {
   };
 
   const handleSave = async () => {
-    if (!user) return;
     if (!form.title.trim()) { toast.error("Título é obrigatório"); return; }
 
     setSaving(true);
     try {
       const payload = {
-        user_id: user.id,
         title: form.title.trim(),
         contact_id: form.contact_id || null,
         value: parseFloat(form.value) || 0,
@@ -184,8 +175,7 @@ const Opportunities = () => {
         const { error } = await db
           .from("opportunities")
           .update(payload)
-          .eq("id", editingId)
-          .eq("user_id", user.id);
+          .eq("id", editingId);
         if (error) throw error;
         toast.success("Oportunidade atualizada!");
       } else {
@@ -207,14 +197,12 @@ const Opportunities = () => {
   };
 
   const handleDelete = async (id: string) => {
-    if (!user) return;
     if (!confirm("Deseja excluir esta oportunidade?")) return;
     try {
       const { error } = await db
         .from("opportunities")
         .delete()
-        .eq("id", id)
-        .eq("user_id", user.id);
+        .eq("id", id);
       if (error) throw error;
       toast.success("Oportunidade excluída!");
       fetchOpportunities();

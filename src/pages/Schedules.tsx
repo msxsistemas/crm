@@ -213,8 +213,10 @@ const Schedules = () => {
       await deleteMutation.mutateAsync(deleteScheduleId);
       toast.success("Agendamento excluído!");
     } catch { toast.error("Erro ao excluir agendamento"); }
-    setDeleteScheduleId(null);
-    setDeletingSchedule(false);
+    finally {
+      setDeleteScheduleId(null);
+      setDeletingSchedule(false);
+    }
   };
 
   const buildRepeatDaily = () => {

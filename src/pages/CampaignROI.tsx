@@ -61,7 +61,7 @@ export default function CampaignROI() {
   const [summaryLoading, setSummaryLoading] = useState(true);
 
   useEffect(() => {
-    api.get<Campaign[]>("/campaigns").then(setCampaigns).catch(() => {});
+    api.get<Campaign[]>("/campaigns").then((data) => setCampaigns(data || [])).catch(() => {});
     loadSummary();
   }, []);
 
@@ -69,7 +69,7 @@ export default function CampaignROI() {
     setSummaryLoading(true);
     try {
       const rows = await api.get<CampaignSummaryRow[]>("/stats/campaigns-roi-summary?days=30");
-      setSummary(rows);
+      setSummary(rows || []);
     } catch {
       toast.error("Erro ao carregar resumo de campanhas");
     } finally {

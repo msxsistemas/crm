@@ -324,8 +324,33 @@ class StorageBucketProxy {
   getPublicUrl(path: string) {
     return { data: { publicUrl: `${BASE_URL}/files/${this.bucket}/${path}` } };
   }
-  async remove(paths: string[]) { return { data: paths, error: null }; }
-  async list(_folder?: string) { return { data: [], error: null }; }
+  async remove(paths: string[]) {
+    try {
+      const csrf = getCsrfToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (csrf) headers['X-CSRF-Token'] = csrf;
+      await fetch(`${BASE_URL}/files/${this.bucket}`, {
+        method: 'DELETE',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({ paths }),
+      });
+    } catch {}
+    return { data: paths, error: null };
+  }
+  async list(folder?: string, _opts?: unknown) {
+    try {
+      const url = folder
+        ? `${BASE_URL}/files/${this.bucket}?folder=${encodeURIComponent(folder)}`
+        : `${BASE_URL}/files/${this.bucket}`;
+      const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+      if (!res.ok) return { data: [], error: new Error(res.statusText) };
+      const data = await res.json();
+      return { data: Array.isArray(data) ? data : [], error: null };
+    } catch (e) {
+      return { data: [], error: e instanceof Error ? e : new Error(String(e)) };
+    }
+  }
 }
 
 // ── Realtime ──────────────────────────────────────────────────────────────────

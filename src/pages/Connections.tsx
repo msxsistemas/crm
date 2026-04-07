@@ -286,7 +286,7 @@ const Connections = () => {
           fetchInstances();
         }
       } catch {}
-      setNewQrLoading(false);
+      finally { setNewQrLoading(false); }
     };
     loadQr();
     newQrIntervalRef.current = setInterval(loadQr, 30000);

@@ -11,13 +11,18 @@ export default function Pipeline() {
   const [newDeal, setNewDeal] = useState<{ stageId: string; title: string } | null>(null);
 
   const load = async () => {
-    const [s, d] = await Promise.all([
-      api.get<any[]>('/pipeline/stages'),
-      api.get<any[]>('/pipeline/deals'),
-    ]);
-    if (s) setStages(s);
-    if (d) setDeals(d);
-    setLoading(false);
+    try {
+      const [s, d] = await Promise.all([
+        api.get<any[]>('/pipeline/stages'),
+        api.get<any[]>('/pipeline/deals'),
+      ]);
+      if (s) setStages(s);
+      if (d) setDeals(d);
+    } catch {
+      // silently handle API errors
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { load(); }, []);

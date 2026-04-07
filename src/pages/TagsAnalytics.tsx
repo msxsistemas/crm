@@ -13,6 +13,7 @@ export default function TagsAnalytics() {
   useEffect(() => {
     api.get<any>('/stats/tags')
       .then(d => { if (d) setData(d); })
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 

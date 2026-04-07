@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { usePlatformName } from "@/hooks/usePlatformName";
-import { db } from "@/lib/db";
+import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,20 +32,19 @@ const Register = () => {
     }
 
     setLoading(true);
-    const { error } = await db.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { full_name: fullName, phone },
-        emailRedirectTo: window.location.origin,
-      },
-    });
-    if (error) {
-      toast.error(error.message);
-    } else {
+    try {
+      await api.post("/auth/register", {
+        name: fullName,
+        email,
+        password,
+      });
       toast.success("Conta criada com sucesso!");
+      window.location.href = "/login";
+    } catch (err: any) {
+      toast.error(err?.data?.error || err?.message || "Erro ao criar conta");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (

@@ -240,13 +240,15 @@ const TopBar = ({ onStartTour, onOpenSearch, onOpenShortcuts }: TopBarProps) => 
     fetchData();
     requestNotificationPermission();
     // Defer latency ping — not on the critical render path
+    let pingInterval: ReturnType<typeof setInterval> | null = null;
     const firstPing = setTimeout(() => {
       measureLatency();
-      const interval = setInterval(measureLatency, 30000);
-      // Store interval id for cleanup via closure
-      return () => clearInterval(interval);
+      pingInterval = setInterval(measureLatency, 30000);
     }, 2000);
-    return () => clearTimeout(firstPing);
+    return () => {
+      clearTimeout(firstPing);
+      if (pingInterval) clearInterval(pingInterval);
+    };
   }, [fetchData, measureLatency, requestNotificationPermission]);
 
   // Browser notifications + DB insert when unread/waiting count increases

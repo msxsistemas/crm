@@ -156,8 +156,8 @@ const KanbanQueues = () => {
         setSelectedBoardId(rawBoards[0].id);
       }
 
-      // 2. Load queues, columns, cards in parallel
-      const [queuesRes, columnsRes, cardsRes] = await Promise.all([
+      // 2. Load queues and columns in parallel
+      const [queuesRes, columnsRes] = await Promise.all([
         db
           .from("queues" as never)
           .select("id, name, color, connection")
@@ -168,14 +168,6 @@ const KanbanQueues = () => {
           .select("id, board_id, name, color, position")
           .eq("board_id", activeBoardId)
           .order("position"),
-        db
-          .from("kanban_cards" as never)
-          .select("id, column_id, contact_id, name, phone, value, created_at, updated_at")
-          .in(
-            "column_id",
-            // We need column ids for this board — will filter after
-            ["placeholder"]
-          ),
       ]);
 
       const rawQueues = (queuesRes.data ?? []) as Queue[];

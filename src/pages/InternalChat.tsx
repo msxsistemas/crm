@@ -132,7 +132,7 @@ const InternalChat = () => {
     };
     socket.on(event, handler);
     return () => { socket.off(event, handler); };
-  }, [selectedConvoId, queryClient]);
+  }, [selectedConvoId, queryClient, user?.id, playNotification]);
 
   const handleSelectConvo = (id: string) => {
     setSelectedConvoId(id);

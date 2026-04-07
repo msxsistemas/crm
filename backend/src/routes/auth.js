@@ -352,7 +352,10 @@ export default async function authRoutes(fastify) {
     },
   }, async (req, reply) => {
     const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return reply.status(400).send({ error: 'Senha atual e nova senha são obrigatórias' });
+    if (newPassword.length < 6) return reply.status(400).send({ error: 'A nova senha deve ter pelo menos 6 caracteres' });
     const { rows } = await query('SELECT password_hash FROM profiles WHERE id = $1', [req.user.id]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Usuário não encontrado' });
     const valid = await bcrypt.compare(currentPassword, rows[0].password_hash);
     if (!valid) return reply.status(400).send({ error: 'Senha atual incorreta' });
 

@@ -22,7 +22,7 @@ interface ChatWidget {
   created_at: string;
 }
 
-const API_BASE = "https://api.msxzap.pro";
+const API_BASE = import.meta.env.VITE_API_URL || "https://api.msxzap.pro";
 
 export default function ChatWidgetConfig() {
   const queryClient = useQueryClient();

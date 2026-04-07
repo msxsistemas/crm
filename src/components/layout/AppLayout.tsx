@@ -17,7 +17,7 @@ import PushNotificationSetup from "@/components/PushNotificationSetup";
 
 const AppLayout = () => {
   const { user } = useAuth();
-  const userName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Usuário";
+  const userName = user?.name || user?.email?.split("@")[0] || "Usuário";
   const { updateStatus } = usePresence(user?.id, userName);
   const { tourActive, currentStep, totalSteps, startTour, endTour, nextStep, prevStep } =
     useOnboardingTour();

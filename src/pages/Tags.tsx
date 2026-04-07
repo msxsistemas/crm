@@ -130,7 +130,7 @@ const Tags = () => {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["tags"] });
+      queryClient.invalidateQueries({ queryKey: ["tags", user?.id] });
       toast.success(editingTag ? "Tag atualizada com sucesso!" : "Tag criada com sucesso!");
       handleClose();
     },
@@ -145,8 +145,8 @@ const Tags = () => {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["tags"] });
-      queryClient.invalidateQueries({ queryKey: ["tag-contact-counts"] });
+      queryClient.invalidateQueries({ queryKey: ["tags", user?.id] });
+      queryClient.invalidateQueries({ queryKey: ["tag-contact-counts", user?.id] });
       toast.success("Tag removida com sucesso!");
       setDeleteConfirmOpen(false);
       setTagToDelete(null);

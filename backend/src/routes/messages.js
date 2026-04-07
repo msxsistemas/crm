@@ -415,11 +415,12 @@ async function handleEvolutionWebhook(payload, fastify) {
     // Use DB transaction for contact + conversation + message creation
     const client = await pool.connect();
     let conv, msgRow, isNewConversation = false;
+    let contact;
     try {
       await client.query('BEGIN');
 
       let { rows: contacts } = await client.query('SELECT * FROM contacts WHERE phone = $1', [phone]);
-      let contact = contacts[0];
+      contact = contacts[0];
       if (!contact) {
         const name = data.pushName || phone;
         const { rows } = await client.query('INSERT INTO contacts (name, phone, avatar_url) VALUES ($1,$2,$3) RETURNING *', [name, phone, data.profilePicUrl || null]);
@@ -429,11 +430,10 @@ async function handleEvolutionWebhook(payload, fastify) {
         await client.query('UPDATE contacts SET avatar_url=$1 WHERE id=$2', [data.profilePicUrl, contact.id]);
       }
 
-      // Check if contact is blocked
+      // Check if contact is blocked — throw a special sentinel so finally can release the client
       if (contact.is_blocked) {
         await client.query('ROLLBACK');
-        client.release();
-        return reply.status(200).send({ blocked: true });
+        return; // finally block below will release the client
       }
 
       let { rows: convs } = await client.query(
@@ -500,7 +500,7 @@ async function handleEvolutionWebhook(payload, fastify) {
     fastify.io?.emit('conversation:updated', { id: conv.id });
 
     // ── Recalculate lead score asynchronously ─────────────────────────────
-    const contactIdForScore = contact.id;
+    const contactIdForScore = contact?.id;
     (async () => {
       try {
         await recalculateLeadScore(contactIdForScore);
@@ -561,7 +561,7 @@ async function handleEvolutionWebhook(payload, fastify) {
       sendPushNotification(
         conv.assigned_to,
         'Nova mensagem',
-        `${contact.name || phone}: ${content}`,
+        `${contact?.name || phone}: ${content}`,
         { conversationId: conv.id }
       ).catch(() => {});
     }

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { TrendingUp, AlertCircle, ThumbsUp, ThumbsDown, Minus, ExternalLink } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -62,10 +62,10 @@ export default function SentimentDashboard() {
   const [agentId, setAgentId] = useState("all");
 
   useEffect(() => {
-    api.get<Profile[]>('/profiles').then(setProfiles).catch(() => {});
+    api.get<Profile[]>('/users').then((data) => setProfiles(data || [])).catch(() => {});
   }, []);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const params: Record<string, string> = {
@@ -75,17 +75,18 @@ export default function SentimentDashboard() {
       if (agentId !== "all") params.agent_id = agentId;
       const qs = new URLSearchParams(params).toString();
       const data = await api.get<any>(`/stats/sentiment?${qs}`);
-      setOverall(data.overall);
-      setByAgent(data.byAgent || []);
-      setTrend(data.trend || []);
-      setAlerts(data.alerts || []);
+      setOverall(data?.overall ?? null);
+      setByAgent(data?.byAgent || []);
+      setTrend(data?.trend || []);
+      setAlerts(data?.alerts || []);
     } catch {
       // silent
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  };
+  }, [startDate, endDate, agentId]);
 
-  useEffect(() => { load(); }, [startDate, endDate, agentId]);
+  useEffect(() => { load(); }, [load]);
 
   const total = parseInt(overall?.total_analyzed || "0");
   const pct = (val: string) => total > 0 ? Math.round((parseInt(val || "0") / total) * 100) : 0;

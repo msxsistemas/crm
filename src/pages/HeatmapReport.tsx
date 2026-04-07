@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -194,8 +194,8 @@ export default function HeatmapReport() {
 
               {/* Data rows */}
               {DAY_LABELS.map((dayLabel, dayIdx) => (
-                <>
-                  <div key={`label-${dayIdx}`} className="text-xs font-medium text-muted-foreground flex items-center pr-2 justify-end">
+                <Fragment key={dayIdx}>
+                  <div className="text-xs font-medium text-muted-foreground flex items-center pr-2 justify-end">
                     {dayLabel}
                   </div>
                   {Array.from({ length: 24 }, (_, h) => {
@@ -222,7 +222,7 @@ export default function HeatmapReport() {
                       </div>
                     );
                   })}
-                </>
+                </Fragment>
               ))}
             </div>
 

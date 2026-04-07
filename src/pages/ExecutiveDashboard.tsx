@@ -126,10 +126,10 @@ export default function ExecutiveDashboard() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get(`/stats/executive-dashboard?days=${days}`);
-      setData(res.data);
+      const res = await api.get<DashboardData>(`/stats/executive-dashboard?days=${days}`);
+      setData(res as DashboardData);
     } catch (e: any) {
-      toast.error("Erro ao carregar dashboard: " + (e?.response?.data?.error || e.message));
+      toast.error("Erro ao carregar dashboard: " + (e?.message || "Erro desconhecido"));
     } finally {
       setLoading(false);
     }

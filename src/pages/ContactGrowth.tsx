@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import api from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -62,10 +62,10 @@ export default function ContactGrowth() {
     staleTime: 5 * 60_000,
   });
 
-  const chartData = (data?.data || []).map(row => ({
+  const chartData = useMemo(() => (data?.data || []).map(row => ({
     ...row,
     label: formatDate(row.date, groupBy),
-  }));
+  })), [data?.data, groupBy]);
 
   const summary = data?.summary;
 

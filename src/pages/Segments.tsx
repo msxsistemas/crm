@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import {
-  Plus, Trash2, Pencil, RefreshCw, ChevronDown, ChevronUp, X, Users,
+  Plus, Trash2, Pencil, RefreshCw, X, Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

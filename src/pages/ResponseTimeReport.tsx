@@ -120,9 +120,10 @@ export default function ResponseTimeReport() {
 
   // Summary cards
   const allAgents = data?.byAgent ?? [];
+  const avgGeralDenominator = allAgents.filter(r => r.avg_handling_min !== null).length;
   const avgGeral =
-    allAgents.length > 0
-      ? allAgents.reduce((s, r) => s + Number(r.avg_handling_min ?? 0), 0) / allAgents.filter(r => r.avg_handling_min !== null).length
+    avgGeralDenominator > 0
+      ? allAgents.reduce((s, r) => s + Number(r.avg_handling_min ?? 0), 0) / avgGeralDenominator
       : null;
   const bestAgent = allAgents.length > 0 ? allAgents[0] : null;
   const worstAgent = allAgents.length > 0 ? allAgents[allAgents.length - 1] : null;

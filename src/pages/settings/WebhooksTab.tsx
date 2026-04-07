@@ -51,7 +51,7 @@ const WebhooksTab = () => {
       const data = await api.get<Webhook[]>('/webhooks');
       setWebhooks(data || []);
     } catch {}
-    setLoading(false);
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchWebhooks(); }, [fetchWebhooks]);
@@ -91,7 +91,7 @@ const WebhooksTab = () => {
       setDialogOpen(false);
       fetchWebhooks();
     } catch { toast.error(editingWebhook ? "Erro ao atualizar webhook" : "Erro ao criar webhook"); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {

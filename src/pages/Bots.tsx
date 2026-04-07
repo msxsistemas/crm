@@ -1259,21 +1259,27 @@ const AnalyticsTab = ({ rules }: { rules: ChatbotRule[] }) => {
     if (!selectedRuleId) { setNodeStats({}); return; }
     const fetchEvents = async () => {
       setLoading(true);
-      const { data: events } = await db
-        .from("chatbot_node_events")
-        .select("node_id, node_type, event_type")
-        .eq("rule_id", selectedRuleId)
-        .gte("created_at", getStartDate(period));
+      try {
+        const { data: events } = await db
+          .from("chatbot_node_events")
+          .select("node_id, node_type, event_type")
+          .eq("rule_id", selectedRuleId)
+          .gte("created_at", getStartDate(period));
 
-      const stats = (events as NodeEvent[] | null)?.reduce<Record<string, NodeStat>>((acc, e) => {
-        if (!acc[e.node_id]) acc[e.node_id] = { entered: 0, exited: 0, abandoned: 0, error: 0 };
-        const key = e.event_type as keyof NodeStat;
-        if (key in acc[e.node_id]) acc[e.node_id][key]++;
-        return acc;
-      }, {});
+        const stats = (events as NodeEvent[] | null)?.reduce<Record<string, NodeStat>>((acc, e) => {
+          if (!acc[e.node_id]) acc[e.node_id] = { entered: 0, exited: 0, abandoned: 0, error: 0 };
+          const key = e.event_type as keyof NodeStat;
+          if (key in acc[e.node_id]) acc[e.node_id][key]++;
+          return acc;
+        }, {});
 
-      setNodeStats(stats ?? {});
-      setLoading(false);
+        setNodeStats(stats ?? {});
+      } catch (err) {
+        console.error("Erro ao carregar eventos:", err);
+        toast.error("Erro ao carregar analytics");
+      } finally {
+        setLoading(false);
+      }
     };
     fetchEvents();
   }, [selectedRuleId, period]);
@@ -1784,23 +1790,29 @@ const IntencoesTab = ({ rules }: { rules: ChatbotRule[] }) => {
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [{ data: intentData }, { data: queueData }] = await Promise.all([
-      db.from("intent_configs").select("*").order("created_at", { ascending: true }),
-      db.from("queues").select("id, name").order("name"),
-    ]);
-    const loadedIntents = (intentData as IntentConfig[]) || [];
-    setIntents(loadedIntents);
-    setQueues((queueData as Queue[]) || []);
+    try {
+      const [{ data: intentData }, { data: queueData }] = await Promise.all([
+        db.from("intent_configs").select("*").order("created_at", { ascending: true }),
+        db.from("queues").select("id, name").order("name"),
+      ]);
+      const loadedIntents = (intentData as IntentConfig[]) || [];
+      setIntents(loadedIntents);
+      setQueues((queueData as Queue[]) || []);
 
-    // Seed defaults if empty
-    if (loadedIntents.length === 0) {
-      const { data: seeded } = await db
-        .from("intent_configs")
-        .insert(DEFAULT_INTENTS as any)
-        .select();
-      if (seeded) setIntents(seeded as IntentConfig[]);
+      // Seed defaults if empty
+      if (loadedIntents.length === 0) {
+        const { data: seeded } = await db
+          .from("intent_configs")
+          .insert(DEFAULT_INTENTS as any)
+          .select();
+        if (seeded) setIntents(seeded as IntentConfig[]);
+      }
+    } catch (err) {
+      console.error("Erro ao carregar intenções:", err);
+      toast.error("Erro ao carregar intenções");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);

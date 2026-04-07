@@ -148,9 +148,9 @@ export default function Appointments() {
   const handleGoogleSync = async (appt: Appointment) => {
     setSyncingId(appt.id);
     try {
-      const res = await api.post(`/google-calendar/sync-appointment/${appt.id}`);
+      const res = await api.post<{ google_event_id: string }>(`/google-calendar/sync-appointment/${appt.id}`);
       toast.success("Sincronizado com Google Calendar!");
-      setAppointments(prev => prev.map(a => a.id === appt.id ? { ...a, google_event_id: res.data.google_event_id } : a));
+      setAppointments(prev => prev.map(a => a.id === appt.id ? { ...a, google_event_id: (res as any)?.google_event_id ?? res } : a));
     } catch (e: any) {
       const msg = e?.response?.data?.error || "Erro ao sincronizar";
       if (msg.includes("não conectado") || msg.includes("not connected")) {

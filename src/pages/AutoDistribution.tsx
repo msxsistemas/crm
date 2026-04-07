@@ -67,33 +67,41 @@ export default function AutoDistribution() {
   const [loadingLog, setLoadingLog] = useState(false);
 
   const loadConfig = useCallback(async () => {
-    const { data } = await db
-      .from("auto_distribution_config")
-      .select("*")
-      .limit(1)
-      .maybeSingle();
+    try {
+      const { data } = await db
+        .from("auto_distribution_config")
+        .select("*")
+        .limit(1)
+        .maybeSingle();
 
-    if (data) {
-      const cfg = data as DistributionConfig;
-      setConfig(cfg);
-      setForm({
-        is_active: cfg.is_active,
-        mode: cfg.mode,
-        respect_working_hours: cfg.respect_working_hours,
-        respect_queues: cfg.respect_queues,
-        max_conversations_per_agent: cfg.max_conversations_per_agent,
-        include_agent_ids: cfg.include_agent_ids ?? [],
-        exclude_agent_ids: cfg.exclude_agent_ids ?? [],
-      });
+      if (data) {
+        const cfg = data as DistributionConfig;
+        setConfig(cfg);
+        setForm({
+          is_active: cfg.is_active,
+          mode: cfg.mode,
+          respect_working_hours: cfg.respect_working_hours,
+          respect_queues: cfg.respect_queues,
+          max_conversations_per_agent: cfg.max_conversations_per_agent,
+          include_agent_ids: cfg.include_agent_ids ?? [],
+          exclude_agent_ids: cfg.exclude_agent_ids ?? [],
+        });
+      }
+    } catch (err) {
+      console.error("Erro ao carregar configuração de distribuição:", err);
     }
   }, []);
 
   const loadAgents = useCallback(async () => {
-    const { data } = await db
-      .from("profiles")
-      .select("id, name, role")
-      .in("role", ["agent", "admin"]);
-    if (data) setAgents(data as Agent[]);
+    try {
+      const { data } = await db
+        .from("profiles")
+        .select("id, name, role")
+        .in("role", ["agent", "admin"]);
+      if (data) setAgents(data as Agent[]);
+    } catch (err) {
+      console.error("Erro ao carregar agentes:", err);
+    }
   }, []);
 
   const loadLog = useCallback(async () => {
@@ -145,12 +153,17 @@ export default function AutoDistribution() {
     const newForm = { ...form, is_active: value };
     setForm(newForm);
     if (config?.id) {
-      await db
-        .from("auto_distribution_config")
-        .update({ is_active: value, updated_at: new Date().toISOString() })
-        .eq("id", config.id);
-      setConfig((prev) => (prev ? { ...prev, is_active: value } : prev));
-      toast.success(value ? "Distribuição ativada!" : "Distribuição desativada.");
+      try {
+        await db
+          .from("auto_distribution_config")
+          .update({ is_active: value, updated_at: new Date().toISOString() })
+          .eq("id", config.id);
+        setConfig((prev) => (prev ? { ...prev, is_active: value } : prev));
+        toast.success(value ? "Distribuição ativada!" : "Distribuição desativada.");
+      } catch (err) {
+        toast.error("Erro ao atualizar configuração");
+        setForm((prev) => ({ ...prev, is_active: !value }));
+      }
     }
   };
 

@@ -156,7 +156,7 @@ const Categories = () => {
       )}
 
       {/* Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) { setEditingCat(null); setCatName(""); setCatColor("#2196F3"); setShowError(false); } setDialogOpen(open); }}>
         <DialogContent className="sm:max-w-md p-0 overflow-hidden gap-0 [&>button.absolute]:hidden">
           {/* Header */}
           <div className="bg-blue-600 px-6 py-5 flex items-center gap-3">

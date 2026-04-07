@@ -220,7 +220,7 @@ const UsersPage = () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
       setPermissionsOpen(false);
     } catch { toast.error("Erro ao salvar permissões"); }
-    setSavingPerms(false);
+    finally { setSavingPerms(false); }
   };
 
 

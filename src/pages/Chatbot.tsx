@@ -201,13 +201,19 @@ const Chatbot = () => {
   };
 
   const loadRules = async () => {
-    const { data, error } = await db
-      .from("chatbot_rules")
-      .select("*")
-      .order("priority", { ascending: false });
-    if (error) console.error(error);
-    else setRules((data as unknown as ChatbotRule[]) || []);
-    setLoading(false);
+    try {
+      const { data, error } = await db
+        .from("chatbot_rules")
+        .select("*")
+        .order("priority", { ascending: false });
+      if (error) throw error;
+      setRules((data as unknown as ChatbotRule[]) || []);
+    } catch (err) {
+      console.error("Erro ao carregar regras:", err);
+      toast.error("Erro ao carregar regras do chatbot");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const openNew = () => {

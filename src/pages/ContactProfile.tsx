@@ -41,9 +41,9 @@ export default function ContactProfile() {
           <p className="text-sm text-muted-foreground">{contact.phone}</p>
         </div>
         <div className="flex gap-4 text-sm">
-          <div className="text-center"><p className="text-lg font-bold text-foreground">{stats.total_conversations}</p><p className="text-xs text-muted-foreground">conversas</p></div>
-          <div className="text-center"><p className="text-lg font-bold text-green-500">{stats.open_conversations}</p><p className="text-xs text-muted-foreground">abertas</p></div>
-          {stats.avg_csat && <div className="text-center"><p className="text-lg font-bold text-yellow-500">⭐ {stats.avg_csat}</p><p className="text-xs text-muted-foreground">CSAT médio</p></div>}
+          <div className="text-center"><p className="text-lg font-bold text-foreground">{stats?.total_conversations ?? 0}</p><p className="text-xs text-muted-foreground">conversas</p></div>
+          <div className="text-center"><p className="text-lg font-bold text-green-500">{stats?.open_conversations ?? 0}</p><p className="text-xs text-muted-foreground">abertas</p></div>
+          {stats?.avg_csat && <div className="text-center"><p className="text-lg font-bold text-yellow-500">⭐ {stats.avg_csat}</p><p className="text-xs text-muted-foreground">CSAT médio</p></div>}
         </div>
       </div>
 
@@ -68,12 +68,12 @@ export default function ContactProfile() {
       <div className="flex-1 overflow-y-auto p-6">
         {activeTab === 'conversations' && (
           <div className="space-y-3">
-            {conversations.map((c: any) => (
+            {(conversations || []).map((c: any) => (
               <Link key={c.id} to={`/inbox?conversation=${c.id}`}
                 className="block rounded-lg border border-border bg-card p-4 hover:bg-muted/30 transition-colors">
                 <div className="flex items-center justify-between mb-1">
                   <Badge variant="outline" className={`text-xs ${statusColor[c.status] || ''}`}>{c.status}</Badge>
-                  <span className="text-xs text-muted-foreground">{format(new Date(c.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })}</span>
+                  <span className="text-xs text-muted-foreground">{c.created_at ? format(new Date(c.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : ''}</span>
                 </div>
                 {c.last_message_body && <p className="text-sm text-foreground truncate">{c.last_message_body}</p>}
                 <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
@@ -83,21 +83,21 @@ export default function ContactProfile() {
                 </div>
               </Link>
             ))}
-            {conversations.length === 0 && <p className="text-center text-muted-foreground py-12">Nenhuma conversa</p>}
+            {(conversations || []).length === 0 && <p className="text-center text-muted-foreground py-12">Nenhuma conversa</p>}
           </div>
         )}
         {activeTab === 'notes' && (
           <div className="space-y-3">
-            {notes.map((n: any) => (
+            {(notes || []).map((n: any) => (
               <div key={n.id} className="rounded-lg border border-border bg-card p-4">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium">{n.author_name}</span>
-                  <span className="text-xs text-muted-foreground">{format(new Date(n.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR })}</span>
+                  <span className="text-xs text-muted-foreground">{n.created_at ? format(new Date(n.created_at), 'dd/MM/yyyy HH:mm', { locale: ptBR }) : ''}</span>
                 </div>
                 <p className="text-sm text-foreground whitespace-pre-wrap">{n.content}</p>
               </div>
             ))}
-            {notes.length === 0 && <p className="text-center text-muted-foreground py-12">Nenhuma nota</p>}
+            {(notes || []).length === 0 && <p className="text-center text-muted-foreground py-12">Nenhuma nota</p>}
           </div>
         )}
         {activeTab === 'info' && (

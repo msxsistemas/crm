@@ -136,19 +136,24 @@ const AgentScheduleEditor = ({ agent, initialSchedule, onSaved }: AgentScheduleE
 
   const handleSave = async () => {
     setSaving(true);
-    const { error } = await db
-      .from("agent_schedules" as any)
-      .upsert({
-        ...schedule,
-        agent_id: agent.id,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: "agent_id" });
-    setSaving(false);
-    if (error) {
-      toast.error("Erro ao salvar horário: " + error.message);
-    } else {
-      toast.success(`Horário de ${agent.full_name || "agente"} salvo!`);
-      onSaved();
+    try {
+      const { error } = await db
+        .from("agent_schedules" as any)
+        .upsert({
+          ...schedule,
+          agent_id: agent.id,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "agent_id" });
+      if (error) {
+        toast.error("Erro ao salvar horário: " + error.message);
+      } else {
+        toast.success(`Horário de ${agent.full_name || "agente"} salvo!`);
+        onSaved();
+      }
+    } catch (err: any) {
+      toast.error("Erro ao salvar horário: " + (err?.message || "Erro inesperado"));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -261,35 +266,40 @@ const AgentSchedulesPage = () => {
 
   const load = useCallback(async () => {
     setLoading(true);
-    if (isAdmin) {
-      const [profilesRes, schedulesRes] = await Promise.all([
-        db.from("profiles").select("id, full_name, email"),
-        db.from("agent_schedules" as any).select("*"),
-      ]);
+    try {
+      if (isAdmin) {
+        const [profilesRes, schedulesRes] = await Promise.all([
+          db.from("profiles").select("id, full_name, email"),
+          db.from("agent_schedules" as any).select("*"),
+        ]);
 
-      if (profilesRes.data) {
-        setAgents(profilesRes.data as AgentProfile[]);
-      }
-      if (schedulesRes.data) {
-        const map: Record<string, AgentSchedule> = {};
-        for (const s of schedulesRes.data as AgentSchedule[]) {
-          map[s.agent_id] = s;
+        if (profilesRes.data) {
+          setAgents(profilesRes.data as AgentProfile[]);
         }
-        setSchedules(map);
+        if (schedulesRes.data) {
+          const map: Record<string, AgentSchedule> = {};
+          for (const s of schedulesRes.data as AgentSchedule[]) {
+            map[s.agent_id] = s;
+          }
+          setSchedules(map);
+        }
+      } else if (user) {
+        const [profileRes, scheduleRes] = await Promise.all([
+          db.from("profiles").select("id, full_name, email").eq("id", user.id).single(),
+          db.from("agent_schedules" as any).select("*").eq("agent_id", user.id).maybeSingle(),
+        ]);
+        if (profileRes.data) {
+          setAgents([profileRes.data as AgentProfile]);
+        }
+        if (scheduleRes.data) {
+          setSchedules({ [user.id]: scheduleRes.data as AgentSchedule });
+        }
       }
-    } else if (user) {
-      const [profileRes, scheduleRes] = await Promise.all([
-        db.from("profiles").select("id, full_name, email").eq("id", user.id).single(),
-        db.from("agent_schedules" as any).select("*").eq("agent_id", user.id).maybeSingle(),
-      ]);
-      if (profileRes.data) {
-        setAgents([profileRes.data as AgentProfile]);
-      }
-      if (scheduleRes.data) {
-        setSchedules({ [user.id]: scheduleRes.data as AgentSchedule });
-      }
+    } catch (err) {
+      console.error("Erro ao carregar horários:", err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [user, isAdmin]);
 
   useEffect(() => { load(); }, [load]);

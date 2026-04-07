@@ -137,47 +137,57 @@ const Campaigns = () => {
 
   const fetchCampaigns = async () => {
     setLoading(true);
-    const { data } = await db
-      .from("campaigns")
-      .select("*")
-      .order("created_at", { ascending: false });
-    setCampaigns(
-      (data || []).map((c) => ({
-        id: c.id,
-        name: c.name,
-        description: c.description ?? undefined,
-        messageTemplate: c.message_template ?? undefined,
-        sendSpeed: c.send_speed || 20,
-        status: c.status as Campaign["status"],
-        totalSent: c.total_sent || 0,
-        delivered: c.delivered || 0,
-        read: c.read || 0,
-        failed: c.failed || 0,
-        createdAt: c.created_at,
-        segmentId: c.segment_id || null,
-        connectionName: c.connection_name || null,
-      }))
-    );
-    setLoading(false);
+    try {
+      const { data } = await db
+        .from("campaigns")
+        .select("*")
+        .order("created_at", { ascending: false });
+      setCampaigns(
+        (data || []).map((c) => ({
+          id: c.id,
+          name: c.name,
+          description: c.description ?? undefined,
+          messageTemplate: c.message_template ?? undefined,
+          sendSpeed: c.send_speed || 20,
+          status: c.status as Campaign["status"],
+          totalSent: c.total_sent || 0,
+          delivered: c.delivered || 0,
+          read: c.read || 0,
+          failed: c.failed || 0,
+          createdAt: c.created_at,
+          segmentId: c.segment_id || null,
+          connectionName: c.connection_name || null,
+        }))
+      );
+    } catch {
+      toast.error("Erro ao carregar campanhas");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const fetchTemplates = async () => {
     setTemplatesLoading(true);
-    const { data } = await db
-      .from("message_templates")
-      .select("*")
-      .order("created_at", { ascending: false });
-    setTemplates(
-      (data || []).map((t) => ({
-        id: t.id,
-        name: t.name,
-        category: t.category || "Geral",
-        content: t.content,
-        variables: (t.variables as string[]) || [],
-        created_at: t.created_at,
-      }))
-    );
-    setTemplatesLoading(false);
+    try {
+      const { data } = await db
+        .from("message_templates")
+        .select("*")
+        .order("created_at", { ascending: false });
+      setTemplates(
+        (data || []).map((t) => ({
+          id: t.id,
+          name: t.name,
+          category: t.category || "Geral",
+          content: t.content,
+          variables: (t.variables as string[]) || [],
+          created_at: t.created_at,
+        }))
+      );
+    } catch {
+      toast.error("Erro ao carregar templates");
+    } finally {
+      setTemplatesLoading(false);
+    }
   };
 
   const loadReport = async (campaignId: string) => {
@@ -185,13 +195,18 @@ const Campaigns = () => {
     setReportData([]);
     setReportSearch("");
     setReportPage(0);
-    const { data } = await db
-      .from("campaign_contacts")
-      .select("*, contacts(name)")
-      .eq("campaign_id", campaignId)
-      .order("created_at", { ascending: false });
-    setReportData((data || []) as CampaignContact[]);
-    setReportLoading(false);
+    try {
+      const { data } = await db
+        .from("campaign_contacts")
+        .select("*, contacts(name)")
+        .eq("campaign_id", campaignId)
+        .order("created_at", { ascending: false });
+      setReportData((data || []) as CampaignContact[]);
+    } catch {
+      toast.error("Erro ao carregar relatório");
+    } finally {
+      setReportLoading(false);
+    }
   };
 
   const openReport = (campaign: Campaign) => {

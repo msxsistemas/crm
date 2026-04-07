@@ -21,6 +21,8 @@ export default function Kanban() {
           api.get<any[]>('/conversations?status=closed&limit=50'),
         ]);
         setConversations([...(open || []), ...(closed || [])]);
+      } catch {
+        // silently handle errors on interval refresh
       } finally {
         setLoading(false);
       }

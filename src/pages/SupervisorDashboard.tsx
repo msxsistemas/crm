@@ -724,8 +724,12 @@ const SupervisorDashboard = () => {
     fetchLiveData();
   };
 
-  // Build agent card data
-  const agentCards: AgentCardData[] = agents.map((profile) => {
+  // Build agent card data (filter by team if selected)
+  const filteredAgents = filterTeam === "all"
+    ? agents
+    : agents.filter((a) => (a as any).team_id === filterTeam);
+
+  const agentCards: AgentCardData[] = filteredAgents.map((profile) => {
     const convos = activeConvos.filter((c) => c.assigned_to === profile.id);
     const avgMinutes =
       convos.length > 0

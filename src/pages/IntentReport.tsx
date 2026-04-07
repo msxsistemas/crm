@@ -7,6 +7,7 @@ import { Download, TrendingUp, TrendingDown, Minus, AlertCircle, Star, Clock } f
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import api from "@/lib/api";
 
 interface IntentRow {
   intent_category: string;
@@ -53,14 +54,8 @@ export default function IntentReport() {
 
   const fetchConnections = useCallback(async () => {
     try {
-      const token = localStorage.getItem("token") || "";
-      const res = await fetch("/evolution-connections", {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (res.ok) {
-        const rows = await res.json();
-        setConnections(rows.map((r: any) => r.instance_name || r.name).filter(Boolean));
-      }
+      const rows = await api.get<any[]>('/connections');
+      setConnections((rows || []).map((r: any) => r.instance_name || r.name).filter(Boolean));
     } catch { /* silent */ }
   }, []);
 
@@ -68,17 +63,12 @@ export default function IntentReport() {
     setLoading(true);
     setError(null);
     try {
-      const token = localStorage.getItem("token") || "";
       const params = new URLSearchParams({ days });
       if (channel !== "all") params.set("channel", channel);
-      const res = await fetch(`/stats/intent-report?${params}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) throw new Error("Erro ao buscar dados");
-      const json = await res.json();
-      setData(json.data || []);
-      setDaily(json.daily || []);
-      setTotal(json.total || 0);
+      const json = await api.get<any>(`/stats/intent-report?${params}`);
+      setData(json?.data || []);
+      setDaily(json?.daily || []);
+      setTotal(json?.total || 0);
     } catch (e: any) {
       setError(e.message || "Erro desconhecido");
     } finally {

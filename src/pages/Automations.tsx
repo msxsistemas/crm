@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import api from "@/lib/api";
 import { toast } from "sonner";
-import { Plus, Pencil, Trash2, Zap, ToggleLeft, ToggleRight, X } from "lucide-react";
+import { Plus, Pencil, Trash2, Zap, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
@@ -74,7 +74,7 @@ export default function Automations() {
   const [editing, setEditing] = useState<AutomationRule | null>(null);
   const [form, setForm] = useState(emptyRule());
 
-  const fetchRules = async () => {
+  const fetchRules = useCallback(async () => {
     setLoading(true);
     try {
       const data = await api.get<AutomationRule[]>("/automations");
@@ -84,9 +84,9 @@ export default function Automations() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { fetchRules(); }, []);
+  useEffect(() => { fetchRules(); }, [fetchRules]);
 
   const openCreate = () => {
     setEditing(null);
