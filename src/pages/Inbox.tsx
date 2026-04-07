@@ -1057,17 +1057,11 @@ const Inbox = () => {
 
   // Load conversations
   const loadConversations = useCallback(async () => {
-    const { data, error } = await db
-      .from("conversations")
-      .select("id, contact_id, instance_name, status, unread_count, last_message_at, assigned_to, category_id, starred, sentiment, label_ids, created_at, is_merged, merged_into, priority, contacts(*)")
-      .eq("is_merged", false)
-      .order("last_message_at", { ascending: false });
-
-    if (error) {
-      console.error("Error loading conversations:", error);
-    } else {
-      // last_message_body already comes from the SQL subquery — no extra fetch needed
-      setConversations((data as unknown as DBConversation[]) || []);
+    try {
+      const data = await api.get<DBConversation[]>('/conversations?limit=200');
+      setConversations(data || []);
+    } catch (err) {
+      console.error("Error loading conversations:", err);
     }
     setLoading(false);
   }, []);
@@ -3111,40 +3105,6 @@ const Inbox = () => {
               ))}
             </div>
           )}
-        </div>
-
-        {/* Status counters bar */}
-        <div className="flex items-center gap-1.5 px-4 py-2 border-b border-border bg-muted/30">
-          <button
-            onClick={() => setActiveTab("aguardando")}
-            className={cn(
-              "flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold transition-colors",
-              activeTab === "aguardando" ? "bg-yellow-500/20 text-yellow-500" : "bg-muted text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <span>Aguardando:</span>
-            <span className="font-bold">{statusCounts.aguardando}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab("atendendo")}
-            className={cn(
-              "flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold transition-colors",
-              activeTab === "atendendo" ? "bg-green-500/20 text-green-500" : "bg-muted text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <span>Atendendo:</span>
-            <span className="font-bold">{statusCounts.atendendo}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab("encerradas")}
-            className={cn(
-              "flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold transition-colors",
-              activeTab === "encerradas" ? "bg-muted-foreground/20 text-foreground" : "bg-muted text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <span>Encerradas:</span>
-            <span className="font-bold">{statusCounts.encerradas}</span>
-          </button>
         </div>
 
         {/* Tabs */}

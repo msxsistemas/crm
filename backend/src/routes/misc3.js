@@ -615,9 +615,13 @@ export default async function misc3Routes(fastify) {
 
   // Get all tags used (for autocomplete)
   fastify.get('/conversations/tags/all', auth, async () => {
+    // Conversations don't have a tags column — return contact tags used in conversations
     const { rows } = await query(`
-      SELECT DISTINCT unnest(tags) as tag, COUNT(*) OVER (PARTITION BY unnest(tags)) as count
-      FROM conversations WHERE tags IS NOT NULL
+      SELECT t.name as tag, COUNT(*) as count
+      FROM contact_tags ct
+      JOIN tags t ON t.id = ct.tag_id
+      JOIN conversations c ON c.contact_id = ct.contact_id AND c.is_merged = false
+      GROUP BY t.name
       ORDER BY count DESC LIMIT 50
     `);
     return rows;
