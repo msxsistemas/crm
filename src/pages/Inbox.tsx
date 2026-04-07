@@ -3119,32 +3119,28 @@ const Inbox = () => {
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-0 px-2 py-0 border-b border-border overflow-x-auto scrollbar-none">
+        <div className="flex items-center gap-4 px-4 py-0 border-b border-border overflow-x-auto scrollbar-none">
           {([
-            { key: "aguardando" as TabFilter, label: "Aguardando", icon: "🟡", count: statusCounts.aguardando, activeColor: "text-yellow-500 after:bg-yellow-500" },
-            { key: "atendendo" as TabFilter, label: "Em Atendimento", icon: "🟢", count: statusCounts.atendendo, activeColor: "text-green-500 after:bg-green-500" },
-            { key: "encerradas" as TabFilter, label: "Encerradas", icon: "✅", count: statusCounts.encerradas, activeColor: "text-muted-foreground after:bg-muted-foreground" },
-            { key: "grupos" as TabFilter, label: "Grupos", icon: "👥", count: statusCounts.grupos, activeColor: "text-blue-500 after:bg-blue-500" },
-            { key: "favoritas" as TabFilter, label: "Favoritas", icon: "⭐", count: statusCounts.favoritas, activeColor: "text-amber-500 after:bg-amber-500" },
-            { key: "arquivadas" as TabFilter, label: "Arquivadas", icon: "📦", count: statusCounts.arquivadas, activeColor: "text-muted-foreground after:bg-muted-foreground" },
+            { key: "aguardando" as TabFilter, label: "AGUARDANDO", count: statusCounts.aguardando },
+            { key: "atendendo" as TabFilter, label: "ATENDENDO", count: statusCounts.atendendo },
+            { key: "encerradas" as TabFilter, label: "ENCERRADAS", count: statusCounts.encerradas },
+            { key: "grupos" as TabFilter, label: "GRUPOS", count: statusCounts.grupos },
+            { key: "favoritas" as TabFilter, label: "⭐ FAVORITAS", count: statusCounts.favoritas },
+            { key: "arquivadas" as TabFilter, label: "📦 ARQUIVADAS", count: statusCounts.arquivadas },
           ]).map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={cn(
-                "relative flex items-center gap-1 px-3 py-2.5 text-[11px] font-semibold whitespace-nowrap transition-colors",
+                "relative flex items-center gap-1.5 py-2.5 text-[11px] font-semibold tracking-wide whitespace-nowrap transition-colors",
                 activeTab === tab.key
-                  ? `${tab.activeColor} after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:rounded-full`
+                  ? "text-primary after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-primary after:rounded-full"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              <span>{tab.icon}</span>
-              <span>{tab.label}</span>
+              {tab.label}
               {tab.count !== undefined && tab.count > 0 && (
-                <span className={cn(
-                  "inline-flex items-center justify-center h-[17px] min-w-[17px] px-1 rounded-full text-[9px] font-bold",
-                  activeTab === tab.key ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"
-                )}>
+                <span className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded-full text-[10px] font-bold bg-primary text-primary-foreground">
                   {tab.count}
                 </span>
               )}
