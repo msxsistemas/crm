@@ -7,6 +7,7 @@ import { sendMetaMessage } from './meta-whatsapp.js';
 import { enqueueSend } from '../jobs/messageQueue.js';
 import { deliverWebhook } from '../jobs/webhookDelivery.js';
 import { sendPushNotification } from '../notifications/pushNotifications.js';
+import { uploadToMinio } from '../minio.js';
 
 export default async function messageRoutes(fastify) {
   const auth = { preHandler: fastify.authenticate };
@@ -16,7 +17,7 @@ export default async function messageRoutes(fastify) {
     const { page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
     const { rows } = await query(
-      `SELECT *, content as body, (direction = 'outbound') as from_me FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3`,
+      `SELECT *, content as body, type as media_type, (direction = 'outbound') as from_me FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3`,
       [req.params.id, limit, offset]
     );
     return rows;
@@ -30,7 +31,7 @@ export default async function messageRoutes(fastify) {
     // Full-text search across all messages
     if (search) {
       const { rows } = await query(
-        `SELECT m.*, m.content as body, (m.direction='outbound') as from_me,
+        `SELECT m.*, m.content as body, m.type as media_type, (m.direction='outbound') as from_me,
                 c.contact_id,
                 ct.name as contact_name, ct.phone as contact_phone
          FROM messages m
@@ -60,7 +61,7 @@ export default async function messageRoutes(fastify) {
 
     if (!conversation_id || !UUID_RE.test(conversation_id)) return [];
     const { rows } = await query(
-      `SELECT *, content as body, (direction = 'outbound') as from_me FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC LIMIT $2`,
+      `SELECT *, content as body, type as media_type, (direction = 'outbound') as from_me FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC LIMIT $2`,
       [conversation_id, lim]
     );
     return rows;
@@ -124,7 +125,7 @@ export default async function messageRoutes(fastify) {
     }
 
     const { rows } = await query(
-      `INSERT INTO messages (conversation_id, content, direction, type, media_url, is_whisper) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *, content as body, (direction = 'outbound') as from_me`,
+      `INSERT INTO messages (conversation_id, content, direction, type, media_url, is_whisper) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *, content as body, type as media_type, (direction = 'outbound') as from_me`,
       [convId, msgContent, msgDirection, msgType, media_url, whisper]
     );
     await query('UPDATE conversations SET last_message_at = NOW(), updated_at = NOW() WHERE id = $1', [convId]);
@@ -177,7 +178,7 @@ export default async function messageRoutes(fastify) {
 
     // Save message to DB
     const { rows } = await query(
-      'INSERT INTO messages (conversation_id, content, direction, type, media_url, quoted_message_id, is_whisper) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      'INSERT INTO messages (conversation_id, content, direction, type, media_url, quoted_message_id, is_whisper) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *, content as body, type as media_type, (direction=\'outbound\') as from_me',
       [convId, content, 'outbound', type, media_url, quoted_message_id, whisper]
     );
     const message = rows[0];
@@ -474,7 +475,7 @@ async function handleEvolutionWebhook(payload, fastify) {
       }
 
       const { rows: msgRows } = await client.query(
-        'INSERT INTO messages (conversation_id, content, direction, type, media_url, external_id, sender_name, sender_phone) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
+        'INSERT INTO messages (conversation_id, content, direction, type, media_url, external_id, sender_name, sender_phone) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *, content as body, type as media_type, false as from_me',
         [conv.id, content, 'inbound', type, mediaUrl, key?.id, senderName, senderPhone || null]
       );
       msgRow = msgRows[0];
@@ -500,13 +501,14 @@ async function handleEvolutionWebhook(payload, fastify) {
       (async () => {
         try {
           const { rows: connRows } = await query(
-            "SELECT api_url, api_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1",
+            "SELECT evolution_url, evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1",
             [instance]
           );
           const conn = connRows[0];
-          if (!conn?.api_url) return;
-          const res = await fetch(`${conn.api_url}/group/findGroupInfos/${instance}?groupJid=${phone}@g.us`, {
-            headers: { 'apikey': conn.api_key },
+          const evoUrl = conn?.evolution_url || 'http://localhost:8080';
+          const evoKey = conn?.evolution_key || process.env.EVOLUTION_API_KEY || '';
+          const res = await fetch(`${evoUrl}/group/findGroupInfos/${instance}?groupJid=${phone}@g.us`, {
+            headers: { 'apikey': evoKey },
           });
           if (!res.ok) return;
           const info = await res.json();
@@ -514,6 +516,43 @@ async function handleEvolutionWebhook(payload, fastify) {
           if (subject) {
             await query('UPDATE contacts SET name=$1 WHERE id=$2', [subject, contact.id]);
           }
+        } catch { /* silent */ }
+      })();
+    }
+
+    // ── Download media from WhatsApp and store in MinIO ───────────────────
+    if (mediaType && mediaUrl && msgRow?.id) {
+      (async () => {
+        try {
+          const { rows: connRows } = await query(
+            "SELECT evolution_url, evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1",
+            [instance]
+          );
+          const conn = connRows[0];
+          const evoUrl = conn?.evolution_url || 'http://localhost:8080';
+          const evoKey = conn?.evolution_key || process.env.EVOLUTION_API_KEY || '';
+
+          const res = await fetch(`${evoUrl}/chat/getBase64FromMediaMessage/${instance}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': evoKey },
+            body: JSON.stringify({ message: { key, message: messageContent } }),
+          });
+          if (!res.ok) return;
+          const json = await res.json();
+          const base64 = json?.base64 || json?.data?.base64;
+          if (!base64) return;
+
+          const extMap = { image: 'jpg', video: 'mp4', audio: 'ogg', document: 'bin', sticker: 'webp' };
+          const ext = extMap[mediaType] || 'bin';
+          const mimeMap = { image: 'image/jpeg', video: 'video/mp4', audio: 'audio/ogg', document: 'application/octet-stream', sticker: 'image/webp' };
+          const mime = mimeMap[mediaType] || 'application/octet-stream';
+
+          const buf = Buffer.from(base64, 'base64');
+          const objectName = `whatsapp-media/${instance}/${msgRow.id}.${ext}`;
+          const publicUrl = await uploadToMinio(objectName, buf, mime);
+
+          await query('UPDATE messages SET media_url=$1 WHERE id=$2', [publicUrl, msgRow.id]);
+          fastify.io?.emit('message:updated', { id: msgRow.id, conversation_id: conv.id, media_url: publicUrl });
         } catch { /* silent */ }
       })();
     }

@@ -1191,6 +1191,13 @@ const Inbox = () => {
     }
   }, []);
 
+  // Media URL updated after async download from WhatsApp
+  useSocketEvent('message:updated', (data: any) => {
+    if (data?.id && data?.media_url) {
+      setMessages(prev => prev.map(m => m.id === data.id ? { ...m, media_url: data.media_url } : m));
+    }
+  }, []);
+
   // Collaborative editing: listen for other agents composing
   useSocketEvent('agent:composing', (data: any) => {
     if (!data?.conversation_id || !data?.agent_id) return;

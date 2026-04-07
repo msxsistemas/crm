@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileText, Download } from "lucide-react";
+import { FileText, Download, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 
@@ -10,10 +10,27 @@ interface MediaMessageProps {
   fromMe?: boolean;
 }
 
+const isEncryptedUrl = (url: string) =>
+  url.includes('mmg.whatsapp.net') || url.endsWith('.enc');
+
 const MediaMessage = ({ mediaUrl, mediaType, body, fromMe }: MediaMessageProps) => {
   const [imageOpen, setImageOpen] = useState(false);
   const type = mediaType?.toLowerCase() || "";
   const normalizedBody = body?.trim().toLowerCase() || "";
+
+  // Encrypted/expired WhatsApp CDN URL — can't be displayed
+  if (isEncryptedUrl(mediaUrl)) {
+    const label = type === 'audio' ? '🎤 Áudio' : type === 'image' ? '📷 Imagem' : type === 'video' ? '🎥 Vídeo' : '📄 Arquivo';
+    return (
+      <div className={cn(
+        "flex items-center gap-2 px-3 py-2 rounded-md min-w-[180px]",
+        fromMe ? "bg-[#025144]" : "bg-[#1a2930]"
+      )}>
+        <Clock className="h-4 w-4 text-[#8696a0] shrink-0" />
+        <span className="text-[12px] text-[#8696a0]">{label} — mídia expirada</span>
+      </div>
+    );
+  }
   const isGenericLabel = ["📷 imagem", "imagem", "🎤 áudio", "áudio", "🎥 vídeo", "vídeo", "📄 documento", "documento"].includes(normalizedBody);
 
   if (type.startsWith("image") || type === "image") {
