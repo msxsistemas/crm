@@ -288,7 +288,7 @@ const AppSidebar = ({ onStartTour }: AppSidebarProps) => {
   const { user, signOut } = useAuth();
   const { isAdmin, isReseller } = useUserRole();
   const location = useLocation();
-  const initial = user?.email?.charAt(0).toUpperCase() || "U";
+  const initial = (user?.name || user?.email || "U").charAt(0).toUpperCase();
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains("dark"));
   const [collapsed, setCollapsed] = useState(() => {
     const saved = localStorage.getItem("sidebar-collapsed");
@@ -423,9 +423,10 @@ const AppSidebar = ({ onStartTour }: AppSidebarProps) => {
     return userPermissions[permKey] !== false;
   };
 
-  const navSections = isAdmin
+  const isAdminPage = location.pathname.startsWith('/admin');
+  const navSections = isAdminPage && isAdmin
     ? adminNavSections
-    : isReseller
+    : isAdminPage && isReseller
       ? resellerNavSections
       : userNavSections;
 
@@ -637,7 +638,7 @@ const AppSidebar = ({ onStartTour }: AppSidebarProps) => {
             {!collapsed && (
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-sidebar-foreground truncate">
-                  {user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Usuário"}
+                  {user?.name || user?.email?.split("@")[0] || "Usuário"}
                 </p>
                 <p className="text-xs text-sidebar-foreground/60 truncate">{user?.email}</p>
               </div>

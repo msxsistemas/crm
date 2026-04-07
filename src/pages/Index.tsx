@@ -1236,7 +1236,7 @@ const Index = () => {
                         <div
                           key={h}
                           className={`w-5 h-5 rounded-sm shrink-0 cursor-default transition-opacity hover:opacity-80 ${getCellClass(count)}`}
-                          title={`${day} ${h}h: ${count} mensagem${count !== 1 ? "s" : ""}`}
+                          title={`${day} ${h}h: ${count} ${count !== 1 ? "mensagens" : "mensagem"}`}
                         />
                       ))}
                     </div>

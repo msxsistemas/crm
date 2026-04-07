@@ -98,7 +98,7 @@ const SubscriptionPage = () => {
     loadSubscription();
   }, [user]);
 
-  const currentPlan = plans[0];
+  const currentPlan = activeSubscription?.plan || plans[0];
   const selected = plans.find((p) => p.id === selectedPlanId);
 
   const formatCurrency = (value: number | string) =>
@@ -119,8 +119,8 @@ const SubscriptionPage = () => {
     setPixQrCodeUrl(null);
 
     try {
-      const userName = user.user_metadata?.full_name || user.email?.split("@")[0] || "Cliente";
-      const userPhone = user.user_metadata?.phone || user.phone || "";
+      const userName = user.name || user.email?.split("@")[0] || "Cliente";
+      const userPhone = "";
       const generatedCPF = generateValidCPF();
 
       // 1. Create customer on Ciabra with name, phone and generated CPF
@@ -301,7 +301,11 @@ const SubscriptionPage = () => {
                           <span className="text-sm font-normal text-muted-foreground">/mês</span>
                         </p>
                       </div>
-                      <Badge variant="outline" className="border-yellow-500/50 text-yellow-500">Trial</Badge>
+                      {activeSubscription ? (
+                        <Badge variant="outline" className="border-green-500/50 text-green-500">Ativo</Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-yellow-500/50 text-yellow-500">Trial</Badge>
+                      )}
                     </div>
                     <div className="grid grid-cols-3 gap-4">
                       <div className="rounded-lg border p-4">
@@ -343,7 +347,7 @@ const SubscriptionPage = () => {
                   <CardTitle className="text-base">Pagamento</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-bold text-foreground">R$ 0</p>
+                  <p className="text-2xl font-bold text-foreground">R$ {formatCurrency(currentPlan?.price || 0)}</p>
                   <p className="text-xs text-muted-foreground">Próxima cobrança: {trialEndDate}</p>
                 </CardContent>
               </Card>
@@ -352,7 +356,11 @@ const SubscriptionPage = () => {
                 <CardContent className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Status</span>
-                    <Badge variant="outline" className="border-yellow-500/50 text-yellow-500">Trial</Badge>
+                    {activeSubscription ? (
+                      <Badge variant="outline" className="border-green-500/50 text-green-500">Ativo</Badge>
+                    ) : (
+                      <Badge variant="outline" className="border-yellow-500/50 text-yellow-500">Trial</Badge>
+                    )}
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Trial até</span>

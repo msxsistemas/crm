@@ -381,8 +381,8 @@ const TopBar = ({ onStartTour, onOpenSearch, onOpenShortcuts }: TopBarProps) => 
 
   const displayName = fullName || user?.email?.split("@")[0] || "Usuário";
 
-  // Badge count: show higher of unread notifications vs conversation count, or sum
-  const bellBadgeCount = unreadNotifCount + (unreadConversations + waitingConversations);
+  // Bell badge shows only unread notifications (conversations already have their own badge on MessageSquare icon)
+  const bellBadgeCount = unreadNotifCount;
 
   return (
     <div className="h-14 bg-blue-600 flex items-center justify-between px-6 text-white text-sm shrink-0 select-none">

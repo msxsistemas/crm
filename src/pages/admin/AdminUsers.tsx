@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { db } from "@/lib/db";
+import api from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -11,18 +10,21 @@ import { Search, Users, ShieldCheck, Store } from "lucide-react";
 
 interface Profile {
   id: string;
+  name: string;
   full_name: string | null;
+  email: string;
+  role: string;
   created_at: string;
 }
 
-interface UserRole {
-  user_id: string;
-  role: string;
-}
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Admin",
+  supervisor: "Supervisor",
+  agent: "Agente",
+};
 
 const AdminUsers = () => {
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [roles, setRoles] = useState<UserRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
@@ -30,37 +32,39 @@ const AdminUsers = () => {
 
   const loadData = async () => {
     setLoading(true);
-    const [p, r] = await Promise.all([
-      db.from("profiles").select("id, full_name, created_at"),
-      db.from("user_roles").select("user_id, role"),
-    ]);
-    setProfiles((p.data as any[]) || []);
-    setRoles((r.data as any[]) || []);
-    setLoading(false);
-  };
-
-  const getUserRole = (userId: string) => {
-    const r = roles.find(r => r.user_id === userId);
-    return r?.role || "user";
+    try {
+      const data = await api.get<Profile[]>('/users');
+      setProfiles(Array.isArray(data) ? data : []);
+    } catch {
+      toast.error("Erro ao carregar usuários");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const changeRole = async (userId: string, newRole: string) => {
-    await db.from("user_roles").delete().eq("user_id", userId);
-    if (newRole !== "user") {
-      const { error } = await db.from("user_roles").insert({ user_id: userId, role: newRole } as any);
-      if (error) return toast.error(error.message);
+    try {
+      await api.patch(`/users/${userId}`, { role: newRole });
+      toast.success("Role atualizada!");
+      setProfiles(prev => prev.map(p => p.id === userId ? { ...p, role: newRole } : p));
+    } catch (e: any) {
+      toast.error(e.message || "Erro ao atualizar role");
     }
-    toast.success("Role atualizada!");
-    loadData();
   };
 
   const filtered = profiles.filter(p =>
-    (p.full_name || "").toLowerCase().includes(search.toLowerCase())
+    (p.name || p.full_name || p.email || "").toLowerCase().includes(search.toLowerCase())
   );
 
-  const totalAdmins = profiles.filter(p => getUserRole(p.id) === "admin").length;
-  const totalResellers = profiles.filter(p => getUserRole(p.id) === "reseller").length;
-  const totalUsers = profiles.filter(p => getUserRole(p.id) === "user").length;
+  const totalAdmins = profiles.filter(p => p.role === "admin").length;
+  const totalSupervisors = profiles.filter(p => p.role === "supervisor").length;
+  const totalAgents = profiles.filter(p => p.role === "agent").length;
+
+  const formatDate = (d: string) => {
+    if (!d) return "—";
+    const date = new Date(d);
+    return isNaN(date.getTime()) ? "—" : date.toLocaleDateString("pt-BR");
+  };
 
   return (
     <div className="flex-1 overflow-auto p-6 space-y-6">
@@ -79,13 +83,13 @@ const AdminUsers = () => {
         <Card>
           <CardContent className="pt-6 flex items-center gap-4">
             <div className="p-3 rounded-xl bg-amber-500/10"><Store className="h-6 w-6 text-amber-500" /></div>
-            <div><p className="text-sm text-muted-foreground">Revendedores</p><p className="text-2xl font-bold">{totalResellers}</p></div>
+            <div><p className="text-sm text-muted-foreground">Supervisores</p><p className="text-2xl font-bold">{totalSupervisors}</p></div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6 flex items-center gap-4">
             <div className="p-3 rounded-xl bg-blue-500/10"><Users className="h-6 w-6 text-blue-500" /></div>
-            <div><p className="text-sm text-muted-foreground">Usuários</p><p className="text-2xl font-bold">{totalUsers}</p></div>
+            <div><p className="text-sm text-muted-foreground">Agentes</p><p className="text-2xl font-bold">{totalAgents}</p></div>
           </CardContent>
         </Card>
       </div>
@@ -98,13 +102,16 @@ const AdminUsers = () => {
       <Card>
         <CardHeader><CardTitle>Todos os Usuários ({filtered.length})</CardTitle></CardHeader>
         <CardContent>
-          {filtered.length === 0 ? (
+          {loading ? (
+            <p className="text-muted-foreground text-center py-8">Carregando...</p>
+          ) : filtered.length === 0 ? (
             <p className="text-muted-foreground text-center py-8">Nenhum usuário encontrado</p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Nome</TableHead>
+                  <TableHead>E-mail</TableHead>
                   <TableHead>Role Atual</TableHead>
                   <TableHead>Criado em</TableHead>
                   <TableHead>Alterar Role</TableHead>
@@ -113,19 +120,20 @@ const AdminUsers = () => {
               <TableBody>
                 {filtered.map(p => (
                   <TableRow key={p.id}>
-                    <TableCell className="font-medium">{p.full_name || "Sem nome"}</TableCell>
+                    <TableCell className="font-medium">{p.name || p.full_name || "Sem nome"}</TableCell>
+                    <TableCell className="text-muted-foreground">{p.email}</TableCell>
                     <TableCell>
-                      <Badge variant={getUserRole(p.id) === "admin" ? "default" : getUserRole(p.id) === "reseller" ? "outline" : "secondary"}>
-                        {getUserRole(p.id) === "admin" ? "Admin" : getUserRole(p.id) === "reseller" ? "Revendedor" : "Usuário"}
+                      <Badge variant={p.role === "admin" ? "default" : p.role === "supervisor" ? "outline" : "secondary"}>
+                        {ROLE_LABELS[p.role] || p.role}
                       </Badge>
                     </TableCell>
-                    <TableCell>{new Date(p.created_at).toLocaleDateString("pt-BR")}</TableCell>
+                    <TableCell>{formatDate(p.created_at)}</TableCell>
                     <TableCell>
-                      <Select value={getUserRole(p.id)} onValueChange={(v) => changeRole(p.id, v)}>
+                      <Select value={p.role} onValueChange={(v) => changeRole(p.id, v)}>
                         <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="user">Usuário</SelectItem>
-                          <SelectItem value="reseller">Revendedor</SelectItem>
+                          <SelectItem value="agent">Agente</SelectItem>
+                          <SelectItem value="supervisor">Supervisor</SelectItem>
                           <SelectItem value="admin">Admin</SelectItem>
                         </SelectContent>
                       </Select>

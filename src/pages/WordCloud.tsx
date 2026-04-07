@@ -20,7 +20,7 @@ const PERIOD_OPTIONS = [
 const DIRECTION_OPTIONS = [
   { value: "inbound", label: "Entrada (clientes)" },
   { value: "outbound", label: "Saída (agentes)" },
-  { value: "", label: "Ambos" },
+  { value: "_all", label: "Ambos" },
 ];
 
 export default function WordCloud() {
@@ -40,7 +40,8 @@ export default function WordCloud() {
   const loadWords = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ days, direction });
+      const params = new URLSearchParams({ days });
+      if (direction && direction !== '_all') params.set('direction', direction);
       if (channel) params.set("channel", channel);
       const data = await api.get<WordEntry[]>(`/stats/word-cloud?${params.toString()}`);
       setWords(Array.isArray(data) ? data : []);

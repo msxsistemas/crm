@@ -520,7 +520,7 @@ export default async function statsRoutes(fastify) {
         ROUND(AVG(EXTRACT(EPOCH FROM (c.first_response_at - c.created_at))/60)::numeric, 1) as avg_response_min
       FROM profiles p
       LEFT JOIN conversations c ON c.assigned_to = p.id AND c.created_at BETWEEN $2 AND $3
-      LEFT JOIN messages m ON m.conversation_id = c.id AND m.sender_type='agent'
+      LEFT JOIN messages m ON m.conversation_id = c.id AND m.direction='outbound'
       WHERE p.id = $1
       GROUP BY p.name
     `, [agent_id, start || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), end || new Date().toISOString()]);
@@ -665,7 +665,7 @@ export default async function statsRoutes(fastify) {
           COUNT(*) FILTER (WHERE created_at > NOW() - interval '24 hours') as today
         FROM messages
       `),
-      query(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status='open') as connected FROM connections`),
+      query(`SELECT COUNT(*) as total, COUNT(*) FILTER (WHERE status='open') as connected FROM evolution_connections`),
       query(`SELECT COUNT(*) as count FROM _migrations`).catch(() => ({ rows: [{ count: 0 }] })),
     ]);
 
@@ -753,7 +753,7 @@ export default async function statsRoutes(fastify) {
         EXTRACT(HOUR FROM created_at AT TIME ZONE 'America/Sao_Paulo') as hour,
         COUNT(*) as count
       FROM messages
-      WHERE created_at BETWEEN $1 AND $2 AND sender_type = 'contact'
+      WHERE created_at BETWEEN $1 AND $2 AND direction = 'inbound'
       GROUP BY dow, hour
       ORDER BY dow, hour
     `, [startDate, endDate]);
@@ -764,7 +764,7 @@ export default async function statsRoutes(fastify) {
         EXTRACT(HOUR FROM created_at AT TIME ZONE 'America/Sao_Paulo') as hour,
         COUNT(*) as count
       FROM messages
-      WHERE created_at BETWEEN $1 AND $2 AND sender_type = 'contact'
+      WHERE created_at BETWEEN $1 AND $2 AND direction = 'inbound'
       GROUP BY hour ORDER BY count DESC LIMIT 5
     `, [startDate, endDate]);
 
@@ -778,12 +778,12 @@ export default async function statsRoutes(fastify) {
         p.id, p.name AS full_name, p.status, p.avatar_url,
         COUNT(c.id) FILTER (WHERE c.status='open') as open_count,
         COUNT(c.id) FILTER (WHERE c.status='open' AND c.assigned_to=p.id) as assigned_count,
-        MAX(m.created_at) FILTER (WHERE m.sender_type='agent') as last_message_at,
-        COUNT(c.id) FILTER (WHERE c.status='open' AND c.last_message_at < NOW() - interval '10 minutes' AND m_last.sender_type='contact') as waiting_reply
+        MAX(m.created_at) FILTER (WHERE m.direction='outbound') as last_message_at,
+        COUNT(c.id) FILTER (WHERE c.status='open' AND c.last_message_at < NOW() - interval '10 minutes' AND m_last.direction='inbound') as waiting_reply
       FROM profiles p
       LEFT JOIN conversations c ON c.assigned_to = p.id
       LEFT JOIN LATERAL (
-        SELECT sender_type FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1
+        SELECT direction FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1
       ) m_last ON true
       LEFT JOIN messages m ON m.conversation_id = c.id
       WHERE p.role IN ('agent','supervisor')
@@ -836,7 +836,7 @@ export default async function statsRoutes(fastify) {
         SELECT contact_id, MIN(created_at) as first_at
         FROM conversations GROUP BY contact_id
       ),
-      returning AS (
+      returning_contacts AS (
         SELECT
           fc.contact_id,
           fc.first_at,
@@ -855,7 +855,7 @@ export default async function statsRoutes(fastify) {
         ROUND(COUNT(*) FILTER (WHERE total_conversations > 1)::numeric / NULLIF(COUNT(*),0) * 100, 1) as retention_rate,
         ROUND(AVG(total_conversations)::numeric, 1) as avg_conversations_per_contact,
         ROUND(AVG(days_as_customer) FILTER (WHERE total_conversations > 1)::numeric, 0) as avg_days_retained
-      FROM returning
+      FROM returning_contacts
     `, [months]);
 
     const { rows: cohort } = await query(`
@@ -990,8 +990,8 @@ export default async function statsRoutes(fastify) {
 
     const params = [daysInt];
     let dirCond = '';
-    if (direction === 'inbound') dirCond = "AND m.sender_type = 'contact'";
-    else if (direction === 'outbound') dirCond = "AND m.sender_type IN ('agent','bot')";
+    if (direction === 'inbound') dirCond = "AND m.direction = 'inbound'";
+    else if (direction === 'outbound') dirCond = "AND m.direction = 'outbound'";
 
     let chanCond = '';
     if (channel) { params.push(channel); chanCond = `AND c.connection_name = $${params.length}`; }
@@ -1001,7 +1001,7 @@ export default async function statsRoutes(fastify) {
       JOIN conversations c ON c.id = m.conversation_id
       WHERE m.created_at > NOW() - ($1 || ' days')::INTERVAL
         AND m.content IS NOT NULL
-        AND m.sender_type != 'system'
+        AND m.direction IS NOT NULL
         ${dirCond}
         ${chanCond}
       LIMIT 50000
@@ -1079,11 +1079,11 @@ export default async function statsRoutes(fastify) {
 
     // Ranking (conversations closed this month)
     const { rows: rankRows } = await query(`
-      SELECT agent_id, COUNT(*) AS closed_month,
+      SELECT assigned_to AS agent_id, COUNT(*) AS closed_month,
         RANK() OVER (ORDER BY COUNT(*) DESC) AS rank
       FROM conversations
       WHERE status = 'closed' AND closed_at >= DATE_TRUNC('month', NOW())
-      GROUP BY agent_id
+      GROUP BY assigned_to
     `);
     const myRank = rankRows.find(r => r.agent_id === userId);
 

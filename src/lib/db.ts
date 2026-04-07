@@ -212,7 +212,8 @@ class QueryBuilder {
 
   private async _execute(): Promise<{ data: unknown; error: unknown }> {
     if (this._endpoint === '/__skip__') {
-      return { data: [], error: null };
+      const emptyData = (this._isSingle || this._isMaybeSingle) ? null : [];
+      return { data: emptyData, error: null };
     }
 
     try {

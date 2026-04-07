@@ -35,10 +35,10 @@ export default async function contactRoutes(fastify) {
       ? `contacts:list:${orderClause}:${page}:${limit}`
       : null;
 
-    const fetchData = () => Promise.all([
-      query(`SELECT * FROM contacts WHERE ${where} ORDER BY ${orderClause} LIMIT $${p} OFFSET $${p+1}`, [...params, limit, offset]),
-      query(`SELECT COUNT(*) FROM contacts WHERE ${where}`, params),
-    ]).then(([{ rows }, { rows: countRows }]) => ({ data: rows, total: parseInt(countRows[0].count), page: +page, limit: +limit }));
+    const fetchData = () => query(
+      `SELECT * FROM contacts WHERE ${where} ORDER BY ${orderClause} LIMIT $${p} OFFSET $${p+1}`,
+      [...params, limit, offset]
+    ).then(({ rows }) => rows);
 
     const result = cacheKey
       ? await cached(cacheKey, 30, fetchData)

@@ -306,10 +306,12 @@ const Contacts = () => {
   const fetchContactsQuery = useQuery({
     queryKey: ['contacts'],
     queryFn: async (): Promise<Contact[]> => {
-      const [data, convos] = await Promise.all([
-        api.get<Contact[]>('/contacts?limit=9999&order=created_at.desc'),
-        api.get<{ contact_id: string; last_message_at: string }[]>('/conversations?select=contact_id,last_message_at&limit=9999&order=last_message_at.desc'),
+      const [rawContacts, rawConvos] = await Promise.all([
+        api.get<any>('/contacts?limit=9999'),
+        api.get<any>('/conversations?limit=200'),
       ]);
+      const data: Contact[] = Array.isArray(rawContacts) ? rawContacts : (rawContacts?.data || []);
+      const convos: { contact_id: string; last_message_at: string }[] = Array.isArray(rawConvos) ? rawConvos : (rawConvos?.data || []);
       const lastMsgMap = new Map<string, string>();
       for (const c of (convos || [])) {
         if (c.last_message_at && !lastMsgMap.has(c.contact_id)) {

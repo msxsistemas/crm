@@ -2766,7 +2766,7 @@ ${conversationContext ? `Contexto da conversa atual:\n${conversationContext}\n\n
   fastify.get('/contacts/top-leads', auth, async (req) => {
     const limit = Math.min(parseInt(req.query.limit || '20'), 100);
     const { rows } = await query(
-      `SELECT id, name, phone, email, company, avatar_url, lead_score, lead_score_updated_at
+      `SELECT id, name, phone, email, avatar_url, lead_score, lead_score_updated_at
        FROM contacts
        WHERE lead_score IS NOT NULL
        ORDER BY lead_score DESC
@@ -3038,6 +3038,109 @@ ${conversationContext ? `Contexto da conversa atual:\n${conversationContext}\n\n
       await query('DELETE FROM push_subscriptions WHERE user_id=$1', [userId]);
     }
     return { ok: true };
+  });
+
+  // ── Teams ─────────────────────────────────────────────────────────────────
+
+  fastify.get('/teams', auth, async (req) => {
+    const { rows } = await query('SELECT * FROM teams ORDER BY name ASC');
+    return rows;
+  });
+
+  fastify.post('/teams', auth, async (req, reply) => {
+    const { name } = req.body;
+    if (!name) return reply.status(400).send({ error: 'name é obrigatório' });
+    const { rows } = await query('INSERT INTO teams (name) VALUES ($1) RETURNING *', [name]);
+    return reply.status(201).send(rows[0]);
+  });
+
+  fastify.patch('/teams/:id', auth, async (req, reply) => {
+    const { name } = req.body;
+    const { rows } = await query('UPDATE teams SET name=$1 WHERE id=$2 RETURNING *', [name, req.params.id]);
+    if (!rows[0]) return reply.status(404).send({ error: 'Não encontrado' });
+    return rows[0];
+  });
+
+  fastify.delete('/teams/:id', auth, async (req, reply) => {
+    await query('DELETE FROM teams WHERE id=$1', [req.params.id]);
+    return { success: true };
+  });
+
+  // ── File Manager (MinIO) ──────────────────────────────────────────────────
+
+  fastify.get('/files/:bucket', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const { minioClient } = await import('../minio.js');
+      const { bucket } = req.params;
+      const folder = req.query.folder || '';
+      const objects = [];
+      await new Promise((resolve, reject) => {
+        const stream = minioClient.listObjects(bucket, folder, false);
+        stream.on('data', obj => objects.push(obj));
+        stream.on('end', resolve);
+        stream.on('error', reject);
+      });
+      const MINIO_PUBLIC = `https://api.msxzap.pro/files/${bucket}`;
+      return objects.map(o => ({
+        id: o.etag || o.name,
+        name: o.name.replace(folder, ''),
+        path: o.name,
+        updated_at: o.lastModified ? o.lastModified.toISOString() : null,
+        created_at: o.lastModified ? o.lastModified.toISOString() : null,
+        last_accessed_at: null,
+        metadata: { size: o.size, mimetype: null },
+        publicUrl: `${MINIO_PUBLIC}/${o.name}`,
+      }));
+    } catch {
+      return [];
+    }
+  });
+
+  fastify.get('/files/:bucket/*', async (req, reply) => {
+    try {
+      const { minioClient } = await import('../minio.js');
+      const { bucket } = req.params;
+      const objectName = req.params['*'];
+      const stream = await minioClient.getObject(bucket, objectName);
+      const stat = await minioClient.statObject(bucket, objectName).catch(() => null);
+      if (stat?.metaData?.['content-type']) reply.header('Content-Type', stat.metaData['content-type']);
+      reply.header('Cache-Control', 'public, max-age=31536000');
+      return reply.send(stream);
+    } catch {
+      return reply.status(404).send({ error: 'File not found' });
+    }
+  });
+
+  fastify.post('/upload/:bucket/*', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const { minioClient } = await import('../minio.js');
+      const { bucket } = req.params;
+      const objectName = req.params['*'];
+      const data = await req.file();
+      if (!data) return reply.status(400).send({ error: 'No file' });
+      const buf = await data.toBuffer();
+      const exists = await minioClient.bucketExists(bucket).catch(() => false);
+      if (!exists) await minioClient.makeBucket(bucket, 'us-east-1');
+      await minioClient.putObject(bucket, objectName, buf, buf.length, { 'Content-Type': data.mimetype });
+      return { path: objectName, publicUrl: `https://api.msxzap.pro/files/${bucket}/${objectName}` };
+    } catch (e) {
+      return reply.status(500).send({ error: e.message });
+    }
+  });
+
+  fastify.delete('/files/:bucket', { preHandler: fastify.authenticate }, async (req, reply) => {
+    try {
+      const { minioClient } = await import('../minio.js');
+      const { bucket } = req.params;
+      const { paths } = req.body;
+      if (!Array.isArray(paths)) return reply.status(400).send({ error: 'paths must be array' });
+      for (const p of paths) {
+        await minioClient.removeObject(bucket, p).catch(() => {});
+      }
+      return { deleted: paths };
+    } catch (e) {
+      return reply.status(500).send({ error: e.message });
+    }
   });
 
 }

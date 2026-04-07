@@ -104,7 +104,7 @@ export default async function conversationRoutes(fastify) {
 
     // Only cache non-search, no-cursor first-page queries
     const cacheKey = !search && !cursor && (!page || page == 1)
-      ? `conv:list:${status||'all'}:${assigned_to||'all'}:${connection_name||'all'}:${lim}`
+      ? `conv:list:${groups||'no'}:${status||'all'}:${assigned_to||'all'}:${connection_name||'all'}:${lim}`
       : null;
 
     const rows = cacheKey
