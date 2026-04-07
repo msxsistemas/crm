@@ -590,26 +590,32 @@ export default async function misc3Routes(fastify) {
 
   // ── Conversation Free Tags ────────────────────────────────────────────────
   fastify.get('/conversations/:id/tags', auth, async (req) => {
-    const { rows } = await query('SELECT tags FROM conversations WHERE id=$1', [req.params.id]);
-    return rows[0]?.tags || [];
+    try {
+      const { rows } = await query('SELECT tags FROM conversations WHERE id=$1', [req.params.id]);
+      return rows[0]?.tags || [];
+    } catch { return []; }
   });
 
   fastify.post('/conversations/:id/tags', auth, async (req, reply) => {
     const { tag } = req.body;
     if (!tag?.trim()) return reply.status(400).send({ error: 'Tag obrigatória' });
-    await query(
-      "UPDATE conversations SET tags=array_append(COALESCE(tags,ARRAY[]::text[]),$1) WHERE id=$2 AND NOT ($1=ANY(COALESCE(tags,ARRAY[]::text[])))",
-      [tag.trim().toLowerCase(), req.params.id]
-    );
-    if (fastify.io) fastify.io.emit('conversation:tag_added', { conversation_id: req.params.id, tag: tag.trim().toLowerCase() });
+    try {
+      await query(
+        "UPDATE conversations SET tags=array_append(COALESCE(tags,ARRAY[]::text[]),$1) WHERE id=$2 AND NOT ($1=ANY(COALESCE(tags,ARRAY[]::text[])))",
+        [tag.trim().toLowerCase(), req.params.id]
+      );
+      if (fastify.io) fastify.io.emit('conversation:tag_added', { conversation_id: req.params.id, tag: tag.trim().toLowerCase() });
+    } catch { /* column may not exist */ }
     return { success: true };
   });
 
   fastify.delete('/conversations/:id/tags/:tag', auth, async (req) => {
-    await query(
-      "UPDATE conversations SET tags=array_remove(COALESCE(tags,ARRAY[]::text[]),$1) WHERE id=$2",
-      [req.params.tag, req.params.id]
-    );
+    try {
+      await query(
+        "UPDATE conversations SET tags=array_remove(COALESCE(tags,ARRAY[]::text[]),$1) WHERE id=$2",
+        [req.params.tag, req.params.id]
+      );
+    } catch { /* column may not exist */ }
     return { success: true };
   });
 

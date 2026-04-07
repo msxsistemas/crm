@@ -631,18 +631,14 @@ const Inbox = () => {
   // Load message reactions for the active conversation
   const loadMessageReactions = useCallback(async (conversationId: string) => {
     try {
-      const { data, error } = await db
-        .from("message_reactions" as any)
-        .select("message_id, user_id, emoji, profiles(full_name)")
-        .filter("message_id", "like", `%${conversationId}%`);
-
-      if (error || !data) return;
+      const data = await api.get<any[]>(`/message-reactions?conversation_id=${conversationId}`).catch(() => []);
+      if (!data) return;
 
       const map: Record<string, { emoji: string; count: number; users: string[] }[]> = {};
       for (const row of data as any[]) {
         if (!map[row.message_id]) map[row.message_id] = [];
         const existing = map[row.message_id].find((r) => r.emoji === row.emoji);
-        const userName = row.profiles?.full_name || "Agente";
+        const userName = row.user_name || "Agente";
         if (existing) {
           existing.count += 1;
           existing.users.push(userName);
