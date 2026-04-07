@@ -2708,6 +2708,12 @@ const Inbox = () => {
     return p.substring(p.length - 2);
   };
 
+  const GROUP_COLORS = ['#00a884','#0e84d1','#d1670e','#a8004d','#6f42c1','#e67e22','#16a085','#c0392b'];
+  const getSenderColor = (key: string) => {
+    const hash = (key || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+    return GROUP_COLORS[hash % GROUP_COLORS.length];
+  };
+
   const formatTime = (dateStr: string | null) => {
     if (!dateStr) return "";
     const date = new Date(dateStr);
@@ -3707,8 +3713,10 @@ const Inbox = () => {
                   </div>
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-foreground">
+                  <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                    {(selectedConvo as any).contacts?.is_group && <span className="text-base leading-none">👥</span>}
                     {selectedConvo.contacts?.name || selectedConvo.contacts?.phone}
+                    {(selectedConvo as any).contacts?.is_group && <span className="text-[10px] font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">Grupo</span>}
                   </p>
                   {/* Selected labels pills */}
                   {(selectedConvo.label_ids || []).length > 0 && (
@@ -4219,6 +4227,16 @@ const Inbox = () => {
                       </div>
                     )}
                     <div className={`flex ${msg.is_whisper ? "justify-start mb-2 pl-2" : msg.from_me ? "justify-end mb-2" : "justify-start mb-4 pl-2"} group items-start gap-2`}>
+                      {/* Group sender avatar */}
+                      {!msg.from_me && !msg.is_whisper && (selectedConvo as any)?.contacts?.is_group && (
+                        <div
+                          className="h-7 w-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 mt-1 select-none"
+                          style={{ backgroundColor: getSenderColor(msg.sender_name || msg.sender_phone || 'x') }}
+                          title={msg.sender_name || msg.sender_phone || 'Participante'}
+                        >
+                          {(msg.sender_name || msg.sender_phone || '?').substring(0, 2).toUpperCase()}
+                        </div>
+                      )}
                       {/* Checkbox for forward selection - left side for received */}
                       {selectingForForward && !msg.from_me && !msg.is_whisper && (
                         <button
@@ -4266,9 +4284,10 @@ const Inbox = () => {
                       >
 
                         {/* Group sender name — WhatsApp style */}
-                        {!msg.from_me && !msg.is_whisper && (selectedConvo as any)?.contacts?.is_group && msg.sender_name && (
-                          <p className="text-[12px] font-semibold mb-0.5" style={{ color: '#' + ((msg.sender_phone || msg.sender_name || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 6 === 0 ? '00a884' : (msg.sender_phone || msg.sender_name || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 6 === 1 ? '0e84d1' : (msg.sender_phone || msg.sender_name || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 6 === 2 ? 'd1670e' : (msg.sender_phone || msg.sender_name || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 6 === 3 ? 'a8004d' : (msg.sender_phone || msg.sender_name || '').split('').reduce((a, c) => a + c.charCodeAt(0), 0) % 6 === 4 ? '6f42c1' : 'e67e22') }}>
-                            {msg.sender_name}
+                        {!msg.from_me && !msg.is_whisper && (selectedConvo as any)?.contacts?.is_group && (
+                          <p className="text-[12px] font-semibold mb-0.5 leading-tight"
+                            style={{ color: getSenderColor(msg.sender_name || msg.sender_phone || 'x') }}>
+                            {msg.sender_name || msg.sender_phone || 'Participante'}
                           </p>
                         )}
 
