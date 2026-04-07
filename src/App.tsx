@@ -132,7 +132,6 @@ const RecurringCampaigns = lazy(() => import("./pages/RecurringCampaigns"));
 const MyProductivity = lazy(() => import("./pages/MyProductivity"));
 const SurveyResponse = lazy(() => import("./pages/SurveyResponse"));
 const LinkTracker = lazy(() => import("./pages/LinkTracker"));
-const TelegramBots = lazy(() => import("./pages/TelegramBots"));
 const TemplateLibrary = lazy(() => import("./pages/TemplateLibrary"));
 const CampaignROI = lazy(() => import("./pages/CampaignROI"));
 const FocusMode = lazy(() => import("./pages/FocusMode"));
@@ -264,7 +263,6 @@ const App = () => (
                     <Route path="/campanhas-recorrentes" element={<RecurringCampaigns />} />
                     <Route path="/minha-produtividade" element={<MyProductivity />} />
                     <Route path="/rastrear-links" element={<LinkTracker />} />
-                    <Route path="/telegram-bots" element={<TelegramBots />} />
                     <Route path="/biblioteca-templates" element={<TemplateLibrary />} />
                     <Route path="/roi-campanhas" element={<CampaignROI />} />
                     <Route path="/executive-dashboard" element={<ExecutiveDashboard />} />

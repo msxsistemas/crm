@@ -164,7 +164,7 @@ export default async function messageRoutes(fastify) {
 
     // Get conversation + contact + connection settings + meta connection
     const { rows: convRows } = await query(`
-      SELECT c.*, ct.phone, ct.telegram_id, s.evolution_url, s.evolution_key,
+      SELECT c.*, ct.phone, s.evolution_url, s.evolution_key,
              mc.phone_number_id as meta_phone_number_id, mc.access_token as meta_access_token
       FROM conversations c
       JOIN contacts ct ON ct.id = c.contact_id
@@ -187,23 +187,8 @@ export default async function messageRoutes(fastify) {
 
     // Whisper messages are NOT sent to the client via Evolution/Meta API
     if (!whisper) {
-      // ── Telegram channel ──────────────────────────────────────────────────
-      if (conv.channel === 'telegram' && conv.connection_name?.startsWith('telegram_')) {
-        const botId = conv.connection_name.replace('telegram_', '');
-        const chatId = conv.telegram_id;
-        if (chatId) {
-          query('SELECT token FROM telegram_bots WHERE id=$1 AND active=true', [botId])
-            .then(async ({ rows: botRows }) => {
-              if (!botRows[0]) return;
-              await fetch(`https://api.telegram.org/bot${botRows[0].token}/sendMessage`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chat_id: chatId, text: content }),
-              }).catch(e => console.error('Telegram send error:', e.message));
-            }).catch(e => console.error('Telegram bot lookup error:', e.message));
-        }
       // Enqueue send (with automatic retry on failure)
-      } else if (conv.meta_phone_number_id && conv.meta_access_token) {
+      if (conv.meta_phone_number_id && conv.meta_access_token) {
         await enqueueSend({
           conversationId: convId,
           messageId: message.id,

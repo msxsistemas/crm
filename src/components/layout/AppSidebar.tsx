@@ -238,12 +238,6 @@ const userNavSections: NavSection[] = [
     ],
   },
   {
-    title: "TELEGRAM",
-    items: [
-      { to: "/telegram-bots", icon: Send, label: "Bots Telegram" },
-    ],
-  },
-  {
     title: "SISTEMA",
     items: [
       { to: "/relatorios-agendados", icon: Mail, label: "Relatórios Agendados" },
