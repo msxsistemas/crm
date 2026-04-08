@@ -89,16 +89,12 @@ export function startSchedulesWorker(io) {
             phoneNumberId: schedule.meta_phone_number_id,
             accessToken: schedule.meta_access_token,
           });
-        } else if (schedule.evolution_url) {
-          // Use global key from settings (Evolution API — not per-instance)
-          const { rows: sv } = await query('SELECT evolution_key FROM settings WHERE id=1').catch(() => ({ rows: [] }));
-          const instanceName = schedule.connection_name || '';
+        } else if (schedule.evolution_url && schedule.instance_token) {
           await enqueueSend({
             conversationId: convId, messageId: message.id, phone,
-            content, type: 'text', provider: 'evolution',
+            content, type: 'text', provider: 'uazap',
             evolutionUrl: schedule.evolution_url,
-            evolutionKey: sv[0]?.evolution_key || '',
-            instance: instanceName,
+            evolutionKey: schedule.instance_token,
           });
         }
 

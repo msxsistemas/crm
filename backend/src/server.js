@@ -68,16 +68,18 @@ import { csrfMiddleware } from './middleware/csrf.js';
 import { register, httpRequests, httpDuration, wsConnections, queueSize } from './metrics.js';
 import { messageQueue } from './jobs/messageQueue.js';
 
-// ── Evolution API send helper ─────────────────────────────────────────────────
+// ── UZap send helper ──────────────────────────────────────────────────────────
 async function uzapSendText(instanceName, phone, text) {
-  const { rows: sRows } = await pool.query('SELECT evolution_url, evolution_key FROM settings WHERE id=1').catch(() => ({ rows: [] }));
-  const evoUrl = sRows[0]?.evolution_url;
-  const evoKey = sRows[0]?.evolution_key;
-  if (!evoUrl || !evoKey) return;
-  await fetch(`${evoUrl}/message/sendText/${instanceName}`, {
+  const { rows: sRows } = await pool.query('SELECT evolution_url FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+  const uazapUrl = sRows[0]?.evolution_url;
+  if (!uazapUrl) return;
+  const { rows: tRows } = await pool.query('SELECT evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1', [instanceName]).catch(() => ({ rows: [] }));
+  const token = tRows[0]?.evolution_key;
+  if (!token) return;
+  await fetch(`${uazapUrl}/send/text`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'apikey': evoKey },
-    body: JSON.stringify({ number: phone, text: { body: text } }),
+    headers: { 'Content-Type': 'application/json', 'token': token },
+    body: JSON.stringify({ number: phone, text }),
   });
 }
 
