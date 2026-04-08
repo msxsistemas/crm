@@ -18,14 +18,14 @@ export const messageQueue = new Queue('send-message', {
 export async function enqueueSend({ conversationId, messageId, phone, content, type, mediaUrl, provider, phoneNumberId, accessToken, evolutionUrl, evolutionKey, instance }) {
   await messageQueue.add('send', {
     conversationId, messageId, phone, content, type, mediaUrl,
-    provider, phoneNumberId, accessToken, evolutionUrl, evolutionKey, instance,
+    provider, phoneNumberId, accessToken, uazapUrl: evolutionUrl, uazapToken: evolutionKey,
   });
 }
 
 /** Worker — processes send jobs with automatic retry on failure */
 export function startMessageWorker(io) {
   const worker = new Worker('send-message', async (job) => {
-    const { provider, phoneNumberId, accessToken, evolutionUrl, evolutionKey, instance, phone, content, type, mediaUrl, messageId } = job.data;
+    const { provider, phoneNumberId, accessToken, uazapUrl, uazapToken, phone, content, type, mediaUrl, messageId } = job.data;
 
     try {
       if (provider === 'meta') {
@@ -36,35 +36,27 @@ export function startMessageWorker(io) {
           await query('UPDATE messages SET status=$1, external_id=$2 WHERE id=$3', ['sent', result.messages[0].id, messageId]);
         }
       } else {
-        // Evolution API — text vs media
-        let evoRes;
+        // UZap API — text vs media
+        let uzRes;
         if (mediaUrl && type && type !== 'text') {
-          // Map type to Evolution mediatype
-          const mediaTypeMap = { image: 'image', video: 'video', audio: 'audio', document: 'document' };
-          const mediatype = mediaTypeMap[type] || 'document';
-          if (type === 'audio') {
-            evoRes = await fetch(`${evolutionUrl}/message/sendWhatsAppAudio/${instance}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
-              body: JSON.stringify({ number: phone, audio: mediaUrl }),
-            });
-          } else {
-            evoRes = await fetch(`${evolutionUrl}/message/sendMedia/${instance}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
-              body: JSON.stringify({ number: phone, mediatype, media: mediaUrl, caption: content || '' }),
-            });
-          }
-        } else {
-          evoRes = await fetch(`${evolutionUrl}/message/sendText/${instance}`, {
+          // Map type to UZap media type
+          const mediaTypeMap = { image: 'image', video: 'video', audio: 'ptt', document: 'document' };
+          const uzType = mediaTypeMap[type] || 'document';
+          uzRes = await fetch(`${uazapUrl}/send/media`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
+            headers: { 'Content-Type': 'application/json', 'token': uazapToken },
+            body: JSON.stringify({ number: phone, type: uzType, file: mediaUrl, text: content || '' }),
+          });
+        } else {
+          uzRes = await fetch(`${uazapUrl}/send/text`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'token': uazapToken },
             body: JSON.stringify({ number: phone, text: content }),
           });
         }
-        const data = await evoRes.json();
+        const data = await uzRes.json();
         if (data.status === 'error' || data.error) throw new Error(data.message || data.error);
-        const extId = data.key?.id || data.id || null;
+        const extId = data.id || null;
         await query('UPDATE messages SET status=$1, external_id=COALESCE($2,external_id) WHERE id=$3', ['sent', extId, messageId]);
       }
 

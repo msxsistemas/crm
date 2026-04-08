@@ -1119,7 +1119,7 @@ const Inbox = () => {
       const result = await getInstanceStatus(instanceName);
       // Evolution API v2 usa instance.status; v1 usa instance.state ou connectionStatus
       const state = result?.instance?.status || result?.instance?.state || result?.state || result?.connectionStatus;
-      setConnected(state === "open");
+      setConnected(state === "connected" || state === "open");
     } catch {
       // Não marcar como desconectado em erro de rede — manter estado anterior
     }
@@ -1141,7 +1141,7 @@ const Inbox = () => {
       try {
         const result = await getInstanceStatus(instanceName);
         const state = result?.instance?.status || result?.instance?.state || result?.state || result?.connectionStatus;
-        setConnected(state === "open");
+        setConnected(state === "connected" || state === "open");
       } catch {
         // Não marcar como desconectado em erro de rede
       }
@@ -1156,8 +1156,8 @@ const Inbox = () => {
   useSocketEvent('connection:status', (data: any) => {
     if (!instanceName || data?.instance !== instanceName) return;
     const state = data?.state;
-    setConnected(state === 'open');
-    if (state === 'close' || state === 'connecting') {
+    setConnected(state === 'connected' || state === 'open');
+    if (state === 'close' || state === 'disconnected' || state === 'connecting') {
       toast.warning(`WhatsApp desconectado (${instanceName}). Acesse Conexões para reconectar.`, { duration: 8000 });
     }
   }, [instanceName]);
@@ -1812,14 +1812,15 @@ const Inbox = () => {
     try {
       try { await createInstance(instanceName); } catch { /* may exist */ }
       const qrResult = await getQRCode(instanceName);
-      const base64 = qrResult?.base64 || qrResult?.qrcode?.base64;
+      // UZap: qrResult.instance.qrcode is a full data URI
+      const base64 = qrResult?.instance?.qrcode || qrResult?.base64 || qrResult?.qrcode?.base64;
       if (base64) {
         setQrCode(base64.startsWith("data:") ? base64 : `data:image/png;base64,${base64}`);
         setShowQR(true);
       } else {
         const status = await getInstanceStatus(instanceName);
-        const state = status?.instance?.state || status?.state;
-        if (state === "open") {
+        const state = status?.instance?.status || status?.instance?.state || status?.state;
+        if (state === "connected" || state === "open") {
           setConnected(true);
           toast.success("WhatsApp já está conectado!");
           try { await setupWebhook(instanceName); } catch (e) { console.warn("Webhook setup:", e); }
@@ -1836,8 +1837,8 @@ const Inbox = () => {
   const handleCheckAfterScan = async () => {
     try {
       const status = await getInstanceStatus(instanceName);
-      const state = status?.instance?.state || status?.state;
-      if (state === "open") {
+      const state = status?.instance?.status || status?.instance?.state || status?.state;
+      if (state === "connected" || state === "open") {
         setConnected(true);
         setShowQR(false);
         toast.success("WhatsApp conectado com sucesso! 🎉");

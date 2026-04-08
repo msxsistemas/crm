@@ -73,14 +73,18 @@ export default async function inboundWebhookRoutes(fastify) {
         const text = body.text || body.message || body.mensagem;
         const instanceName = body.instance || body.connection_name;
         if (!phone || !text) return reply.status(400).send({ error: 'phone e text são obrigatórios' });
-        const { rows: evo } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
-        const e = evo[0];
-        if (e?.evolution_url && instanceName) {
-          await fetch(`${e.evolution_url}/message/sendText/${instanceName}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'apikey': e.evolution_key },
-            body: JSON.stringify({ number: phone, text })
-          });
+        const { rows: evo } = await query('SELECT evolution_url FROM settings WHERE id=1');
+        const uazapUrl = evo[0]?.evolution_url;
+        if (uazapUrl && instanceName) {
+          const { rows: tokRows } = await query('SELECT evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1', [instanceName]);
+          const instanceToken = tokRows[0]?.evolution_key;
+          if (instanceToken) {
+            await fetch(`${uazapUrl}/send/text`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'token': instanceToken },
+              body: JSON.stringify({ number: phone, text })
+            });
+          }
         }
       }
     } catch (err) {

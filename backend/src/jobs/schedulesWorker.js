@@ -25,12 +25,14 @@ export function startSchedulesWorker(io) {
     const { rows: pending } = await query(`
       SELECT s.*,
         ct.phone as contact_phone,
-        sv.evolution_url, sv.evolution_key,
+        sv.evolution_url,
+        ec.evolution_key as instance_token,
         mc.phone_number_id as meta_phone_number_id, mc.access_token as meta_access_token
       FROM schedules s
       LEFT JOIN contacts ct ON ct.id = s.contact_id
       LEFT JOIN settings sv ON sv.id = 1
       LEFT JOIN conversations conv ON conv.id = s.conversation_id
+      LEFT JOIN evolution_connections ec ON ec.instance_name = COALESCE(s.connection_name, conv.connection_name)
       LEFT JOIN meta_connections mc ON mc.phone_number_id = conv.connection_name
       WHERE s.status = 'pending'
         AND COALESCE(s.send_at, s.scheduled_at) <= $1
@@ -87,13 +89,12 @@ export function startSchedulesWorker(io) {
             phoneNumberId: schedule.meta_phone_number_id,
             accessToken: schedule.meta_access_token,
           });
-        } else if (schedule.evolution_url && schedule.connection_name) {
+        } else if (schedule.evolution_url && schedule.instance_token) {
           await enqueueSend({
             conversationId: convId, messageId: message.id, phone,
-            content, type: 'text', provider: 'evolution',
+            content, type: 'text', provider: 'uazap',
             evolutionUrl: schedule.evolution_url,
-            evolutionKey: schedule.evolution_key,
-            instance: schedule.connection_name,
+            evolutionKey: schedule.instance_token,
           });
         }
 

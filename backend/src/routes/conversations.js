@@ -326,15 +326,17 @@ export default async function conversationRoutes(fastify) {
     // CSAT: send rating request when conversation closes with awaiting_csat=true
     if (req.body.status === 'closed' && rows[0].awaiting_csat) {
       query(`
-        SELECT ct.phone, s.evolution_url, s.evolution_key, c.connection_name
+        SELECT ct.phone, s.evolution_url, c.connection_name,
+               ec.evolution_key AS instance_token
         FROM conversations c JOIN contacts ct ON ct.id=c.contact_id, settings s
+        LEFT JOIN evolution_connections ec ON ec.instance_name=c.connection_name
         WHERE c.id=$1 AND s.id=1
       `, [req.params.id]).then(async ({ rows: r }) => {
         const row = r[0];
-        if (!row?.evolution_url || !row?.phone) return;
-        await fetch(`${row.evolution_url}/message/sendText/${row.connection_name}`, {
+        if (!row?.evolution_url || !row?.phone || !row?.instance_token) return;
+        await fetch(`${row.evolution_url}/send/text`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': row.evolution_key },
+          headers: { 'Content-Type': 'application/json', 'token': row.instance_token },
           body: JSON.stringify({ number: row.phone, text: '⭐ Como você avaliaria nosso atendimento?\nResponda com um número de *1* a *5*:\n\n1 - Muito ruim\n2 - Ruim\n3 - Regular\n4 - Bom\n5 - Excelente' }),
         }).catch(() => {});
       }).catch(() => {});
@@ -350,46 +352,28 @@ export default async function conversationRoutes(fastify) {
         ).catch(() => ({ rows: [] }));
         if (cRows[0]) {
           const csatMsg = sRows[0].csat_message || '⭐ Como foi seu atendimento?\nAvalie de 1 a 5:';
-          const { rows: sEvo } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1').catch(() => ({ rows: [] }));
-          if (sEvo[0]?.evolution_url) {
-            const instanceName = cRows[0].connection_name;
+          const { rows: sEvo } = await query(
+            `SELECT s.evolution_url, ec.evolution_key AS instance_token
+             FROM settings s
+             LEFT JOIN evolution_connections ec ON ec.instance_name=$1
+             WHERE s.id=1`,
+            [cRows[0].connection_name]
+          ).catch(() => ({ rows: [] }));
+          const uazapUrl = sEvo[0]?.evolution_url;
+          const instanceToken = sEvo[0]?.instance_token;
+          if (uazapUrl && instanceToken) {
             const contactPhone = cRows[0].phone;
-            const evolutionUrl = sEvo[0].evolution_url;
-            const evolutionKey = sEvo[0].evolution_key;
-
             const sendCsat = async () => {
-              const buttons = [
-                { buttonId: 'csat_1', buttonText: { displayText: '⭐ 1' }, type: 1 },
-                { buttonId: 'csat_2', buttonText: { displayText: '⭐⭐ 2' }, type: 1 },
-                { buttonId: 'csat_3', buttonText: { displayText: '⭐⭐⭐ 3' }, type: 1 },
-              ];
-              try {
-                const btnRes = await fetch(`${evolutionUrl}/message/sendButtons/${instanceName}`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
-                  body: JSON.stringify({
-                    number: contactPhone,
-                    buttonMessage: { text: csatMsg, buttons, headerType: 1 }
-                  })
-                });
-                if (!btnRes.ok) throw new Error('buttons failed');
-              } catch {
-                // Fallback to plain text
-                await fetch(`${evolutionUrl}/message/sendText/${instanceName}`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
-                  body: JSON.stringify({ number: contactPhone, text: `${csatMsg}\nDigite um número de 1 a 5.` })
-                }).catch(() => {});
-              }
+              await fetch(`${uazapUrl}/send/text`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'token': instanceToken },
+                body: JSON.stringify({ number: contactPhone, text: `${csatMsg}\nDigite um número de 1 a 5.` })
+              }).catch(() => {});
               query('UPDATE conversations SET csat_sent_at=NOW() WHERE id=$1', [req.params.id]).catch(() => {});
             };
-
             const delayMs = (sRows[0].csat_delay_minutes || 0) * 60 * 1000;
-            if (delayMs > 0) {
-              setTimeout(sendCsat, delayMs);
-            } else {
-              sendCsat().catch(() => {});
-            }
+            if (delayMs > 0) setTimeout(sendCsat, delayMs);
+            else sendCsat().catch(() => {});
           }
         }
       }
@@ -406,14 +390,19 @@ export default async function conversationRoutes(fastify) {
             [req.params.id]
           );
           if (cRows2[0]) {
-            const { rows: sEvo2 } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1').catch(() => ({ rows: [] }));
-            if (sEvo2[0]?.evolution_url) {
-              fetch(`${sEvo2[0].evolution_url}/message/sendText/${cRows2[0].connection_name}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'apikey': sEvo2[0].evolution_key },
-                body: JSON.stringify({ number: cRows2[0].phone, text: npsMsg })
-              }).catch(() => {});
-              query('UPDATE conversations SET nps_sent_at=NOW() WHERE id=$1', [req.params.id]).catch(() => {});
+            const { rows: sEvo2 } = await query('SELECT evolution_url FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+            const uazapUrl2 = sEvo2[0]?.evolution_url;
+            if (uazapUrl2) {
+              const { rows: tokRows2 } = await query('SELECT evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1', [cRows2[0].connection_name]).catch(() => ({ rows: [] }));
+              const tok2 = tokRows2[0]?.evolution_key;
+              if (tok2) {
+                fetch(`${uazapUrl2}/send/text`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'token': tok2 },
+                  body: JSON.stringify({ number: cRows2[0].phone, text: npsMsg })
+                }).catch(() => {});
+                query('UPDATE conversations SET nps_sent_at=NOW() WHERE id=$1', [req.params.id]).catch(() => {});
+              }
             }
           }
         } catch (e) { /* silent */ }
@@ -433,16 +422,21 @@ export default async function conversationRoutes(fastify) {
             [convRows[0].connection_name]
           ).catch(() => ({ rows: [] }));
           if (surveys[0]) {
-            const { rows: sEvo3 } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1').catch(() => ({ rows: [] }));
-            if (sEvo3[0]?.evolution_url) {
-              const frontendUrl = process.env.FRONTEND_URL || 'https://msxzap.pro';
-              const surveyLink = `${frontendUrl}/pesquisa/${surveys[0].id}?c=${req.params.id}&ct=${convRows[0].contact_id}`;
-              const surveyMsg = `📋 Pesquisa de Satisfação\nGostaríamos de saber sua opinião sobre o atendimento!\nAcesse: ${surveyLink}`;
-              fetch(`${sEvo3[0].evolution_url}/message/sendText/${convRows[0].connection_name}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'apikey': sEvo3[0].evolution_key },
-                body: JSON.stringify({ number: convRows[0].phone, text: surveyMsg })
-              }).catch(() => {});
+            const { rows: sEvo3 } = await query('SELECT evolution_url FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+            const uazapUrl3 = sEvo3[0]?.evolution_url;
+            if (uazapUrl3) {
+              const { rows: tokRows3 } = await query('SELECT evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1', [convRows[0].connection_name]).catch(() => ({ rows: [] }));
+              const tok3 = tokRows3[0]?.evolution_key;
+              if (tok3) {
+                const frontendUrl = process.env.FRONTEND_URL || 'https://msxzap.pro';
+                const surveyLink = `${frontendUrl}/pesquisa/${surveys[0].id}?c=${req.params.id}&ct=${convRows[0].contact_id}`;
+                const surveyMsg = `📋 Pesquisa de Satisfação\nGostaríamos de saber sua opinião sobre o atendimento!\nAcesse: ${surveyLink}`;
+                fetch(`${uazapUrl3}/send/text`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'token': tok3 },
+                  body: JSON.stringify({ number: convRows[0].phone, text: surveyMsg })
+                }).catch(() => {});
+              }
             }
           }
         }
@@ -780,7 +774,7 @@ ${'─'.repeat(60)}
     return { ok: true, count: ids.length };
   });
 
-  // Send audio (base64) via Evolution API
+  // Send audio (base64) via UZap API
   fastify.post('/conversations/:id/send-audio', auth, async (req, reply) => {
     const { audio_base64, mime_type } = req.body;
     const { rows } = await query(
@@ -788,18 +782,19 @@ ${'─'.repeat(60)}
       [req.params.id]
     );
     if (!rows[0]) return reply.code(404).send({ error: 'Not found' });
-    const { rows: settings } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
-    const s = settings[0];
-    if (!s?.evolution_url) return reply.code(400).send({ error: 'Evolution API não configurada' });
-    const resp = await fetch(`${s.evolution_url}/message/sendMedia/${rows[0].instance_name}`, {
+    const { rows: settings } = await query('SELECT evolution_url FROM settings WHERE id=1');
+    const uazapUrl = settings[0]?.evolution_url;
+    if (!uazapUrl) return reply.code(400).send({ error: 'UZap API não configurada' });
+    const { rows: tokRows } = await query('SELECT evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1', [rows[0].instance_name]);
+    const instanceToken = tokRows[0]?.evolution_key;
+    if (!instanceToken) return reply.code(400).send({ error: 'Token da instância não encontrado' });
+    const resp = await fetch(`${uazapUrl}/send/media`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': s.evolution_key },
+      headers: { 'Content-Type': 'application/json', 'token': instanceToken },
       body: JSON.stringify({
         number: rows[0].phone,
-        mediatype: 'audio',
-        media: audio_base64,
-        fileName: 'audio.ogg',
-        mimetype: mime_type || 'audio/ogg',
+        type: 'ptt',
+        file: `data:${mime_type || 'audio/ogg'};base64,${audio_base64}`,
       }),
     });
     return { ok: resp.ok };
@@ -948,20 +943,29 @@ ${'─'.repeat(60)}
     const message = campaign[0].message || campaign[0].message_template;
 
     (async () => {
+      // Look up UZap settings once before the loop
+      const { rows: campSRows } = await query('SELECT evolution_url FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+      const campUazapUrl = campSRows[0]?.evolution_url;
+      const { rows: campTokRows } = await query('SELECT evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1', [instance]).catch(() => ({ rows: [] }));
+      const campToken = campTokRows[0]?.evolution_key;
+      // If template, look up body from local templates table
+      let campText = message;
+      if (template && !campText) {
+        const { rows: tmplRows } = await query('SELECT body_text FROM hsm_templates_local WHERE name=$1 LIMIT 1', [template]).catch(() => ({ rows: [] }));
+        campText = tmplRows[0]?.body_text || template;
+      }
+
       let sent = 0, failed = 0;
       for (const contact of contacts) {
         try {
-          if (template) {
-            await fetch(`${process.env.EVOLUTION_API_URL}/message/sendTemplate/${instance}`, {
+          if (campUazapUrl && campToken && campText) {
+            const personalizedText = campText
+              .replace(/\{\{nome\}\}/gi, contact.name || '')
+              .replace(/\{\{1\}\}/g, contact.name || '');
+            await fetch(`${campUazapUrl}/send/text`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-              body: JSON.stringify({ number: contact.phone, template: { name: template, language: { code: 'pt_BR' }, components: [] } })
-            });
-          } else if (message) {
-            await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${instance}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-              body: JSON.stringify({ number: contact.phone, text: message })
+              headers: { 'Content-Type': 'application/json', 'token': campToken },
+              body: JSON.stringify({ number: contact.phone, text: personalizedText })
             });
           }
           sent++;
@@ -1007,13 +1011,14 @@ ${'─'.repeat(60)}
   fastify.post('/conversations/:id/video-call-link', { onRequest: [fastify.authenticate] }, async (req, reply) => {
     const convId = req.params.id;
 
-    // Load conversation + contact phone + evolution settings
+    // Load conversation + contact phone + UZap settings
     const { rows: convRows } = await query(`
       SELECT c.id, c.connection_name, ct.phone, ct.name as contact_name,
-             s.evolution_url, s.evolution_key
+             s.evolution_url, ec.evolution_key AS instance_token
       FROM conversations c
       JOIN contacts ct ON ct.id = c.contact_id
       LEFT JOIN settings s ON s.id = 1
+      LEFT JOIN evolution_connections ec ON ec.instance_name = c.connection_name
       WHERE c.id = $1
     `, [convId]);
 
@@ -1058,11 +1063,11 @@ ${'─'.repeat(60)}
     // Send WhatsApp message
     const messageText = `📹 Link para videochamada: ${videoLink}`;
 
-    if (conv.evolution_url && conv.connection_name && conv.phone) {
+    if (conv.evolution_url && conv.instance_token && conv.phone) {
       try {
-        await fetch(`${conv.evolution_url}/message/sendText/${conv.connection_name}`, {
+        await fetch(`${conv.evolution_url}/send/text`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': conv.evolution_key },
+          headers: { 'Content-Type': 'application/json', 'token': conv.instance_token },
           body: JSON.stringify({ number: conv.phone, text: messageText }),
         });
       } catch (e) {

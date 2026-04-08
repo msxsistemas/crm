@@ -68,6 +68,22 @@ import { csrfMiddleware } from './middleware/csrf.js';
 import { register, httpRequests, httpDuration, wsConnections, queueSize } from './metrics.js';
 import { messageQueue } from './jobs/messageQueue.js';
 
+// ── UZap send helper ──────────────────────────────────────────────────────────
+// Looks up base URL from settings and per-instance token from evolution_connections
+async function uzapSendText(instanceName, phone, text) {
+  const { rows: sRows } = await pool.query('SELECT evolution_url FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+  const uazapUrl = sRows[0]?.evolution_url;
+  if (!uazapUrl) return;
+  const { rows: tRows } = await pool.query('SELECT evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1', [instanceName]).catch(() => ({ rows: [] }));
+  const token = tRows[0]?.evolution_key;
+  if (!token) return;
+  await fetch(`${uazapUrl}/send/text`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'token': token },
+    body: JSON.stringify({ number: phone, text }),
+  });
+}
+
 const fastify = Fastify({ logger: { level: 'warn' }, trustProxy: true });
 
 // CORS
@@ -386,11 +402,7 @@ setInterval(async () => {
     const { rows } = await pool.query("SELECT sm.*, c.connection_name as instance_name, ct.phone FROM scheduled_messages sm JOIN conversations c ON c.id=sm.conversation_id JOIN contacts ct ON ct.id=c.contact_id WHERE sm.status='pending' AND sm.scheduled_at <= NOW()");
     for (const msg of rows) {
       try {
-        await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${msg.instance_name}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-          body: JSON.stringify({ number: msg.phone, text: msg.content })
-        });
+        await uzapSendText(msg.instance_name, msg.phone, msg.content);
         await pool.query("UPDATE scheduled_messages SET status='sent', sent_at=NOW() WHERE id=$1", [msg.id]);
       } catch(e) {
         await pool.query("UPDATE scheduled_messages SET status='error' WHERE id=$1", [msg.id]);
@@ -442,11 +454,7 @@ setInterval(async () => {
               const message = campaign.message
                 .replace(/\{\{nome\}\}/g, contact.name || '')
                 .replace(/\{\{empresa\}\}/g, contact.company || '');
-              await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${campaign.connection_name}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-                body: JSON.stringify({ number: contact.phone, text: message })
-              });
+              await uzapSendText(campaign.connection_name, contact.phone, message);
               await pool.query(
                 'INSERT INTO recurring_campaign_logs (campaign_id, contact_id, status) VALUES ($1,$2,$3)',
                 [campaign.id, contact.id, 'sent']
@@ -479,11 +487,7 @@ setInterval(async () => {
               const message = campaign.message
                 .replace(/\{\{nome\}\}/g, conv.contact_name || '')
                 .replace(/\{\{empresa\}\}/g, conv.contact_company || '');
-              await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${campaign.connection_name}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-                body: JSON.stringify({ number: conv.phone, text: message })
-              });
+              await uzapSendText(campaign.connection_name, conv.phone, message);
               await pool.query(
                 'INSERT INTO recurring_campaign_logs (campaign_id, contact_id, status) VALUES ($1,$2,$3)',
                 [campaign.id, conv.contact_id, 'sent']
@@ -515,11 +519,7 @@ setInterval(async () => {
               const message = campaign.message
                 .replace(/\{\{nome\}\}/g, contact.name || '')
                 .replace(/\{\{empresa\}\}/g, contact.company || '');
-              await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${campaign.connection_name}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-                body: JSON.stringify({ number: contact.phone, text: message })
-              });
+              await uzapSendText(campaign.connection_name, contact.phone, message);
               await pool.query(
                 'INSERT INTO recurring_campaign_logs (campaign_id, contact_id, status) VALUES ($1,$2,$3)',
                 [campaign.id, contact.id, 'sent']
@@ -550,11 +550,7 @@ setInterval(async () => {
     `);
     for (const appt of rows) {
       try {
-        await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${appt.instance_name}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-          body: JSON.stringify({ number: appt.phone, text: `⏰ Lembrete: ${appt.title} em 15 minutos!` })
-        });
+        await uzapSendText(appt.instance_name, appt.phone, `⏰ Lembrete: ${appt.title} em 15 minutos!`);
         await pool.query('UPDATE appointments SET notified=true WHERE id=$1', [appt.id]);
       } catch(e) {}
     }

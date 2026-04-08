@@ -165,11 +165,13 @@ export default async function messageRoutes(fastify) {
 
     // Get conversation + contact + connection settings + meta connection
     const { rows: convRows } = await query(`
-      SELECT c.*, ct.phone, s.evolution_url, s.evolution_key,
+      SELECT c.*, ct.phone, s.evolution_url,
+             COALESCE(ec.evolution_key, '') as evolution_key,
              mc.phone_number_id as meta_phone_number_id, mc.access_token as meta_access_token
       FROM conversations c
       JOIN contacts ct ON ct.id = c.contact_id
       LEFT JOIN settings s ON s.id = 1
+      LEFT JOIN evolution_connections ec ON ec.instance_name = c.connection_name
       LEFT JOIN meta_connections mc ON mc.phone_number_id = c.connection_name
       WHERE c.id = $1
     `, [convId]);
@@ -199,16 +201,15 @@ export default async function messageRoutes(fastify) {
           phoneNumberId: conv.meta_phone_number_id,
           accessToken: conv.meta_access_token,
         }).catch(e => console.error('Enqueue error:', e.message));
-      } else if (conv.evolution_url && conv.connection_name) {
+      } else if (conv.evolution_url && conv.evolution_key) {
         await enqueueSend({
           conversationId: convId,
           messageId: message.id,
           phone: conv.phone,
           content, type, mediaUrl: media_url,
-          provider: 'evolution',
+          provider: 'uazap',
           evolutionUrl: conv.evolution_url,
           evolutionKey: conv.evolution_key,
-          instance: conv.connection_name,
         }).catch(e => console.error('Enqueue error:', e.message));
       }
     }
@@ -234,21 +235,22 @@ export default async function messageRoutes(fastify) {
   });
 
   // Webhook receiver from Evolution API
-  fastify.post('/webhook/evolution', async (req, reply) => {
-    // Validate apikey header matches configured Evolution key
-    const incomingKey = req.headers['apikey'] || req.headers['x-api-key'];
-    if (incomingKey) {
-      try {
-        const { rows } = await query('SELECT evolution_key FROM settings WHERE id=1');
-        const configuredKey = rows[0]?.evolution_key;
-        if (configuredKey && incomingKey !== configuredKey) {
-          return reply.status(401).send({ error: 'Unauthorized' });
-        }
-      } catch { /* if DB fails, allow through */ }
-    }
+  // UZap webhook (primary)
+  fastify.post('/webhook/uazap', async (req, reply) => {
     const payload = req.body;
     try {
-      await handleEvolutionWebhook(payload, fastify);
+      await handleUZapWebhook(payload, fastify);
+    } catch (e) {
+      console.error('UZap Webhook error:', e);
+    }
+    return reply.status(200).send({ ok: true });
+  });
+
+  // Legacy alias — kept for backward compat
+  fastify.post('/webhook/evolution', async (req, reply) => {
+    const payload = req.body;
+    try {
+      await handleUZapWebhook(payload, fastify);
     } catch (e) {
       console.error('Webhook error:', e);
     }
@@ -306,102 +308,64 @@ async function recalculateLeadScore(contactId) {
   await pool.query('UPDATE contacts SET lead_score=$1, lead_score_updated_at=NOW() WHERE id=$2', [score, contactId]);
 }
 
-async function sendEvolutionMessage({ evolutionUrl, evolutionKey, instance, phone, content, type, media_url }) {
-  const url = `${evolutionUrl}/message/sendText/${instance}`;
-  const body = {
-    number: phone,
-    text: content,
-  };
+async function handleUZapWebhook(payload, fastify) {
+  const { EventType, token: instanceToken } = payload;
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
-    body: JSON.stringify(body),
-  });
-  return res.json();
-}
+  // Get UZap base URL from settings
+  const { rows: settingsRows } = await pool.query('SELECT evolution_url FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+  const uazapUrl = settingsRows[0]?.evolution_url || process.env.EVOLUTION_API_URL || '';
 
-// Extract media URL and type from Evolution message object
-function extractMedia(msg) {
-  if (!msg) return { mediaUrl: null, mediaType: null };
-  if (msg.imageMessage)    return { mediaUrl: msg.imageMessage.url    || msg.imageMessage.directPath, mediaType: 'image' };
-  if (msg.videoMessage)    return { mediaUrl: msg.videoMessage.url    || msg.videoMessage.directPath, mediaType: 'video' };
-  if (msg.audioMessage)    return { mediaUrl: msg.audioMessage.url    || msg.audioMessage.directPath, mediaType: 'audio' };
-  if (msg.documentMessage) return { mediaUrl: msg.documentMessage.url || msg.documentMessage.directPath, mediaType: 'document' };
-  if (msg.stickerMessage)  return { mediaUrl: msg.stickerMessage.url  || msg.stickerMessage.directPath, mediaType: 'image' };
-  return { mediaUrl: null, mediaType: null };
-}
-
-async function handleEvolutionWebhook(payload, fastify) {
-  const { event, data, instance } = payload;
+  // Look up instance name from token
+  const { rows: connRows } = await pool.query(
+    'SELECT instance_name FROM evolution_connections WHERE evolution_key=$1 LIMIT 1',
+    [instanceToken]
+  ).catch(() => ({ rows: [] }));
+  const instance = connRows[0]?.instance_name || instanceToken;
 
   // ── Connection status update ──────────────────────────────────────────────
-  if (event === 'connection.update') {
-    const state = data?.state;
+  if (EventType === 'connection') {
+    const rawState = payload.status || payload.state;
+    // Normalise UZap status to legacy 'open'/'close' used across the app
+    const state = rawState === 'connected' ? 'open'
+                : rawState === 'disconnected' ? 'close'
+                : rawState || null;
     fastify.io?.emit('connection:status', { instance, state });
-
-    // Update evolution_connections table
     if (state) {
-      query('UPDATE evolution_connections SET status=$1, updated_at=NOW() WHERE instance_name=$2', [state, instance]).catch(() => {});
+      pool.query('UPDATE evolution_connections SET status=$1, updated_at=NOW() WHERE instance_name=$2', [state, instance]).catch(() => {});
     }
     return;
   }
 
   // ── Read receipts ─────────────────────────────────────────────────────────
-  if (event === 'messages.update') {
-    const updates = Array.isArray(data) ? data : [data];
-    for (const upd of updates) {
-      const externalId = upd?.key?.id;
-      const status = upd?.update?.status;
-      // Status 4 = READ in Evolution API
-      if (externalId && status >= 4) {
-        query('UPDATE messages SET read_at=NOW() WHERE external_id=$1 AND read_at IS NULL', [externalId]).catch(() => {});
-      }
+  if (EventType === 'messages_update') {
+    const externalId = payload.messageid;
+    const status = payload.status;
+    // status = 'read' in UZap
+    if (externalId && (status === 'read' || status === 'READ')) {
+      pool.query('UPDATE messages SET read_at=NOW() WHERE external_id=$1 AND read_at IS NULL', [externalId]).catch(() => {});
     }
     return;
   }
 
   // ── New message ───────────────────────────────────────────────────────────
-  if (event === 'messages.upsert' && (data?.message || data?.key)) {
-    const key = data.key || data.message?.key;
-    const messageContent = data.message;
-    const remoteJid = key?.remoteJid || '';
+  if (EventType === 'messages' || EventType === 'history') {
+    const { chatid, messageid, fromMe, isGroup, messageType, text: rawText, fileURL, senderName, sender } = payload;
 
-    const isGroup = remoteJid.endsWith('@g.us');
-    const phone = isGroup
-      ? remoteJid.replace('@g.us', '')
-      : remoteJid.replace('@s.whatsapp.net', '');
-    if (!phone || key?.fromMe) return;
+    if (fromMe) return;
+    if (!chatid) return;
 
-    // For groups: get sender info from participant field
-    const senderJid = isGroup ? (key?.participant || data?.participant || '') : '';
-    const senderPhone = senderJid.replace('@s.whatsapp.net', '').replace('@g.us', '');
-    const senderName = isGroup ? (data?.pushName || senderPhone || null) : null;
+    const phone = chatid.split('@')[0];
+    if (!phone) return;
 
-    // Ignore protocol/system messages
-    if (messageContent?.protocolMessage || messageContent?.senderKeyDistributionMessage) return;
+    const senderPhone = isGroup ? (sender || '').split('@')[0] : '';
 
-    // Extract text content (including button/list responses)
-    const buttonsResponse = messageContent?.buttonsResponseMessage;
-    const listResponse = messageContent?.listResponseMessage;
-    const textContent = messageContent?.conversation
-      || messageContent?.extendedTextMessage?.text
-      || messageContent?.imageMessage?.caption
-      || messageContent?.videoMessage?.caption
-      || messageContent?.documentMessage?.caption
-      || buttonsResponse?.selectedDisplayText
-      || buttonsResponse?.selectedButtonId
-      || listResponse?.singleSelectReply?.selectedRowId
-      || listResponse?.title
-      || null;
+    // Ignore system messages
+    if (messageType === 'protocolMessage' || messageType === 'senderKeyDistributionMessage') return;
 
-    // Extract media
-    const { mediaUrl, mediaType } = extractMedia(messageContent);
-
-    const isButtonResponse = !!(messageContent?.buttonsResponseMessage);
-    const isListResponse = !!(messageContent?.listResponseMessage);
-    const content = textContent || (mediaType ? `[${mediaType}]` : '[mensagem]');
-    const type = isButtonResponse ? 'button_response' : isListResponse ? 'list_response' : mediaType || (textContent ? 'text' : 'media');
+    const textContent = rawText || null;
+    const mediaUrl = fileURL || null;
+    const content = textContent || (mediaUrl ? `[${messageType || 'mídia'}]` : '[mensagem]');
+    const type = mediaUrl ? (messageType || 'media') : (textContent ? 'text' : 'media');
 
     // Use DB transaction for contact + conversation + message creation
     const client = await pool.connect();
@@ -413,15 +377,14 @@ async function handleEvolutionWebhook(payload, fastify) {
       let { rows: contacts } = await client.query('SELECT * FROM contacts WHERE phone = $1', [phone]);
       contact = contacts[0];
       if (!contact) {
-        // For groups: use groupName or a generic name — never use pushName (that's the sender, not the group)
-        const name = isGroup ? (data.groupName || data.group?.subject || `Grupo ${phone}`) : (data.pushName || phone);
+        const name = isGroup ? (payload.groupName || `Grupo ${phone}`) : (senderName || phone);
         const { rows } = await client.query(
           'INSERT INTO contacts (name, phone, avatar_url, is_group) VALUES ($1,$2,$3,$4) RETURNING *',
-          [name, phone, data.profilePicUrl || null, isGroup]
+          [name, phone, payload.profilePicUrl || null, isGroup]
         );
         contact = rows[0];
-      } else if (data.profilePicUrl && !contact.avatar_url) {
-        await client.query('UPDATE contacts SET avatar_url=$1 WHERE id=$2', [data.profilePicUrl, contact.id]);
+      } else if (payload.profilePicUrl && !contact.avatar_url) {
+        await client.query('UPDATE contacts SET avatar_url=$1 WHERE id=$2', [payload.profilePicUrl, contact.id]);
       }
 
       // Check if contact is blocked — throw a special sentinel so finally can release the client
@@ -476,7 +439,7 @@ async function handleEvolutionWebhook(payload, fastify) {
 
       const { rows: msgRows } = await client.query(
         'INSERT INTO messages (conversation_id, content, direction, type, media_url, external_id, sender_name, sender_phone) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *, content as body, type as media_type, false as from_me',
-        [conv.id, content, 'inbound', type, mediaUrl, key?.id, senderName, senderPhone || null]
+        [conv.id, content, 'inbound', type, mediaUrl, messageid, senderName || null, senderPhone || null]
       );
       msgRow = msgRows[0];
 
@@ -496,63 +459,48 @@ async function handleEvolutionWebhook(payload, fastify) {
     fastify.io?.emit('message:new', { ...msgRow, conversation_id: conv.id });
     fastify.io?.emit('conversation:updated', { id: conv.id });
 
-    // ── Sync group name from Evolution API asynchronously ─────────────────
+    // ── Sync group name via UZap ─────────────────────────────────────────────
     if (isGroup && contact?.name?.startsWith('Grupo ')) {
       (async () => {
         try {
-          const { rows: connRows } = await query(
-            "SELECT evolution_url, evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1",
-            [instance]
-          );
-          const conn = connRows[0];
-          const evoUrl = conn?.evolution_url || 'http://localhost:8080';
-          const evoKey = conn?.evolution_key || process.env.EVOLUTION_API_KEY || '';
-          const res = await fetch(`${evoUrl}/group/findGroupInfos/${instance}?groupJid=${phone}@g.us`, {
-            headers: { 'apikey': evoKey },
+          const res = await fetch(`${uazapUrl}/group/info`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'token': instanceToken },
+            body: JSON.stringify({ groupjid: chatid }),
           });
           if (!res.ok) return;
           const info = await res.json();
-          const subject = info?.subject || info?.name;
-          if (subject) {
-            await query('UPDATE contacts SET name=$1 WHERE id=$2', [subject, contact.id]);
-          }
+          const name = info?.Name || info?.name || info?.subject;
+          if (name) await pool.query('UPDATE contacts SET name=$1 WHERE id=$2', [name, contact.id]);
         } catch { /* silent */ }
       })();
     }
 
-    // ── Download media from WhatsApp and store in MinIO ───────────────────
-    if (mediaType && mediaUrl && msgRow?.id) {
+    // ── Download media via UZap and store in MinIO ───────────────────────────
+    if (mediaUrl && messageid && msgRow?.id) {
       (async () => {
         try {
-          const { rows: connRows } = await query(
-            "SELECT evolution_url, evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1",
-            [instance]
-          );
-          const conn = connRows[0];
-          const evoUrl = conn?.evolution_url || 'http://localhost:8080';
-          const evoKey = conn?.evolution_key || process.env.EVOLUTION_API_KEY || '';
-
-          const res = await fetch(`${evoUrl}/chat/getBase64FromMediaMessage/${instance}`, {
+          const res = await fetch(`${uazapUrl}/message/download`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'apikey': evoKey },
-            body: JSON.stringify({ message: { key, message: messageContent } }),
+            headers: { 'Content-Type': 'application/json', 'token': instanceToken },
+            body: JSON.stringify({ id: messageid, return_base64: true, return_link: true }),
           });
           if (!res.ok) return;
           const json = await res.json();
-          const base64 = json?.base64 || json?.data?.base64;
-          if (!base64) return;
 
-          const extMap = { image: 'jpg', video: 'mp4', audio: 'ogg', document: 'bin', sticker: 'webp' };
-          const ext = extMap[mediaType] || 'bin';
-          const mimeMap = { image: 'image/jpeg', video: 'video/mp4', audio: 'audio/ogg', document: 'application/octet-stream', sticker: 'image/webp' };
-          const mime = mimeMap[mediaType] || 'application/octet-stream';
+          let publicUrl = json?.fileURL;
+          if (!publicUrl && json?.base64Data) {
+            const mime = json?.mimetype || 'application/octet-stream';
+            const ext = mime.split('/')[1]?.split(';')[0] || 'bin';
+            const buf = Buffer.from(json.base64Data, 'base64');
+            const objectName = `whatsapp-media/${instance}/${msgRow.id}.${ext}`;
+            publicUrl = await uploadToMinio(objectName, buf, mime);
+          }
 
-          const buf = Buffer.from(base64, 'base64');
-          const objectName = `whatsapp-media/${instance}/${msgRow.id}.${ext}`;
-          const publicUrl = await uploadToMinio(objectName, buf, mime);
-
-          await query('UPDATE messages SET media_url=$1 WHERE id=$2', [publicUrl, msgRow.id]);
-          fastify.io?.emit('message:updated', { id: msgRow.id, conversation_id: conv.id, media_url: publicUrl });
+          if (publicUrl) {
+            await pool.query('UPDATE messages SET media_url=$1 WHERE id=$2', [publicUrl, msgRow.id]);
+            fastify.io?.emit('message:updated', { id: msgRow.id, conversation_id: conv.id, media_url: publicUrl });
+          }
         } catch { /* silent */ }
       })();
     }
@@ -637,11 +585,13 @@ async function handleEvolutionWebhook(payload, fastify) {
             const msg = (qs[0].queue_message_text || '')
               .replace('{{posicao}}', position)
               .replace('{{tempo}}', Math.ceil(position * 10));
-            await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${instance}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-              body: JSON.stringify({ number: phone, text: msg })
-            });
+            if (uazapUrl) {
+              await fetch(`${uazapUrl}/send/text`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'token': instanceToken },
+                body: JSON.stringify({ number: phone, text: msg })
+              });
+            }
             await pool.query("INSERT INTO messages (conversation_id, content, sender_type, direction) VALUES ($1,$2,'bot','outbound')", [conv.id, msg]);
           }
         } catch(e) {}
@@ -720,11 +670,13 @@ async function handleEvolutionWebhook(payload, fastify) {
           } else if (action.type === 'add_label' && action.label) {
             await pool.query('UPDATE conversations SET labels=array_append(COALESCE(labels,ARRAY[]::text[]),$1) WHERE id=$2', [action.label, conv.id]);
           } else if (action.type === 'send_message' && action.message) {
-            await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${instance}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-              body: JSON.stringify({ number: phone, text: action.message })
-            });
+            if (uazapUrl) {
+              await fetch(`${uazapUrl}/send/text`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'token': instanceToken },
+                body: JSON.stringify({ number: phone, text: action.message })
+              });
+            }
             await pool.query("INSERT INTO messages (conversation_id, content, sender_type) VALUES ($1,$2,'bot')", [conv.id, action.message]);
           }
         }
@@ -770,27 +722,25 @@ async function handleEvolutionWebhook(payload, fastify) {
     })();
 
     // ── Audio transcription — non-blocking ────────────────────────────────
-    if (type === 'audio' || messageContent?.audioMessage) {
+    if ((type === 'audio' || type === 'ptt') && messageid) {
       const openaiKey = process.env.OPENAI_API_KEY;
-      const evolutionUrl = process.env.EVOLUTION_API_URL;
-      const evolutionKey = process.env.EVOLUTION_API_KEY;
-      if (openaiKey && evolutionUrl && msgRow.id) {
+      if (openaiKey && uazapUrl && msgRow.id) {
         (async () => {
           try {
-            const audioResp = await fetch(`${evolutionUrl}/message/download/base64/${instance}`, {
+            const audioResp = await fetch(`${uazapUrl}/message/download`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'apikey': evolutionKey },
-              body: JSON.stringify({ messageId: key?.id })
+              headers: { 'Content-Type': 'application/json', 'token': instanceToken },
+              body: JSON.stringify({ id: messageid, return_base64: true, generate_mp3: true })
             });
             if (!audioResp.ok) return;
             const audioJson = await audioResp.json();
-            const base64 = audioJson?.base64;
+            const base64 = audioJson?.base64Data;
             if (!base64) return;
 
             const audioBuffer = Buffer.from(base64, 'base64');
             const formData = new FormData();
-            const blob = new Blob([audioBuffer], { type: 'audio/ogg' });
-            formData.append('file', blob, 'audio.ogg');
+            const blob = new Blob([audioBuffer], { type: 'audio/mpeg' });
+            formData.append('file', blob, 'audio.mp3');
             formData.append('model', 'whisper-1');
             formData.append('language', 'pt');
 
@@ -802,10 +752,10 @@ async function handleEvolutionWebhook(payload, fastify) {
             if (!whisperResp.ok) return;
             const { text } = await whisperResp.json();
             if (text) {
-              await query('UPDATE messages SET transcription=$1 WHERE id=$2', [text, msgRow.id]);
+              await pool.query('UPDATE messages SET transcription=$1 WHERE id=$2', [text, msgRow.id]);
               fastify.io?.to(`conversation:${conv.id}`).emit('message:transcription', { message_id: msgRow.id, transcription: text });
             }
-          } catch (e) { /* silent */ }
+          } catch { /* silent */ }
         })();
       }
     }
@@ -816,8 +766,6 @@ async function handleEvolutionWebhook(payload, fastify) {
       if (anthropicKey) {
         (async () => {
           try {
-            const msgType = messageContent?.conversation ? 'conversation' : (messageContent?.extendedTextMessage ? 'extendedTextMessage' : null);
-            if (!msgType) return;
             const resp = await fetch('https://api.anthropic.com/v1/messages', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },
@@ -936,11 +884,13 @@ async function handleEvolutionWebhook(payload, fastify) {
             const nextNode = nodes.find(n => n.id === edge.target);
             if (!nextNode) break;
             if (nextNode.type === 'send_message' && nextNode.data && nextNode.data.text) {
-              await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${instance}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-                body: JSON.stringify({ number: phone, text: nextNode.data.text })
-              });
+              if (uazapUrl) {
+                await fetch(`${uazapUrl}/send/text`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'token': instanceToken },
+                  body: JSON.stringify({ number: phone, text: nextNode.data.text })
+                });
+              }
               await pool.query("INSERT INTO messages (conversation_id, content, sender_type, created_at) VALUES ($1,$2,'bot',NOW())", [conv.id, nextNode.data.text]);
             } else if (nextNode.type === 'condition' && nextNode.data && nextNode.data.keyword) {
               const msgLowerFlow = (content || '').toLowerCase();
@@ -960,21 +910,19 @@ async function handleEvolutionWebhook(payload, fastify) {
       );
       const matched = faqRules.find(r => msgLower.includes(r.keyword.toLowerCase()));
       if (matched) {
-        const { rows: evo } = await pool.query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
-        const e = evo[0];
-        if (e?.evolution_url) {
-          await fetch(`${e.evolution_url}/message/sendText/${instance}`, {
+        if (uazapUrl) {
+          await fetch(`${uazapUrl}/send/text`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'apikey': e.evolution_key },
+            headers: { 'Content-Type': 'application/json', 'token': instanceToken },
             body: JSON.stringify({ number: phone, text: matched.response })
           });
-          await pool.query(
-            "INSERT INTO messages (conversation_id, content, direction, type, status) VALUES ($1,$2,'outbound','text','sent')",
-            [conv.id, matched.response]
-          );
-          await pool.query('UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1', [conv.id]);
-          fastify.io?.emit('message:new', { conversation_id: conv.id, content: matched.response, direction: 'outbound', type: 'text' });
         }
+        await pool.query(
+          "INSERT INTO messages (conversation_id, content, direction, type, status) VALUES ($1,$2,'outbound','text','sent')",
+          [conv.id, matched.response]
+        );
+        await pool.query('UPDATE conversations SET last_message_at=NOW(), updated_at=NOW() WHERE id=$1', [conv.id]);
+        fastify.io?.emit('message:new', { conversation_id: conv.id, content: matched.response, direction: 'outbound', type: 'text' });
         return; // FAQ handled — skip chatbot
       }
     } catch(e) { /* FAQ bot error — silent */ }
@@ -997,12 +945,10 @@ async function handleEvolutionWebhook(payload, fastify) {
         })();
         if (!isOpen) {
           const msg = cfg.office_hours_off_message || 'No momento estamos fora do horário de atendimento. Retornaremos em breve!';
-          const { rows: evo } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
-          const e = evo[0];
-          if (e?.evolution_url) {
-            fetch(`${e.evolution_url}/message/sendText/${instance}`, {
+          if (uazapUrl) {
+            fetch(`${uazapUrl}/send/text`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'apikey': e.evolution_key },
+              headers: { 'Content-Type': 'application/json', 'token': instanceToken },
               body: JSON.stringify({ number: phone, text: msg }),
             }).catch(() => {});
           }
@@ -1031,11 +977,13 @@ async function handleEvolutionWebhook(payload, fastify) {
             [conv.id, s[0].out_of_hours_message]
           );
           if (!recent.length) {
-            await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${instance}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-              body: JSON.stringify({ number: phone, text: s[0].out_of_hours_message })
-            });
+            if (uazapUrl) {
+              await fetch(`${uazapUrl}/send/text`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'token': instanceToken },
+                body: JSON.stringify({ number: phone, text: s[0].out_of_hours_message })
+              });
+            }
             await pool.query("INSERT INTO messages (conversation_id, content, sender_type) VALUES ($1,$2,'bot')", [conv.id, s[0].out_of_hours_message]);
           }
         }
@@ -1130,13 +1078,11 @@ async function handleEvolutionWebhook(payload, fastify) {
           return; // no auto-reply on handoff
         }
 
-        // Send reply via Evolution API
-        const { rows: evoSet } = await pool.query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
-        const evo = evoSet[0];
-        if (evo?.evolution_url) {
-          await fetch(`${evo.evolution_url}/message/sendText/${instance}`, {
+        // Send reply via UZap API
+        if (uazapUrl) {
+          await fetch(`${uazapUrl}/send/text`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'apikey': evo.evolution_key },
+            headers: { 'Content-Type': 'application/json', 'token': instanceToken },
             body: JSON.stringify({ number: phone, text: botReply })
           });
         }
@@ -1179,17 +1125,14 @@ async function handleEvolutionWebhook(payload, fastify) {
       const response = rule.response_text || rule.message;
       if (!response) continue;
 
-      // Get Evolution settings
-      const { rows: settings } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
-      const s = settings[0];
-      if (!s?.evolution_url) break;
+      if (!uazapUrl) break;
 
       // Send auto-reply after 1s delay
       setTimeout(async () => {
         try {
-          await fetch(`${s.evolution_url}/message/sendText/${instance}`, {
+          await fetch(`${uazapUrl}/send/text`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'apikey': s.evolution_key },
+            headers: { 'Content-Type': 'application/json', 'token': instanceToken },
             body: JSON.stringify({ number: phone, text: response }),
           });
           // Save bot message in DB

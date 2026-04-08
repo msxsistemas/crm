@@ -23,7 +23,7 @@ export async function sendMedia(
   mediaType: string,
   caption?: string
 ) {
-  return api.post('/evolution-proxy', { action: 'message/sendMedia', instanceName, data: { number: phone, mediaUrl, mediaType, caption } });
+  return api.post('/evolution/send-media', { instanceName, phone, fileUrl: mediaUrl, mediaType, caption });
 }
 
 export async function listInstances() {

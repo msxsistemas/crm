@@ -283,21 +283,40 @@ export default async function misc3Routes(fastify) {
     return { ok: true };
   });
 
-  // ── Evolution Proxy ───────────────────────────────────────────────────────
-  // Helper: get evolution settings
+  // ── UZap Proxy ────────────────────────────────────────────────────────────
+  // Helper: get UZap global settings
   async function getEvoSettings() {
     const { rows } = await query('SELECT evolution_url, evolution_key FROM settings WHERE id=1');
     return rows[0] || null;
   }
-  async function evoFetch(s, method, path, body) {
-    const res = await fetch(`${s.evolution_url}${path}`, {
+  // Helper: get per-instance token from DB
+  async function getInstanceToken(instanceName) {
+    const { rows } = await query('SELECT evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1', [instanceName]);
+    return rows[0]?.evolution_key || null;
+  }
+  // Fetch with instance token
+  async function uzapFetch(baseUrl, token, method, path, body) {
+    const res = await fetch(`${baseUrl}${path}`, {
       method,
-      headers: { 'Content-Type': 'application/json', 'apikey': s.evolution_key },
+      headers: { 'Content-Type': 'application/json', 'token': token },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || err.error || `Evolution API ${res.status}`);
+      throw new Error(err.message || err.error || `UZap API ${res.status}`);
+    }
+    return res.json();
+  }
+  // Fetch with admin token
+  async function uzapAdminFetch(baseUrl, adminToken, method, path, body) {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'admintoken': adminToken },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || err.error || `UZap API ${res.status}`);
     }
     return res.json();
   }
@@ -305,14 +324,18 @@ export default async function misc3Routes(fastify) {
   // Create instance
   fastify.post('/evolution/instance/create', auth, async (req, reply) => {
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return reply.status(400).send({ error: 'Evolution API não configurada nas Configurações' });
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'UZap API não configurada nas Configurações' });
     const { instanceName } = req.body;
     try {
-      const data = await evoFetch(s, 'POST', '/instance/create', {
-        instanceName,
-        qrcode: true,
-        integration: 'WHATSAPP-BAILEYS',
-      });
+      const data = await uzapAdminFetch(s.evolution_url, s.evolution_key, 'POST', '/instance/create', { name: instanceName });
+      // data = { token, name, instance: {...} }
+      // Persist token in evolution_connections so future calls can look it up
+      if (data.token) {
+        await query(
+          `UPDATE evolution_connections SET evolution_key=$1 WHERE instance_name=$2`,
+          [data.token, data.name || instanceName]
+        ).catch(() => {});
+      }
       return data;
     } catch (e) {
       return reply.status(500).send({ error: e.message });
@@ -322,21 +345,23 @@ export default async function misc3Routes(fastify) {
   // List all instances
   fastify.get('/evolution/instance/list', auth, async (req, reply) => {
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return reply.status(400).send({ error: 'Evolution API não configurada' });
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'UZap API não configurada' });
     try {
-      const data = await evoFetch(s, 'GET', '/instance/fetchInstances');
+      const data = await uzapAdminFetch(s.evolution_url, s.evolution_key, 'GET', '/instance/all');
       return Array.isArray(data) ? data : [];
     } catch (e) {
       return reply.status(500).send({ error: e.message });
     }
   });
 
-  // Get QR code
+  // Get QR code / connect
   fastify.get('/evolution/instance/qr/:instanceName', auth, async (req, reply) => {
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return reply.status(400).send({ error: 'Evolution API não configurada' });
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'UZap API não configurada' });
+    const instanceToken = await getInstanceToken(req.params.instanceName);
+    if (!instanceToken) return reply.status(404).send({ error: 'Token da instância não encontrado' });
     try {
-      const data = await evoFetch(s, 'GET', `/instance/connect/${req.params.instanceName}`);
+      const data = await uzapFetch(s.evolution_url, instanceToken, 'POST', '/instance/connect', {});
       return data;
     } catch (e) {
       return reply.status(500).send({ error: e.message });
@@ -346,11 +371,12 @@ export default async function misc3Routes(fastify) {
   // Get instance status
   fastify.get('/evolution/instance/status/:instanceName', auth, async (req, reply) => {
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return reply.status(400).send({ error: 'Evolution API não configurada' });
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'UZap API não configurada' });
+    const instanceToken = await getInstanceToken(req.params.instanceName);
+    if (!instanceToken) return {};
     try {
-      const data = await evoFetch(s, 'GET', `/instance/fetchInstances?instanceName=${req.params.instanceName}`);
-      const instance = Array.isArray(data) ? data[0] : data;
-      return instance || {};
+      const data = await uzapFetch(s.evolution_url, instanceToken, 'GET', '/instance/status', undefined);
+      return data || {};
     } catch (e) {
       return reply.status(500).send({ error: e.message });
     }
@@ -359,17 +385,14 @@ export default async function misc3Routes(fastify) {
   // Set webhook
   fastify.post('/evolution/instance/webhook/:instanceName', auth, async (req, reply) => {
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return reply.status(400).send({ error: 'Evolution API não configurada' });
-    const webhookUrl = req.body?.webhookUrl || `${process.env.BACKEND_URL || 'https://api.msxzap.pro'}/webhook/evolution`;
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'UZap API não configurada' });
+    const instanceToken = await getInstanceToken(req.params.instanceName);
+    if (!instanceToken) return reply.status(404).send({ error: 'Token da instância não encontrado' });
+    const webhookUrl = req.body?.webhookUrl || `${process.env.BACKEND_URL || 'https://api.msxzap.pro'}/webhook/uazap`;
     try {
-      const data = await evoFetch(s, 'POST', `/webhook/set/${req.params.instanceName}`, {
-        webhook: {
-          enabled: true,
-          url: webhookUrl,
-          webhookByEvents: false,
-          webhookBase64: false,
-          events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED', 'SEND_MESSAGE'],
-        },
+      const data = await uzapFetch(s.evolution_url, instanceToken, 'POST', '/webhook', {
+        url: webhookUrl,
+        events: ['messages', 'connection', 'messages_update'],
       });
       return data;
     } catch (e) {
@@ -380,23 +403,52 @@ export default async function misc3Routes(fastify) {
   // Delete instance
   fastify.delete('/evolution/instance/:instanceName', auth, async (req, reply) => {
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return reply.status(400).send({ error: 'Evolution API não configurada' });
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'UZap API não configurada' });
+    const instanceToken = await getInstanceToken(req.params.instanceName);
+    if (!instanceToken) return reply.status(404).send({ error: 'Token da instância não encontrado' });
     try {
-      const data = await evoFetch(s, 'DELETE', `/instance/delete/${req.params.instanceName}`);
+      const data = await uzapFetch(s.evolution_url, instanceToken, 'DELETE', '/instance', undefined);
       return data;
     } catch (e) {
       return reply.status(500).send({ error: e.message });
     }
   });
 
-  // Legacy proxy (kept for backward compat)
+  // Legacy proxy (kept for backward compat — maps to UZap send/text)
   fastify.post('/evolution-proxy', auth, async (req, reply) => {
-    const { action, instanceName, data: body } = req.body || {};
+    const { instanceName, data: body } = req.body || {};
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return { data: null, error: { message: 'Evolution API não configurada' } };
+    if (!s?.evolution_url) return { data: null, error: { message: 'UZap API não configurada' } };
+    const instanceToken = await getInstanceToken(instanceName);
+    if (!instanceToken) return { data: null, error: { message: 'Token da instância não encontrado' } };
     try {
-      const url = `${s.evolution_url}/${action || 'message/sendText'}/${instanceName}`;
-      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': s.evolution_key }, body: JSON.stringify(body) });
+      const res = await fetch(`${s.evolution_url}/send/text`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'token': instanceToken },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      return { data, error: null };
+    } catch (e) {
+      return reply.status(500).send({ data: null, error: { message: e.message } });
+    }
+  });
+
+  // Send media via UZap
+  fastify.post('/evolution/send-media', auth, async (req, reply) => {
+    const { instanceName, phone, fileUrl, mediaType, caption } = req.body || {};
+    if (!instanceName || !phone || !fileUrl) return reply.status(400).send({ error: 'instanceName, phone e fileUrl são obrigatórios' });
+    const s = await getEvoSettings();
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'UZap API não configurada' });
+    const instanceToken = await getInstanceToken(instanceName);
+    if (!instanceToken) return reply.status(404).send({ error: 'Token da instância não encontrado' });
+    const uzType = mediaType === 'audio' ? 'ptt' : (mediaType || 'document');
+    try {
+      const res = await fetch(`${s.evolution_url}/send/media`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'token': instanceToken },
+        body: JSON.stringify({ number: phone, type: uzType, file: fileUrl, text: caption || '' }),
+      });
       const data = await res.json();
       return { data, error: null };
     } catch (e) {
@@ -537,28 +589,35 @@ export default async function misc3Routes(fastify) {
     await query('DELETE FROM hsm_templates_local WHERE id=$1', [req.params.id]);
     return { ok: true };
   });
-  // Send HSM template to a conversation
+  // Send HSM template to a conversation (via UZap — sends template body as plain text)
   fastify.post('/conversations/:id/send-hsm', auth, async (req) => {
-    const { template_name, language_code, variables } = req.body;
+    const { template_name, variables } = req.body;
     const { rows } = await query(
-      'SELECT c.instance_name, ct.phone FROM conversations c JOIN contacts ct ON ct.id=c.contact_id WHERE c.id=$1',
+      `SELECT c.connection_name, ct.phone,
+              ec.evolution_key AS instance_token, s.evolution_url AS uazap_url
+       FROM conversations c
+       JOIN contacts ct ON ct.id=c.contact_id
+       LEFT JOIN evolution_connections ec ON ec.instance_name=c.connection_name
+       LEFT JOIN settings s ON s.id=1
+       WHERE c.id=$1`,
       [req.params.id]
     );
     if (!rows[0]) return { ok: false };
+    const { uazap_url, instance_token, phone } = rows[0];
+    if (!uazap_url || !instance_token) return { ok: false };
 
-    // Build components with variables
-    const components = variables && variables.length ? [{
-      type: 'body',
-      parameters: variables.map(v => ({ type: 'text', text: v }))
-    }] : [];
+    // Look up template body from local templates table
+    const { rows: tmpl } = await query('SELECT body_text FROM hsm_templates_local WHERE name=$1 LIMIT 1', [template_name]);
+    let text = tmpl[0]?.body_text || `[Template: ${template_name}]`;
+    // Replace {{1}}, {{2}}, ... with variables
+    if (variables?.length) {
+      variables.forEach((v, i) => { text = text.replace(`{{${i + 1}}}`, v); });
+    }
 
-    const resp = await fetch(`${process.env.EVOLUTION_API_URL}/message/sendTemplate/${rows[0].instance_name}`, {
+    const resp = await fetch(`${uazap_url}/send/text`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-      body: JSON.stringify({
-        number: rows[0].phone,
-        template: { name: template_name, language: { code: language_code || 'pt_BR' }, components }
-      })
+      headers: { 'Content-Type': 'application/json', 'token': instance_token },
+      body: JSON.stringify({ number: phone, text }),
     });
     return { ok: resp.ok };
   });
@@ -567,22 +626,26 @@ export default async function misc3Routes(fastify) {
   fastify.get('/whatsapp/groups/:instance', auth, async (req) => {
     const s = await getEvoSettings();
     if (!s?.evolution_url) return [];
-    const resp = await fetch(`${s.evolution_url}/group/fetchAllGroups/${req.params.instance}?getParticipants=false`, {
-      headers: { 'apikey': s.evolution_key }
+    const instanceToken = await getInstanceToken(req.params.instance);
+    if (!instanceToken) return [];
+    const resp = await fetch(`${s.evolution_url}/group/list`, {
+      headers: { 'token': instanceToken }
     });
     if (!resp.ok) return [];
     const data = await resp.json();
-    return Array.isArray(data) ? data.map(g => ({ id: g.id, subject: g.subject, size: g.size })) : [];
+    return Array.isArray(data) ? data.map(g => ({ id: g.id || g.groupjid, subject: g.Name || g.subject, size: g.MembersCount || g.size })) : [];
   });
 
   fastify.post('/whatsapp/groups/:instance/send', auth, async (req, reply) => {
     const { group_id, text } = req.body;
     if (!group_id || !text) return reply.code(400).send({ error: 'group_id e text são obrigatórios' });
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return reply.code(400).send({ error: 'Evolution API não configurada' });
-    const resp = await fetch(`${s.evolution_url}/message/sendText/${req.params.instance}`, {
+    if (!s?.evolution_url) return reply.code(400).send({ error: 'UZap API não configurada' });
+    const instanceToken = await getInstanceToken(req.params.instance);
+    if (!instanceToken) return reply.code(400).send({ error: 'Token da instância não encontrado' });
+    const resp = await fetch(`${s.evolution_url}/send/text`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': s.evolution_key },
+      headers: { 'Content-Type': 'application/json', 'token': instanceToken },
       body: JSON.stringify({ number: group_id, text })
     });
     return { ok: resp.ok };
@@ -798,9 +861,15 @@ export default async function misc3Routes(fastify) {
   fastify.post('/public/v1/messages', { preHandler: apiKeyAuth }, async (req, reply) => {
     const { phone, text, instance_name } = req.body;
     if (!phone || !text) return reply.code(400).send({ error: 'phone and text are required' });
-    const resp = await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${instance_name}`, {
+    const { rows: sRows } = await query('SELECT evolution_url FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+    const uazapUrl = sRows[0]?.evolution_url;
+    if (!uazapUrl) return reply.code(400).send({ error: 'UZap API não configurada' });
+    const { rows: tokRows } = await query('SELECT evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1', [instance_name]).catch(() => ({ rows: [] }));
+    const instanceToken = tokRows[0]?.evolution_key;
+    if (!instanceToken) return reply.code(400).send({ error: 'Token da instância não encontrado' });
+    const resp = await fetch(`${uazapUrl}/send/text`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
+      headers: { 'Content-Type': 'application/json', 'token': instanceToken },
       body: JSON.stringify({ number: phone, text })
     });
     return { ok: resp.ok };
@@ -1056,46 +1125,38 @@ export default async function misc3Routes(fastify) {
   });
 
   // ── Interactive WhatsApp Messages (Buttons & Lists) ────────────────────────
+  // UZap does not support native buttons/lists — sends as plain text fallback
   fastify.post('/conversations/:id/send-interactive', auth, async (req, reply) => {
     const { type, body_text, buttons, sections, header_text, footer_text } = req.body;
     const { rows } = await query(
-      'SELECT c.name as connection_name, ct.phone FROM conversations cv JOIN contacts ct ON ct.id=cv.contact_id JOIN connections c ON c.name=cv.connection_name WHERE cv.id=$1',
+      `SELECT cv.connection_name, ct.phone,
+              ec.evolution_key AS instance_token, s.evolution_url AS uazap_url
+       FROM conversations cv
+       JOIN contacts ct ON ct.id=cv.contact_id
+       LEFT JOIN evolution_connections ec ON ec.instance_name=cv.connection_name
+       LEFT JOIN settings s ON s.id=1
+       WHERE cv.id=$1`,
       [req.params.id]
     );
     if (!rows[0]) return reply.status(404).send({ error: 'Conversa não encontrada' });
-    const { connection_name, phone } = rows[0];
+    const { connection_name, phone, instance_token, uazap_url } = rows[0];
 
-    let payload;
-    if (type === 'button') {
-      payload = {
-        number: phone,
-        buttonMessage: {
-          text: body_text,
-          buttons: (buttons || []).map((b, i) => ({ buttonId: `btn${i}`, buttonText: { displayText: b }, type: 1 })),
-          headerType: 1
+    if (uazap_url && instance_token) {
+      // Build plain text fallback
+      let text = body_text || '';
+      if (type === 'button' && buttons?.length) {
+        text += '\n\n' + buttons.map((b, i) => `${i + 1}. ${b}`).join('\n');
+      } else if (type === 'list' && sections?.length) {
+        for (const sec of sections) {
+          if (sec.title) text += `\n\n*${sec.title}*`;
+          if (sec.rows?.length) text += '\n' + sec.rows.map((r, i) => `${i + 1}. ${r.title || r}`).join('\n');
         }
-      };
-      await fetch(`${process.env.EVOLUTION_API_URL}/message/sendButtons/${connection_name}`, {
+      }
+      await fetch(`${uazap_url}/send/text`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-        body: JSON.stringify(payload)
-      });
-    } else if (type === 'list') {
-      payload = {
-        number: phone,
-        listMessage: {
-          title: header_text || '',
-          description: body_text,
-          buttonText: 'Ver opções',
-          footerText: footer_text || '',
-          sections: sections || []
-        }
-      };
-      await fetch(`${process.env.EVOLUTION_API_URL}/message/sendList/${connection_name}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-        body: JSON.stringify(payload)
-      });
+        headers: { 'Content-Type': 'application/json', 'token': instance_token },
+        body: JSON.stringify({ number: phone, text })
+      }).catch(() => {});
     }
 
     const { rows: savedMsg } = await query(
@@ -1506,11 +1567,19 @@ export default async function misc3Routes(fastify) {
       );
       if (conv[0] && external_url) {
         const msg = `💳 *Link de Pagamento*\n📋 ${description}\n💰 R$ ${parseFloat(amount).toFixed(2)}\n\n🔗 ${external_url}`;
-        await fetch(`${process.env.EVOLUTION_API_URL}/message/sendText/${conv[0].connection_name}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': process.env.EVOLUTION_API_KEY },
-          body: JSON.stringify({ number: conv[0].phone, text: msg })
-        }).catch(() => {});
+        const { rows: plSRows } = await query('SELECT evolution_url FROM settings WHERE id=1').catch(() => ({ rows: [] }));
+        const plUrl = plSRows[0]?.evolution_url;
+        if (plUrl) {
+          const { rows: plTokRows } = await query('SELECT evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1', [conv[0].connection_name]).catch(() => ({ rows: [] }));
+          const plToken = plTokRows[0]?.evolution_key;
+          if (plToken) {
+            await fetch(`${plUrl}/send/text`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'token': plToken },
+              body: JSON.stringify({ number: conv[0].phone, text: msg })
+            }).catch(() => {});
+          }
+        }
         await query("INSERT INTO messages (conversation_id, content, sender_type) VALUES ($1,$2,'agent')", [conversation_id, msg]).catch(() => {});
       }
     }
@@ -2550,19 +2619,26 @@ ${conversationContext ? `Contexto da conversa atual:\n${conversationContext}\n\n
         [conversation_id]
       ).catch(() => ({ rows: [] }));
       if (cRows[0]) {
-        const msg1 = `💳 Cobrança Pix\n${description || ''}\nValor: R$ ${parseFloat(amount).toFixed(2).replace('.', ',')}\n\nUse o código Pix abaixo para pagar:`;
-        fetch(`${sRows[0].evolution_url}/message/sendText/${cRows[0].connection_name}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': sRows[0].evolution_key },
-          body: JSON.stringify({ number: cRows[0].phone, text: msg1 }),
-        }).catch(() => {});
-        setTimeout(() => {
-          fetch(`${sRows[0].evolution_url}/message/sendText/${cRows[0].connection_name}`, {
+        const { rows: tokRows } = await query(
+          'SELECT evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1',
+          [cRows[0].connection_name]
+        ).catch(() => ({ rows: [] }));
+        const instanceToken = tokRows[0]?.evolution_key;
+        if (instanceToken) {
+          const msg1 = `💳 Cobrança Pix\n${description || ''}\nValor: R$ ${parseFloat(amount).toFixed(2).replace('.', ',')}\n\nUse o código Pix abaixo para pagar:`;
+          fetch(`${sRows[0].evolution_url}/send/text`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'apikey': sRows[0].evolution_key },
-            body: JSON.stringify({ number: cRows[0].phone, text: payload }),
+            headers: { 'Content-Type': 'application/json', 'token': instanceToken },
+            body: JSON.stringify({ number: cRows[0].phone, text: msg1 }),
           }).catch(() => {});
-        }, 1500);
+          setTimeout(() => {
+            fetch(`${sRows[0].evolution_url}/send/text`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'token': instanceToken },
+              body: JSON.stringify({ number: cRows[0].phone, text: payload }),
+            }).catch(() => {});
+          }, 1500);
+        }
       }
     }
 

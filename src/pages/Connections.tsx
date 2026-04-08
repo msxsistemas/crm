@@ -201,15 +201,20 @@ const Connections = () => {
         allNames.map(async (name) => {
           try {
             const statusResult = await getInstanceStatus(name) as any;
-            const connectionStatus = statusResult?.connectionStatus || statusResult?.instance?.state || statusResult?.state;
+            // UZap: statusResult.instance.status | Evolution fallback fields
+            const connectionStatus = statusResult?.instance?.status || statusResult?.connectionStatus || statusResult?.instance?.state || statusResult?.state;
 
             if (!connectionStatus || connectionStatus === 'not_found') {
               return { instanceName: name, __missing: true } as any;
             }
 
-            const status = connectionStatus;
-            const ownerJid = statusResult?.ownerJid || statusResult?.instance?.owner || "";
-            const profilePicUrl = statusResult?.profilePicUrl || statusResult?.instance?.profilePictureUrl || "";
+            // Normalise UZap 'connected'/'disconnected' → legacy 'open'/'close'
+            const status = connectionStatus === 'connected' ? 'open'
+                         : connectionStatus === 'disconnected' ? 'close'
+                         : connectionStatus;
+            const ownerJid = statusResult?.instance?.owner || statusResult?.ownerJid || "";
+            // UZap: profilePicUrl (not profilePictureUrl)
+            const profilePicUrl = statusResult?.instance?.profilePicUrl || statusResult?.profilePicUrl || statusResult?.instance?.profilePictureUrl || "";
 
             // Update status in backend DB
             api.patch('/evolution-connections', { instance_name: name, status, owner_jid: ownerJid, profile_pic_url: profilePicUrl }).catch(() => {});
@@ -274,11 +279,12 @@ const Connections = () => {
       setNewQrLoading(true);
       try {
         const result = await getQRCode(name);
-        const qr = result?.qrcode?.base64 || result?.base64 || null;
+        // UZap: result.instance.qrcode is a full data URI string
+        const qr = result?.instance?.qrcode || result?.qrcode?.base64 || result?.base64 || null;
         if (qr) setNewQr(qr);
         // Check if connected
         const status = await getInstanceStatus(name);
-        const state = status?.instance?.state || status?.state;
+        const state = status?.instance?.status || status?.instance?.state || status?.state;
         if (state === 'open' || state === 'connected') {
           stopNewQrPolling();
           setNewStep('connected');
@@ -301,7 +307,7 @@ const Connections = () => {
       let initialQr: string | null = null;
       try {
         const created = await createInstance(name) as any;
-        initialQr = created?.qrcode?.base64 || created?.base64 || null;
+        initialQr = created?.instance?.qrcode || created?.qrcode?.base64 || created?.base64 || null;
       } catch {}
       try { await setupWebhook(name); } catch {}
       setNewStep('qr');
@@ -355,7 +361,8 @@ const Connections = () => {
     try {
       const result = await getInstanceStatus(instanceName);
 
-      const connectionStatus = (result as any)?.connectionStatus || result?.instance?.state || result?.state;
+      // UZap: result.instance.status | Evolution fallback
+      const connectionStatus = (result as any)?.instance?.status || (result as any)?.connectionStatus || (result as any)?.instance?.state || (result as any)?.state;
       if (!connectionStatus || connectionStatus === "not_found") {
         api.delete(`/evolution-connections?instance_name=${instanceName}`).catch(() => {});
         setInstances((prev) => prev.filter((item) => item.instanceName !== instanceName));
@@ -363,8 +370,8 @@ const Connections = () => {
         return;
       }
 
-      const isConnected = connectionStatus === "open";
-      const ownerJid = (result as any)?.ownerJid || result?.instance?.ownerJid || null;
+      const isConnected = connectionStatus === "connected" || connectionStatus === "open";
+      const ownerJid = (result as any)?.instance?.owner || (result as any)?.ownerJid || (result as any)?.instance?.ownerJid || null;
 
       api.patch('/evolution-connections', {
         instance_name: instanceName,
@@ -414,8 +421,8 @@ const Connections = () => {
       try {
         // Check if already connected
         const status = await getInstanceStatus(instanceName) as any;
-        const state = status?.instance?.state || status?.state || status?.connectionStatus;
-        if (state === 'open' || state === 'connected') {
+        const state = status?.instance?.status || status?.instance?.state || status?.state || status?.connectionStatus;
+        if (state === 'connected' || state === 'open') {
           stopQrAutoRefresh();
           setQrOpen(false);
           fetchInstances();
@@ -432,7 +439,7 @@ const Connections = () => {
           toast.error(`Instância ${instanceName} não existe mais`);
           return;
         }
-        const qr = result?.qrcode?.base64 || result?.base64 || result?.code || null;
+        const qr = result?.instance?.qrcode || result?.qrcode?.base64 || result?.base64 || result?.code || null;
         if (qr) setQrData(qr);
       } catch {
         // silently ignore errors during polling
