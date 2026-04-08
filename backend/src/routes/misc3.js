@@ -326,22 +326,24 @@ export default async function misc3Routes(fastify) {
     const s = await getEvoSettings();
     if (!s?.evolution_url) return reply.status(400).send({ error: 'UZap API não configurada nas Configurações' });
     const { instanceName } = req.body;
+    if (!instanceName?.trim()) return reply.status(400).send({ error: 'Nome da instância é obrigatório' });
     try {
-      const data = await uzapAdminFetch(s.evolution_url, s.evolution_key, 'POST', '/instance/create', { name: instanceName });
+      const data = await uzapAdminFetch(s.evolution_url, s.evolution_key, 'POST', '/instance/create', { name: instanceName.trim() });
       // data = { token, name, instance: {...} }
       const token = data.token || '';
-      const name = data.name || instanceName;
-      // Upsert connection record
+      const name = data.name || instanceName.trim();
+      // Save connection linked to the user who created it
       await query(
-        `INSERT INTO evolution_connections (id, name, evolution_url, evolution_key, instance_name, status)
-         VALUES (uuid_generate_v4(), $1, $2, $3, $4, 'connecting')
-         ON CONFLICT DO NOTHING`,
-        [name, s.evolution_url, token, name]
-      ).catch(() => {});
-      // Set webhook immediately
+        `INSERT INTO evolution_connections (id, user_id, name, evolution_url, evolution_key, instance_name, status)
+         VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5, 'connecting')
+         ON CONFLICT (user_id, instance_name) DO UPDATE SET evolution_key=$4, status='connecting', updated_at=NOW()`,
+        [req.user.id, name, s.evolution_url, token, name]
+      );
+      // Configure webhook immediately
       const webhookUrl = `${process.env.BACKEND_URL || 'https://api.msxzap.pro'}/webhook/uazap`;
       uzapFetch(s.evolution_url, token, 'POST', '/webhook', {
         url: webhookUrl,
+        enabled: true,
         events: ['messages', 'connection', 'messages_update'],
       }).catch(() => {});
       return data;
