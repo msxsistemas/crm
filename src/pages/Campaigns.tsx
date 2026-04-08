@@ -432,7 +432,7 @@ const Campaigns = () => {
     }
 
     if (!instanceName) {
-      toast.error("Nenhuma conexão UZap disponível");
+      toast.error("Nenhuma conexão Msx API disponível");
       setExecutingCampaign(null);
       await db.from("campaigns").update({ status: "paused" }).eq("id", campaignId);
       return;

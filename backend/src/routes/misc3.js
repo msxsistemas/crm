@@ -303,7 +303,7 @@ export default async function misc3Routes(fastify) {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || err.error || `UZap API ${res.status}`);
+      throw new Error(err.message || err.error || `Msx API ${res.status}`);
     }
     return res.json();
   }
@@ -316,7 +316,7 @@ export default async function misc3Routes(fastify) {
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || err.error || `UZap API ${res.status}`);
+      throw new Error(err.message || err.error || `Msx API ${res.status}`);
     }
     return res.json();
   }
@@ -324,7 +324,7 @@ export default async function misc3Routes(fastify) {
   // Create instance
   fastify.post('/evolution/instance/create', auth, async (req, reply) => {
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return reply.status(400).send({ error: 'UZap API não configurada nas Configurações' });
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'Msx API não configurada nas Configurações' });
     const { instanceName } = req.body;
     if (!instanceName?.trim()) return reply.status(400).send({ error: 'Nome da instância é obrigatório' });
     try {
@@ -355,7 +355,7 @@ export default async function misc3Routes(fastify) {
   // List all instances
   fastify.get('/evolution/instance/list', auth, async (req, reply) => {
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return reply.status(400).send({ error: 'UZap API não configurada' });
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'Msx API não configurada' });
     try {
       const data = await uzapAdminFetch(s.evolution_url, s.evolution_key, 'GET', '/instance/all');
       return Array.isArray(data) ? data : [];
@@ -367,7 +367,7 @@ export default async function misc3Routes(fastify) {
   // Get QR code / connect
   fastify.get('/evolution/instance/qr/:instanceName', auth, async (req, reply) => {
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return reply.status(400).send({ error: 'UZap API não configurada' });
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'Msx API não configurada' });
     const instanceToken = await getInstanceToken(req.params.instanceName);
     if (!instanceToken) return reply.status(404).send({ error: 'Token da instância não encontrado' });
     try {
@@ -395,7 +395,7 @@ export default async function misc3Routes(fastify) {
   // Set webhook
   fastify.post('/evolution/instance/webhook/:instanceName', auth, async (req, reply) => {
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return reply.status(400).send({ error: 'UZap API não configurada' });
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'Msx API não configurada' });
     const instanceToken = await getInstanceToken(req.params.instanceName);
     if (!instanceToken) return reply.status(404).send({ error: 'Token da instância não encontrado' });
     const webhookUrl = req.body?.webhookUrl || `${process.env.BACKEND_URL || 'https://api.msxzap.pro'}/webhook/uazap`;
@@ -413,7 +413,7 @@ export default async function misc3Routes(fastify) {
   // Delete instance
   fastify.delete('/evolution/instance/:instanceName', auth, async (req, reply) => {
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return reply.status(400).send({ error: 'UZap API não configurada' });
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'Msx API não configurada' });
     const instanceToken = await getInstanceToken(req.params.instanceName);
     if (!instanceToken) return reply.status(404).send({ error: 'Token da instância não encontrado' });
     try {
@@ -428,7 +428,7 @@ export default async function misc3Routes(fastify) {
   fastify.post('/evolution-proxy', auth, async (req, reply) => {
     const { action, instanceName, data: body } = req.body || {};
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return { data: null, error: { message: 'UZap API não configurada' } };
+    if (!s?.evolution_url) return { data: null, error: { message: 'Msx API não configurada' } };
     const instanceToken = await getInstanceToken(instanceName);
     if (!instanceToken) return { data: null, error: { message: 'Token da instância não encontrado' } };
 
@@ -475,7 +475,7 @@ export default async function misc3Routes(fastify) {
     const { instanceName, phone, fileUrl, mediaType, caption } = req.body || {};
     if (!instanceName || !phone || !fileUrl) return reply.status(400).send({ error: 'instanceName, phone e fileUrl são obrigatórios' });
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return reply.status(400).send({ error: 'UZap API não configurada' });
+    if (!s?.evolution_url) return reply.status(400).send({ error: 'Msx API não configurada' });
     const instanceToken = await getInstanceToken(instanceName);
     if (!instanceToken) return reply.status(404).send({ error: 'Token da instância não encontrado' });
     const uzType = mediaType === 'audio' ? 'ptt' : (mediaType || 'document');
@@ -676,7 +676,7 @@ export default async function misc3Routes(fastify) {
     const { group_id, text } = req.body;
     if (!group_id || !text) return reply.code(400).send({ error: 'group_id e text são obrigatórios' });
     const s = await getEvoSettings();
-    if (!s?.evolution_url) return reply.code(400).send({ error: 'UZap API não configurada' });
+    if (!s?.evolution_url) return reply.code(400).send({ error: 'Msx API não configurada' });
     const instanceToken = await getInstanceToken(req.params.instance);
     if (!instanceToken) return reply.code(400).send({ error: 'Token da instância não encontrado' });
     const resp = await fetch(`${s.evolution_url}/send/text`, {
@@ -899,7 +899,7 @@ export default async function misc3Routes(fastify) {
     if (!phone || !text) return reply.code(400).send({ error: 'phone and text are required' });
     const { rows: sRows } = await query('SELECT evolution_url FROM settings WHERE id=1').catch(() => ({ rows: [] }));
     const uazapUrl = sRows[0]?.evolution_url;
-    if (!uazapUrl) return reply.code(400).send({ error: 'UZap API não configurada' });
+    if (!uazapUrl) return reply.code(400).send({ error: 'Msx API não configurada' });
     const { rows: tokRows } = await query('SELECT evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1', [instance_name]).catch(() => ({ rows: [] }));
     const instanceToken = tokRows[0]?.evolution_key;
     if (!instanceToken) return reply.code(400).send({ error: 'Token da instância não encontrado' });

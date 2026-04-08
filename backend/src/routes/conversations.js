@@ -784,7 +784,7 @@ ${'─'.repeat(60)}
     if (!rows[0]) return reply.code(404).send({ error: 'Not found' });
     const { rows: settings } = await query('SELECT evolution_url FROM settings WHERE id=1');
     const uazapUrl = settings[0]?.evolution_url;
-    if (!uazapUrl) return reply.code(400).send({ error: 'UZap API não configurada' });
+    if (!uazapUrl) return reply.code(400).send({ error: 'Msx API não configurada' });
     const { rows: tokRows } = await query('SELECT evolution_key FROM evolution_connections WHERE instance_name=$1 LIMIT 1', [rows[0].instance_name]);
     const instanceToken = tokRows[0]?.evolution_key;
     if (!instanceToken) return reply.code(400).send({ error: 'Token da instância não encontrado' });
