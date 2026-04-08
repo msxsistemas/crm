@@ -313,13 +313,22 @@ async function handleUZapWebhook(payload, fastify) {
   // ── Connection status update ──────────────────────────────────────────────
   if (EventType === 'connection') {
     const rawState = payload.status || payload.state;
-    // Normalise UZap status to legacy 'open'/'close' used across the app
     const state = rawState === 'connected' ? 'open'
                 : rawState === 'disconnected' ? 'close'
                 : rawState || null;
     fastify.io?.emit('connection:status', { instance, state });
     if (state) {
-      pool.query('UPDATE evolution_connections SET status=$1, updated_at=NOW() WHERE instance_name=$2', [state, instance]).catch(() => {});
+      // Upsert: se a instância não existir no banco, cria com os dados do webhook
+      const ownerJid = payload.owner || payload.jid?.split('@')[0] || '';
+      pool.query(
+        `INSERT INTO evolution_connections (id, instance_name, name, evolution_url, evolution_key, status, owner_jid)
+         VALUES (uuid_generate_v4(), $1, $1, $2, $3, $4, $5)
+         ON CONFLICT (instance_name) DO UPDATE SET status=$4, owner_jid=COALESCE(NULLIF($5,''), evolution_connections.owner_jid), evolution_url=COALESCE(NULLIF($2,''), evolution_connections.evolution_url), updated_at=NOW()`,
+        [instance, uazapUrl, instanceToken, state, ownerJid]
+      ).catch(() => {
+        // fallback: apenas update status
+        pool.query('UPDATE evolution_connections SET status=$1, updated_at=NOW() WHERE instance_name=$2', [state, instance]).catch(() => {});
+      });
     }
     return;
   }

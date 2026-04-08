@@ -336,16 +336,18 @@ export default async function misc3Routes(fastify) {
       await query(
         `INSERT INTO evolution_connections (id, user_id, name, evolution_url, evolution_key, instance_name, status)
          VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5, 'connecting')
-         ON CONFLICT (user_id, instance_name) DO UPDATE SET evolution_key=$4, status='connecting', updated_at=NOW()`,
+         ON CONFLICT (user_id, instance_name) DO UPDATE SET evolution_key=$4, evolution_url=$3, status='connecting', updated_at=NOW()`,
         [req.user.id, name, s.evolution_url, token, name]
       );
-      // Configure webhook immediately
+      // Configure webhook after a short delay to let UZap initialize the instance
       const webhookUrl = `${process.env.BACKEND_URL || 'https://api.msxzap.pro'}/webhook/uazap`;
-      uzapFetch(s.evolution_url, token, 'POST', '/webhook', {
-        url: webhookUrl,
-        enabled: true,
-        events: ['messages', 'connection', 'messages_update'],
-      }).catch(() => {});
+      setTimeout(() => {
+        uzapFetch(s.evolution_url, token, 'POST', '/webhook', {
+          url: webhookUrl,
+          enabled: true,
+          events: ['messages', 'connection', 'messages_update'],
+        }).catch(() => {});
+      }, 2000);
       return data;
     } catch (e) {
       return reply.status(500).send({ error: e.message });
@@ -371,6 +373,13 @@ export default async function misc3Routes(fastify) {
     const instanceToken = await getInstanceToken(req.params.instanceName);
     if (!instanceToken) return reply.status(404).send({ error: 'Token da instância não encontrado' });
     try {
+      // Ensure webhook is configured and enabled before connecting
+      const webhookUrl = `${process.env.BACKEND_URL || 'https://api.msxzap.pro'}/webhook/uazap`;
+      await uzapFetch(s.evolution_url, instanceToken, 'POST', '/webhook', {
+        url: webhookUrl,
+        enabled: true,
+        events: ['messages', 'connection', 'messages_update'],
+      }).catch(() => {});
       const data = await uzapFetch(s.evolution_url, instanceToken, 'POST', '/instance/connect', {});
       return data;
     } catch (e) {
