@@ -432,7 +432,7 @@ const Campaigns = () => {
     }
 
     if (!instanceName) {
-      toast.error("Nenhuma conexão Evolution API disponível");
+      toast.error("Nenhuma conexão UZap disponível");
       setExecutingCampaign(null);
       await db.from("campaigns").update({ status: "paused" }).eq("id", campaignId);
       return;

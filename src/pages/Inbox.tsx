@@ -1829,7 +1829,7 @@ const Inbox = () => {
         }
       }
     } catch (err: any) {
-      toast.error("Erro ao conectar: " + (err?.message || "Verifique a Evolution API"));
+      toast.error("Erro ao conectar: " + (err?.message || "Verifique a UZap API"));
     }
     setConnecting(false);
   };

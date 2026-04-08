@@ -557,18 +557,18 @@ const Connections = () => {
         <Tabs defaultValue="evolution" className="w-full">
           <TabsList className="mb-4">
             <TabsTrigger value="evolution" className="gap-2">
-              <Globe className="h-4 w-4" /> Evolution API
+              <Globe className="h-4 w-4" /> UZap API
             </TabsTrigger>
             <TabsTrigger value="meta" className="gap-2">
               <MessageSquare className="h-4 w-4" /> WhatsApp Oficial
             </TabsTrigger>
           </TabsList>
 
-          {/* Evolution API Tab */}
+          {/* UZap API Tab */}
           <TabsContent value="evolution" className="space-y-4">
             <div className="flex items-center justify-between">
               <p className="text-sm text-muted-foreground">
-                Insira apenas o nome da instância para conectar via Evolution API
+                Insira apenas o nome da instância para conectar via UZap API
               </p>
               <Button variant="action" className="gap-2 px-5" onClick={() => setNewOpen(true)}>
                 <Plus className="h-4 w-4" /> Nova Instância
@@ -602,7 +602,7 @@ const Connections = () => {
                             {getStatusDot(inst.status)}
                             <p className="font-semibold text-foreground truncate">{inst.instanceName}</p>
                             {getStatusBadge(inst.status)}
-                            <Badge variant="outline" className="text-xs">Evolution</Badge>
+                            <Badge variant="outline" className="text-xs">UZap</Badge>
                           </div>
                           <p className="text-sm text-muted-foreground">
                             {isConnected
@@ -874,7 +874,7 @@ const Connections = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Evolution - New Instance Dialog */}
+      {/* UZap - New Instance Dialog */}
       <Dialog open={newOpen} onOpenChange={handleCloseNewDialog}>
         <DialogContent className="sm:max-w-md p-0 overflow-hidden gap-0 [&>button.absolute]:hidden">
           {/* Header */}
@@ -889,7 +889,7 @@ const Connections = () => {
                 {newStep === 'connected' && 'Conectado!'}
               </h2>
               <p className="text-sm text-white/70">
-                {newStep === 'form' && 'Evolution API — WhatsApp Web'}
+                {newStep === 'form' && 'UZap API — WhatsApp Web'}
                 {newStep === 'qr' && `Instância: ${newName}`}
                 {newStep === 'connected' && `${newName} está online`}
               </p>
@@ -1003,7 +1003,7 @@ const Connections = () => {
             <div className="flex-1">
               <h2 className="text-lg font-bold text-white">Conectar WhatsApp</h2>
               <p className="text-sm text-white/70">
-                Evolution API — {qrInstance}
+                UZap API — {qrInstance}
               </p>
             </div>
             <button onClick={() => setQrOpen(false)} className="text-white/70 hover:text-white">
