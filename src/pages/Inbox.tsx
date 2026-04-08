@@ -51,7 +51,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import api from "@/lib/api";
 import { db } from "@/lib/db";
-import { createInstance, getQRCode, getInstanceStatus, sendMessage, setupWebhook } from "@/lib/evolution-api";
+import { createInstance, getQRCode, getInstanceStatus, sendMessage, setupWebhook } from "@/lib/uazap-api";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
@@ -2231,7 +2231,7 @@ const Inbox = () => {
         }
         if (step.type === "send_message" && step.config.message) {
           const sendInstanceName = convo.instance_name || instanceName;
-          const { sendMessage: sendMsg } = await import("@/lib/evolution-api");
+          const { sendMessage: sendMsg } = await import("@/lib/uazap-api");
           await sendMsg(sendInstanceName, convo.contacts.phone, step.config.message);
           await db.from("messages").insert({
             conversation_id: selected,

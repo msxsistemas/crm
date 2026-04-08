@@ -186,7 +186,7 @@ const WhatsAppStatusPage = () => {
       if (activeTab === "text") {
         if (!textContent.trim()) { toast.error("Digite o texto do status"); return; }
 
-        await db.functions.invoke("evolution-api", {
+        await db.functions.invoke("uazap", {
           body: {
             action: "send_status",
             instanceName: selectedInstance,
@@ -212,7 +212,7 @@ const WhatsAppStatusPage = () => {
         if (!imageFile) { toast.error("Selecione uma imagem"); return; }
         const base64 = await toBase64(imageFile);
 
-        await db.functions.invoke("evolution-api", {
+        await db.functions.invoke("uazap", {
           body: {
             action: "send_status",
             instanceName: selectedInstance,
@@ -238,7 +238,7 @@ const WhatsAppStatusPage = () => {
         if (!videoFile) { toast.error("Selecione um vídeo"); return; }
         const base64 = await toBase64(videoFile);
 
-        await db.functions.invoke("evolution-api", {
+        await db.functions.invoke("uazap", {
           body: {
             action: "send_status",
             instanceName: selectedInstance,

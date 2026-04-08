@@ -536,8 +536,8 @@ const Index = () => {
     if (!bdayContact || !bdaySelectedConn || !bdayMessage.trim()) return;
     setBdaySending(true);
     try {
-      const { error } = await db.functions.invoke("evolution-api", {
-        body: { action: "send_message", instanceName: bdaySelectedConn, data: { phone: bdayContact.phone, message: bdayMessage } },
+      const { error } = await db.functions.invoke("uazap", {
+        body: { action: "send_message", instanceName: bdaySelectedConn, data: { number: bdayContact.phone, text: bdayMessage } },
       });
       if (error) throw new Error(error.message);
       toast.success("Mensagem de aniversário enviada!");

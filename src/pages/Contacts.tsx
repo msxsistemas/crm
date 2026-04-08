@@ -396,7 +396,7 @@ const Contacts = () => {
     if (!selectedWAInstance) return;
     setImportingWhatsApp(true);
     try {
-      const { data: result, error } = await db.functions.invoke("evolution-api", {
+      const { data: result, error } = await db.functions.invoke("uazap", {
         body: { action: "fetch_contacts", instanceName: selectedWAInstance },
       });
 

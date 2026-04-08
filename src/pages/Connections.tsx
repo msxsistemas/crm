@@ -19,7 +19,7 @@ import {
   getQRCode,
   getInstanceStatus,
   setupWebhook,
-} from "@/lib/evolution-api";
+} from "@/lib/uazap-api";
 import { api } from "@/lib/api";
 
 interface MetaConnection {

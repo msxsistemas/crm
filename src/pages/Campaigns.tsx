@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { sendMessage } from "@/lib/evolution-api";
+import { sendMessage } from "@/lib/uazap-api";
 import { logAudit } from "@/lib/audit";
 
 interface Campaign {

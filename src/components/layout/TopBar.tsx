@@ -341,7 +341,7 @@ const TopBar = ({ onStartTour, onOpenSearch, onOpenShortcuts }: TopBarProps) => 
         const presence = newStatus === "online" ? "available" : "unavailable";
         await Promise.all(
           evoConns.map((conn) =>
-            db.functions.invoke("evolution-api", {
+            db.functions.invoke("uazap", {
               body: { action: "set_presence", instanceName: conn.instance_name, data: { presence } },
             })
           )

@@ -588,7 +588,8 @@ const authShim = {
 const FUNCTION_MAP: Record<string, string> = {
   'manage-users': '/manage-users',
   'ai-agent': '/ai-agent',
-  'evolution-api': '/evolution-proxy',
+  'uazap': '/evolution-proxy',
+  'evolution-api': '/evolution-proxy', // backward compat alias
 };
 
 const functionsShim = {

@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import { db } from "@/lib/db";
-import { sendMedia } from "@/lib/evolution-api";
+import { sendMedia } from "@/lib/uazap-api";
 import { toast } from "sonner";
 
 const SUPABASE_URL = "https://vjpkrulpokzjihlmevht.db.co";

@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, forwardRef, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { sendMessage } from "@/lib/evolution-api";
+import { sendMessage } from "@/lib/uazap-api";
 import MediaMessage from "@/components/chat/MediaMessage";
 import { useMediaUpload } from "@/components/chat/useMediaUpload";
 import { EmojiPicker, StickerPicker } from "@/components/chat/EmojiStickerPicker";

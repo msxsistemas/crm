@@ -422,20 +422,46 @@ export default async function misc3Routes(fastify) {
     }
   });
 
-  // Legacy proxy (maps to UZap send/text)
+  // UZap proxy — routes actions to correct UZap endpoints
   fastify.post('/evolution-proxy', auth, async (req, reply) => {
-    const { instanceName, data: body } = req.body || {};
+    const { action, instanceName, data: body } = req.body || {};
     const s = await getEvoSettings();
     if (!s?.evolution_url) return { data: null, error: { message: 'UZap API não configurada' } };
     const instanceToken = await getInstanceToken(instanceName);
     if (!instanceToken) return { data: null, error: { message: 'Token da instância não encontrado' } };
+
     try {
-      const res = await fetch(`${s.evolution_url}/send/text`, {
-        method: 'POST',
+      let path, payload, method = 'POST';
+
+      if (action === 'send_message' || action === 'message/sendText') {
+        // Normalize legacy { phone, message } or proper { number, text }
+        path = '/send/text';
+        payload = {
+          number: body?.number || body?.phone || body?.to,
+          text: body?.text || body?.message,
+        };
+      } else if (action === 'send_status') {
+        path = '/send/status';
+        payload = body;
+      } else if (action === 'set_presence') {
+        // UZap presence endpoint — gracefully ignore if unavailable
+        path = '/instance/presence';
+        payload = body;
+      } else if (action === 'fetch_contacts') {
+        // Contact fetch — UZap doesn't support bulk contact import
+        return { data: [], error: null };
+      } else {
+        // Default: send text (for direct { number, text } calls)
+        path = '/send/text';
+        payload = body;
+      }
+
+      const res = await fetch(`${s.evolution_url}${path}`, {
+        method,
         headers: { 'Content-Type': 'application/json', 'token': instanceToken },
-        body: JSON.stringify(body),
+        body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       return { data, error: null };
     } catch (e) {
       return reply.status(500).send({ data: null, error: { message: e.message } });
