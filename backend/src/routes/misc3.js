@@ -283,12 +283,17 @@ export default async function misc3Routes(fastify) {
     return { ok: true };
   });
 
-  // Transfer conversations from one connection to another
+  // Transfer / delete conversations when removing a connection
   fastify.post('/evolution-connections/transfer', auth, async (req, reply) => {
-    const { from_connection, to_connection } = req.body || {};
+    const { from_connection, mode, to_connection, to_agent_id } = req.body || {};
     if (!from_connection) return reply.status(400).send({ error: 'from_connection obrigatório' });
-    if (to_connection) {
+    if (mode === 'delete') {
+      await query('DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE connection_name=$1)', [from_connection]);
+      await query('DELETE FROM conversations WHERE connection_name=$1', [from_connection]);
+    } else if (mode === 'connection' && to_connection) {
       await query('UPDATE conversations SET connection_name=$1 WHERE connection_name=$2', [to_connection, from_connection]);
+    } else if (mode === 'agent' && to_agent_id) {
+      await query('UPDATE conversations SET assigned_to=$1 WHERE connection_name=$2', [to_agent_id, from_connection]);
     }
     return { ok: true };
   });

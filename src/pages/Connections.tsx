@@ -174,8 +174,11 @@ const Connections = () => {
   // Remove / transfer state
   const [removeOpen, setRemoveOpen] = useState(false);
   const [removeInstance, setRemoveInstance] = useState("");
-  const [transferTo, setTransferTo] = useState("");
+  const [removeMode, setRemoveMode] = useState<'keep' | 'connection' | 'agent' | 'delete'>('keep');
+  const [transferToConnection, setTransferToConnection] = useState("");
+  const [transferToAgent, setTransferToAgent] = useState("");
   const [removing, setRemoving] = useState(false);
+  const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
 
   // Status check state
   const [checkingInstance, setCheckingInstance] = useState<string | null>(null);
@@ -334,21 +337,38 @@ const Connections = () => {
     if (newStep === 'connected') fetchInstances();
   };
 
-  const openRemoveDialog = (instanceName: string) => {
+  const openRemoveDialog = async (instanceName: string) => {
     setRemoveInstance(instanceName);
-    setTransferTo("");
+    setRemoveMode('keep');
+    setTransferToConnection("");
+    setTransferToAgent("");
     setRemoveOpen(true);
+    try {
+      const data = await api.get<any[]>('/users');
+      setAgents((data || []).map((u: any) => ({ id: u.id, name: u.name || u.full_name || u.email })));
+    } catch { setAgents([]); }
   };
 
   const handleConfirmRemove = async () => {
     setRemoving(true);
     try {
-      if (transferTo) {
-        await api.post('/evolution-connections/transfer', { from_connection: removeInstance, to_connection: transferTo });
+      if (removeMode !== 'keep') {
+        await api.post('/evolution-connections/transfer', {
+          from_connection: removeInstance,
+          mode: removeMode,
+          to_connection: removeMode === 'connection' ? transferToConnection : undefined,
+          to_agent_id: removeMode === 'agent' ? transferToAgent : undefined,
+        });
       }
       await api.delete(`/evolution-connections?instance_name=${removeInstance}`);
       setInstances((prev) => prev.filter((i) => i.instanceName !== removeInstance));
-      toast.success(transferTo ? `Conversas transferidas e instância removida` : "Instância removida");
+      const msgs: Record<string, string> = {
+        keep: 'Instância removida',
+        connection: 'Conversas transferidas para outra conexão',
+        agent: 'Conversas atribuídas ao atendente',
+        delete: 'Instância e conversas removidas',
+      };
+      toast.success(msgs[removeMode]);
       setRemoveOpen(false);
     } catch {
       toast.error("Erro ao remover instância");
@@ -996,52 +1016,101 @@ const Connections = () => {
               <X className="h-5 w-5" />
             </button>
           </div>
-          <div className="px-6 py-5 space-y-4">
-            <p className="text-sm text-muted-foreground">
-              O que deseja fazer com as conversas desta conexão?
-            </p>
-            <div className="space-y-2">
-              <button
-                onClick={() => setTransferTo("")}
-                className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors text-left ${!transferTo ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'}`}
-              >
-                <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${!transferTo ? 'bg-primary/20' : 'bg-muted'}`}>
-                  <Trash2 className={`h-4 w-4 ${!transferTo ? 'text-primary' : 'text-muted-foreground'}`} />
-                </div>
-                <div>
-                  <p className="text-sm font-medium">Manter sem conexão</p>
-                  <p className="text-xs text-muted-foreground">Conversas ficam no sistema sem vínculo</p>
-                </div>
-              </button>
+          <div className="px-6 py-5 space-y-3">
+            <p className="text-sm text-muted-foreground">O que fazer com as conversas desta conexão?</p>
 
-              {instances.filter(i => i.instanceName !== removeInstance).map(inst => (
-                <button
-                  key={inst.instanceName}
-                  onClick={() => setTransferTo(inst.instanceName)}
-                  className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors text-left ${transferTo === inst.instanceName ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'}`}
-                >
-                  <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${transferTo === inst.instanceName ? 'bg-primary/20' : 'bg-muted'}`}>
-                    <ArrowRight className={`h-4 w-4 ${transferTo === inst.instanceName ? 'text-primary' : 'text-muted-foreground'}`} />
+            {/* Opção: manter */}
+            {(['keep', 'connection', 'agent', 'delete'] as const).map((mode) => {
+              const isSelected = removeMode === mode;
+              const sel = isSelected ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50';
+              if (mode === 'keep') return (
+                <button key={mode} onClick={() => setRemoveMode('keep')} className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors text-left ${sel}`}>
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${isSelected ? 'bg-primary/20' : 'bg-muted'}`}>
+                    <Smartphone className={`h-4 w-4 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
                   </div>
                   <div>
-                    <p className="text-sm font-medium">Transferir para <strong>{inst.instanceName}</strong></p>
-                    <p className="text-xs text-muted-foreground">
-                      {inst.status === 'open' || inst.status === 'connected' ? 'Conectado' : 'Desconectado'}
-                    </p>
+                    <p className="text-sm font-medium">Manter sem conexão</p>
+                    <p className="text-xs text-muted-foreground">Histórico preservado, sem vínculo de canal</p>
                   </div>
                 </button>
-              ))}
-            </div>
+              );
+              if (mode === 'connection') return (
+                <div key={mode} className={`rounded-lg border transition-colors ${isSelected ? 'border-primary bg-primary/5' : 'border-border'}`}>
+                  <button onClick={() => setRemoveMode('connection')} className="w-full flex items-center gap-3 p-3 text-left">
+                    <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${isSelected ? 'bg-primary/20' : 'bg-muted'}`}>
+                      <ArrowRight className={`h-4 w-4 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Transferir para outra conexão</p>
+                      <p className="text-xs text-muted-foreground">Conversas migram para outro número/canal</p>
+                    </div>
+                  </button>
+                  {isSelected && (
+                    <div className="px-3 pb-3">
+                      <select
+                        value={transferToConnection}
+                        onChange={e => setTransferToConnection(e.target.value)}
+                        className="w-full text-sm border border-border rounded-md px-3 py-2 bg-background"
+                      >
+                        <option value="">Selecionar conexão...</option>
+                        {instances.filter(i => i.instanceName !== removeInstance).map(i => (
+                          <option key={i.instanceName} value={i.instanceName}>{i.instanceName}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              );
+              if (mode === 'agent') return (
+                <div key={mode} className={`rounded-lg border transition-colors ${isSelected ? 'border-primary bg-primary/5' : 'border-border'}`}>
+                  <button onClick={() => setRemoveMode('agent')} className="w-full flex items-center gap-3 p-3 text-left">
+                    <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${isSelected ? 'bg-primary/20' : 'bg-muted'}`}>
+                      <Bot className={`h-4 w-4 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Transferir para atendente</p>
+                      <p className="text-xs text-muted-foreground">Conversas ficam atribuídas a um agente</p>
+                    </div>
+                  </button>
+                  {isSelected && (
+                    <div className="px-3 pb-3">
+                      <select
+                        value={transferToAgent}
+                        onChange={e => setTransferToAgent(e.target.value)}
+                        className="w-full text-sm border border-border rounded-md px-3 py-2 bg-background"
+                      >
+                        <option value="">Selecionar atendente...</option>
+                        {agents.map(a => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              );
+              // delete
+              return (
+                <button key={mode} onClick={() => setRemoveMode('delete')} className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors text-left ${isSelected ? 'border-red-500 bg-red-500/5' : 'border-border hover:bg-muted/50'}`}>
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${isSelected ? 'bg-red-500/20' : 'bg-muted'}`}>
+                    <Trash2 className={`h-4 w-4 ${isSelected ? 'text-red-500' : 'text-muted-foreground'}`} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-red-600">Apagar tudo</p>
+                    <p className="text-xs text-muted-foreground">Remove permanentemente todas as conversas e mensagens</p>
+                  </div>
+                </button>
+              );
+            })}
           </div>
           <div className="flex justify-end gap-3 px-6 py-4 border-t border-border">
             <Button variant="outline" onClick={() => setRemoveOpen(false)}>Cancelar</Button>
             <Button
               onClick={handleConfirmRemove}
-              disabled={removing}
-              className="bg-red-600 hover:bg-red-700 text-white gap-2"
+              disabled={removing || (removeMode === 'connection' && !transferToConnection) || (removeMode === 'agent' && !transferToAgent)}
+              className={`gap-2 text-white ${removeMode === 'delete' ? 'bg-red-600 hover:bg-red-700' : 'bg-primary hover:bg-primary/90'}`}
             >
               {removing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-              {transferTo ? 'Transferir e Remover' : 'Remover'}
+              {removeMode === 'delete' ? 'Apagar tudo' : removeMode !== 'keep' ? 'Transferir e Remover' : 'Remover'}
             </Button>
           </div>
         </DialogContent>
