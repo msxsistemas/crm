@@ -246,10 +246,11 @@ export default async function messageRoutes(fastify) {
     return reply.status(200).send({ ok: true });
   });
 
-  // Legacy alias — kept for backward compat
+  // Evolution API webhook — normalize payload to UZap format
   fastify.post('/webhook/evolution', async (req, reply) => {
-    const payload = req.body;
+    const raw = req.body;
     try {
+      const payload = normalizeEvolutionPayload(raw) || raw;
       await handleUZapWebhook(payload, fastify);
     } catch (e) {
       console.error('Webhook error:', e);
@@ -306,6 +307,97 @@ async function recalculateLeadScore(contactId) {
 
   const score = Math.min(100, convPts + inboundPts + responsePts + recentPts + pixPts + csatPts + emailPts + companyPts);
   await pool.query('UPDATE contacts SET lead_score=$1, lead_score_updated_at=NOW() WHERE id=$2', [score, contactId]);
+}
+
+// Normalize Evolution API v2 webhook payload to the internal UZap-like format
+function normalizeEvolutionPayload(evo) {
+  const event = evo?.event || '';
+  const instance = evo?.instance || '';
+  const data = evo?.data || {};
+
+  if (event === 'connection.update') {
+    return {
+      EventType: 'connection',
+      token: instance,
+      status: data.state || 'close',
+      state: data.state || 'close',
+    };
+  }
+
+  if (event === 'messages.update') {
+    const updates = Array.isArray(data) ? data : [data];
+    const upd = updates[0] || {};
+    return {
+      EventType: 'messages_update',
+      token: instance,
+      messageid: upd.key?.id || '',
+      status: (upd.update?.status || 0) >= 4 ? 'read' : 'delivered',
+    };
+  }
+
+  if (event === 'messages.upsert') {
+    const key = data.key || {};
+    const remoteJid = key.remoteJid || '';
+    const isGroup = remoteJid.endsWith('@g.us');
+    const fromMe = key.fromMe || false;
+    const messageid = key.id || '';
+    const senderJid = data.participant || key.participant || '';
+    const msg = data.message || {};
+    let text = '';
+    let fileURL = null;
+    let messageType = data.messageType || 'conversation';
+
+    if (msg.conversation) {
+      text = msg.conversation;
+    } else if (msg.extendedTextMessage?.text) {
+      text = msg.extendedTextMessage.text;
+      messageType = 'text';
+    } else if (msg.imageMessage) {
+      text = msg.imageMessage.caption || '';
+      fileURL = msg.imageMessage.url || null;
+      messageType = 'imageMessage';
+    } else if (msg.videoMessage) {
+      text = msg.videoMessage.caption || '';
+      fileURL = msg.videoMessage.url || null;
+      messageType = 'videoMessage';
+    } else if (msg.audioMessage || msg.pttMessage) {
+      const am = msg.audioMessage || msg.pttMessage;
+      fileURL = am.url || null;
+      messageType = 'audioMessage';
+    } else if (msg.documentMessage) {
+      text = msg.documentMessage.caption || msg.documentMessage.fileName || '';
+      fileURL = msg.documentMessage.url || null;
+      messageType = 'documentMessage';
+    } else if (msg.stickerMessage) {
+      fileURL = msg.stickerMessage.url || null;
+      messageType = 'stickerMessage';
+    } else if (msg.locationMessage) {
+      text = `📍 ${msg.locationMessage.name || 'Localização'}`;
+      messageType = 'locationMessage';
+    } else if (msg.contactMessage) {
+      text = `👤 ${msg.contactMessage.displayName || 'Contato'}`;
+      messageType = 'contactMessage';
+    }
+
+    return {
+      EventType: 'messages',
+      token: instance,
+      chatid: remoteJid,
+      messageid,
+      fromMe,
+      isGroup,
+      messageType,
+      text,
+      fileURL,
+      senderName: data.pushName || '',
+      sender: senderJid,
+      profilePicUrl: null,
+      groupName: null,
+    };
+  }
+
+  // Not a recognized Evolution API event — return null so caller uses raw payload
+  return null;
 }
 
 async function handleUZapWebhook(payload, fastify) {
