@@ -171,6 +171,12 @@ const Connections = () => {
   const newQrIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const qrAutoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Remove / transfer state
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const [removeInstance, setRemoveInstance] = useState("");
+  const [transferTo, setTransferTo] = useState("");
+  const [removing, setRemoving] = useState(false);
+
   // Status check state
   const [checkingInstance, setCheckingInstance] = useState<string | null>(null);
 
@@ -328,14 +334,26 @@ const Connections = () => {
     if (newStep === 'connected') fetchInstances();
   };
 
-  const handleRemoveEvolution = async (instanceName: string) => {
+  const openRemoveDialog = (instanceName: string) => {
+    setRemoveInstance(instanceName);
+    setTransferTo("");
+    setRemoveOpen(true);
+  };
+
+  const handleConfirmRemove = async () => {
+    setRemoving(true);
     try {
-      await api.delete(`/evolution-connections?instance_name=${instanceName}`);
-      setInstances((prev) => prev.filter((i) => i.instanceName !== instanceName));
-      toast.success("Instância removida");
+      if (transferTo) {
+        await api.post('/evolution-connections/transfer', { from_connection: removeInstance, to_connection: transferTo });
+      }
+      await api.delete(`/evolution-connections?instance_name=${removeInstance}`);
+      setInstances((prev) => prev.filter((i) => i.instanceName !== removeInstance));
+      toast.success(transferTo ? `Conversas transferidas e instância removida` : "Instância removida");
+      setRemoveOpen(false);
     } catch {
       toast.error("Erro ao remover instância");
     }
+    setRemoving(false);
   };
 
   const handleEditEvolution = (instanceName: string) => {
@@ -632,7 +650,7 @@ const Connections = () => {
                           <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEditEvolution(inst.instanceName)} title="Editar">
                             <Pencil className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleRemoveEvolution(inst.instanceName)} title="Excluir">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => openRemoveDialog(inst.instanceName)} title="Excluir">
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -960,6 +978,72 @@ const Connections = () => {
               <Button onClick={handleCloseNewDialog} className="bg-emerald-600 hover:bg-emerald-700 text-white">Fechar</Button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Remove / Transfer Dialog */}
+      <Dialog open={removeOpen} onOpenChange={setRemoveOpen}>
+        <DialogContent className="sm:max-w-md p-0 overflow-hidden gap-0 [&>button.absolute]:hidden">
+          <div className="bg-red-600 px-6 py-5 flex items-center gap-3">
+            <div className="h-10 w-10 rounded-full bg-white/20 flex items-center justify-center">
+              <Trash2 className="h-5 w-5 text-white" />
+            </div>
+            <div className="flex-1">
+              <h2 className="text-lg font-bold text-white">Remover conexão</h2>
+              <p className="text-sm text-white/70">{removeInstance}</p>
+            </div>
+            <button onClick={() => setRemoveOpen(false)} className="text-white/70 hover:text-white">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="px-6 py-5 space-y-4">
+            <p className="text-sm text-muted-foreground">
+              O que deseja fazer com as conversas desta conexão?
+            </p>
+            <div className="space-y-2">
+              <button
+                onClick={() => setTransferTo("")}
+                className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors text-left ${!transferTo ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'}`}
+              >
+                <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${!transferTo ? 'bg-primary/20' : 'bg-muted'}`}>
+                  <Trash2 className={`h-4 w-4 ${!transferTo ? 'text-primary' : 'text-muted-foreground'}`} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Manter sem conexão</p>
+                  <p className="text-xs text-muted-foreground">Conversas ficam no sistema sem vínculo</p>
+                </div>
+              </button>
+
+              {instances.filter(i => i.instanceName !== removeInstance).map(inst => (
+                <button
+                  key={inst.instanceName}
+                  onClick={() => setTransferTo(inst.instanceName)}
+                  className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors text-left ${transferTo === inst.instanceName ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'}`}
+                >
+                  <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${transferTo === inst.instanceName ? 'bg-primary/20' : 'bg-muted'}`}>
+                    <ArrowRight className={`h-4 w-4 ${transferTo === inst.instanceName ? 'text-primary' : 'text-muted-foreground'}`} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Transferir para <strong>{inst.instanceName}</strong></p>
+                    <p className="text-xs text-muted-foreground">
+                      {inst.status === 'open' || inst.status === 'connected' ? 'Conectado' : 'Desconectado'}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 px-6 py-4 border-t border-border">
+            <Button variant="outline" onClick={() => setRemoveOpen(false)}>Cancelar</Button>
+            <Button
+              onClick={handleConfirmRemove}
+              disabled={removing}
+              className="bg-red-600 hover:bg-red-700 text-white gap-2"
+            >
+              {removing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {transferTo ? 'Transferir e Remover' : 'Remover'}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

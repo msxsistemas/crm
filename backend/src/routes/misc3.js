@@ -283,6 +283,16 @@ export default async function misc3Routes(fastify) {
     return { ok: true };
   });
 
+  // Transfer conversations from one connection to another
+  fastify.post('/evolution-connections/transfer', auth, async (req, reply) => {
+    const { from_connection, to_connection } = req.body || {};
+    if (!from_connection) return reply.status(400).send({ error: 'from_connection obrigatório' });
+    if (to_connection) {
+      await query('UPDATE conversations SET connection_name=$1 WHERE connection_name=$2', [to_connection, from_connection]);
+    }
+    return { ok: true };
+  });
+
   // ── UZap Proxy ────────────────────────────────────────────────────────────
   // Helper: get UZap global settings
   async function getEvoSettings() {
